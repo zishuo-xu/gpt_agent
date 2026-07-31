@@ -473,6 +473,7 @@ export function SessionApp() {
                 <RailCard title="消耗">
                   <KeyValue
                     label="本会话累计"
+                    tone="kv-total"
                     value={`${formatTokens(
                       selected.totalInputTokens +
                         selected.totalOutputTokens,
@@ -480,6 +481,7 @@ export function SessionApp() {
                   />
                   <KeyValue
                     label="输入 / 输出"
+                    tone="kv-io"
                     value={`${formatTokens(
                       selected.totalInputTokens,
                     )} / ${formatTokens(
@@ -488,6 +490,7 @@ export function SessionApp() {
                   />
                   <KeyValue
                     label="缓存命中"
+                    tone="kv-cache"
                     value={`${formatTokens(
                       selected.totalCachedTokens,
                     )} tokens`}
@@ -697,7 +700,10 @@ function SessionCard(props: {
     (todo) => todo.status === "in_progress",
   );
   return (
-    <button className="dashboard-card" onClick={props.onClick}>
+    <button
+      className={`dashboard-card status-${statusMeta[session.status].tone}`}
+      onClick={props.onClick}
+    >
       <div className="dashboard-card-top">
         <h2>{session.title}</h2>
         <StatusTag status={session.status} />
@@ -741,6 +747,7 @@ function StatusTag(props: { status: SessionStatus }) {
   const meta = statusMeta[props.status];
   return (
     <span className={`session-tag ${meta.tone}`}>
+      <i className="tag-dot" />
       {meta.label}
     </span>
   );
@@ -916,15 +923,15 @@ function EventCard(props: {
           (candidate.event.type === "permission_denied" &&
             candidate.event.call?.id === event.call.id),
       )?.event;
+    const toolStateClass = !result
+      ? "tool-running"
+      : result.type === "permission_denied"
+        ? "tool-denied"
+        : result.isError
+          ? "tool-error"
+          : "tool-ok";
     return (
-      <details
-        className={`web-tool-card ${
-          result?.isError ||
-          result?.type === "permission_denied"
-            ? "tool-error"
-            : ""
-        }`}
-      >
+      <details className={`web-tool-card ${toolStateClass}`}>
         <summary>
           <span className="tool-chevron">›</span>
           <span className="tool-badge">
@@ -1285,9 +1292,13 @@ function RailCard(props: {
   );
 }
 
-function KeyValue(props: { label: string; value: string }) {
+function KeyValue(props: {
+  label: string;
+  value: string;
+  tone?: string;
+}) {
   return (
-    <div className="rail-kv">
+    <div className={`rail-kv ${props.tone ?? ""}`}>
       <span>{props.label}</span>
       <strong>{props.value}</strong>
     </div>

@@ -139,13 +139,13 @@ export function MemoryApp() {
           <aside className="memory-list">
             {documents.map((document) => (
               <button
-                className={
-                  document.id === selectedId ? "selected" : ""
-                }
+                className={`doc-${document.id}${
+                  document.id === selectedId ? " selected" : ""
+                }`}
                 key={document.id}
                 onClick={() => setSelectedId(document.id)}
               >
-                <span>
+                <span className="doc-icon">
                   {document.scope === "global" ? "◎" : "◇"}
                 </span>
                 <span>
