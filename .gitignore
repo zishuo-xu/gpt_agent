@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.myagent/local.jsonc
+*.log
+.DS_Store
+.playwright-cli/
+test-todo-api/

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyAgent — Web UX 原型</title>
+<style>
+:root{
+  --bg:#0d1117; --bg2:#161b22; --bg3:#1c2330; --line:#2d333f;
+  --tx:#e6e9ef; --tx2:#9aa4b2; --tx3:#6b7482;
+  --ac:#6e9bff; --ac2:#8b7bff; --ok:#3fb96b; --warn:#e0a63f; --err:#e05f5f;
+  --mono:'SF Mono',Menlo,Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font:14px/1.6 -apple-system,'PingFang SC','Microsoft YaHei',sans-serif;display:flex;height:100vh;overflow:hidden}
+code,pre,.mono{font-family:var(--mono);font-size:12.5px}
+
+/* ============ 侧边栏 ============ */
+.side{width:216px;min-width:216px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:14px 10px}
+.logo{display:flex;align-items:center;gap:9px;padding:4px 8px 16px;font-weight:700;font-size:15px}
+.logo .dot{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,var(--ac),var(--ac2));display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff}
+.nav{padding:4px 8px;border-radius:7px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:9px;margin-bottom:2px;font-size:13.5px}
+.nav:hover{background:var(--bg3);color:var(--tx)}
+.nav.on{background:var(--bg3);color:var(--tx);font-weight:600}
+.nav .ic{width:18px;text-align:center}
+.side .ft{margin-top:auto;padding:10px 8px 2px;font-size:12px;color:var(--tx3);border-top:1px solid var(--line)}
+.side .ft b{color:var(--ok)}
+
+/* ============ 主区 ============ */
+.main{flex:1;overflow-y:auto;padding:24px 28px}
+.page{display:none}
+.page.on{display:block}
+h1{font-size:19px;margin-bottom:4px}
+.sub{color:var(--tx3);font-size:12.5px;margin-bottom:20px}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:10px}
+.tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;font-weight:600}
+.tag.run{background:#14321f;color:var(--ok)} .tag.done{background:#1a2436;color:var(--ac)}
+.tag.wait{background:#33270f;color:var(--warn)} .tag.err{background:#331a1a;color:var(--err)}
+.btn{display:inline-block;padding:6px 14px;border-radius:7px;border:1px solid var(--line);background:var(--bg3);color:var(--tx);font-size:12.5px;cursor:pointer}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#fff;font-weight:600}
+.btn:hover{filter:brightness(1.15)}
+
+/* ============ 监控台 ============ */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+.scard{padding:16px 18px;cursor:pointer;transition:border-color .15s}
+.scard:hover{border-color:var(--ac)}
+.scard .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.scard h3{font-size:14.5px}
+.scard .proj{color:var(--tx3);font-size:12px;margin-bottom:12px}
+.prog{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;margin:8px 0 6px}
+.prog i{display:block;height:100%;background:linear-gradient(90deg,var(--ac),var(--ac2));border-radius:3px}
+.scard .meta{display:flex;gap:16px;color:var(--tx2);font-size:12px;margin-top:10px}
+.scard .meta b{color:var(--tx);font-weight:600}
+.todos-mini{font-size:12px;color:var(--tx2)}
+.todos-mini .done{color:var(--ok)}
+
+/* ============ 会话详情布局 ============ */
+.sess{display:flex;gap:16px;height:calc(100vh - 120px)}
+.chat{flex:1;display:flex;flex-direction:column;min-width:0}
+.chatlog{flex:1;overflow-y:auto;padding-right:4px}
+.msg{margin-bottom:14px;padding:13px 16px}
+.msg.u{background:#1a2436;border:1px solid #26436e;border-radius:10px}
+.msg.a{background:var(--bg2);border:1px solid var(--line);border-radius:10px}
+.msg .who{font-size:11px;color:var(--tx3);margin-bottom:5px;letter-spacing:.5px}
+.tool{background:var(--bg3);border:1px solid var(--line);border-radius:8px;margin:10px 0;overflow:hidden}
+.tool .hd{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:12px;color:var(--tx2);cursor:pointer}
+.tool .hd:hover{color:var(--tx)}
+.tool .bd{border-top:1px solid var(--line);padding:10px 12px}
+.pill{font-size:10.5px;padding:1px 7px;border-radius:4px;background:#26436e;color:#9cc2ff;font-weight:600}
+.pill.g{background:#14321f;color:var(--ok)} .pill.y{background:#33270f;color:var(--warn)}
+.diff{font-family:var(--mono);font-size:12px;line-height:1.7;overflow-x:auto}
+.diff .d{color:#ff9d9d;background:#3a1c1c;display:block;padding:0 8px}
+.diff .a{color:#7be2a5;background:#12321f;display:block;padding:0 8px}
+.diff .c{color:var(--tx3);display:block;padding:0 8px}
+.subtask{border:1px solid var(--ac2);border-radius:8px;margin:10px 0}
+.subtask .hd{display:flex;gap:8px;align-items:center;padding:8px 12px;font-size:12.5px;color:var(--tx2);cursor:pointer}
+.appr{border:1px solid var(--warn);background:#221b0c;border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.appr .cmd{background:var(--bg);border-radius:6px;padding:8px 10px;margin:8px 0 10px;color:var(--warn)}
+.appr .opts{display:flex;gap:8px;flex-wrap:wrap}
+.inputbar{display:flex;gap:8px;margin-top:12px}
+.inputbar input{flex:1;background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:10px 14px;color:var(--tx);font-size:13.5px;outline:none}
+.inputbar input:focus{border-color:var(--ac)}
+.rail{width:290px;min-width:290px;display:flex;flex-direction:column;gap:12px}
+.rail .card{padding:13px 15px}
+.rail h4{font-size:12px;color:var(--tx3);letter-spacing:.5px;margin-bottom:9px;text-transform:uppercase}
+.todo{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;margin-bottom:7px;color:var(--tx2)}
+.todo .ck{width:14px;height:14px;border-radius:4px;border:1px solid var(--tx3);margin-top:3px;flex-shrink:0}
+.turncost{font-size:11px;color:var(--tx3);margin:-8px 0 14px 4px}
+.todo.done{color:var(--tx3);text-decoration:line-through}
+.todo.done .ck{background:var(--ok);border-color:var(--ok)}
+.todo.ing{color:var(--tx)} .todo.ing .ck{border-color:var(--ac);box-shadow:0 0 0 2px #6e9bff33}
+.kv{display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0;color:var(--tx2)}
+.kv b{color:var(--tx)}
+
+/* ============ 记忆面板 ============ */
+.mem{display:grid;grid-template-columns:200px 1fr;gap:16px;height:calc(100vh - 120px)}
+.memlist .mi{padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;color:var(--tx2);margin-bottom:2px}
+.memlist .mi.on,.memlist .mi:hover{background:var(--bg3);color:var(--tx)}
+.memdoc{padding:18px 22px;overflow-y:auto}
+.memdoc .entry{border-left:2px solid var(--ac);padding:2px 0 2px 12px;margin-bottom:14px}
+.memdoc .entry .dt{font-size:11px;color:var(--tx3)}
+.timeline{margin-top:22px}
+.tl{border-left:2px solid var(--line);padding-left:14px}
+.tl .e{margin-bottom:12px;font-size:12.5px;color:var(--tx2)}
+.tl .e .t{font-size:11px;color:var(--tx3)}
+
+/* ============ 设置 ============ */
+.set{max-width:760px}
+.sect{margin-bottom:18px;padding:18px 22px}
+.sect h3{font-size:14px;margin-bottom:3px}
+.sect .d{font-size:12px;color:var(--tx3);margin-bottom:14px}
+.frow{display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--line)}
+.frow:last-child{border-bottom:none}
+.frow label{width:200px;font-size:13px;color:var(--tx2)}
+.frow .hint{font-size:11px;color:var(--tx3);display:block}
+.frow input,.frow select{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;color:var(--tx);font-size:13px;outline:none}
+.scope{display:inline-flex;background:var(--bg3);border-radius:8px;padding:3px;margin-bottom:16px}
+.scope span{padding:5px 16px;border-radius:6px;font-size:12.5px;cursor:pointer;color:var(--tx2)}
+.scope span.on{background:var(--ac);color:#fff;font-weight:600}
+.rule{display:flex;gap:8px;align-items:center;font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line)}
+.rule code{flex:1;color:var(--tx)}
+.rule .x{color:var(--tx3);cursor:pointer}
+
+@media(max-width:900px){.side{display:none}.rail{display:none}}
+</style>
+</head>
+<body>
+
+<nav class="side">
+  <div class="logo"><span class="dot">◆</span> MyAgent</div>
+  <div class="nav on" data-p="dash"><span class="ic">▦</span> 监控台</div>
+  <div class="nav" data-p="sess"><span class="ic">◉</span> 会话详情</div>
+  <div class="nav" data-p="mem"><span class="ic">✎</span> 记忆面板</div>
+  <div class="nav" data-p="set"><span class="ic">⚙</span> 设置</div>
+  <div class="ft">本机 · <b>●</b> localhost:3000<br>UX 原型 v0.1（数据为示意）</div>
+</nav>
+
+<div class="main">
+
+<!-- ================= 监控台 ================= -->
+<div class="page on" id="p-dash">
+  <h1>监控台</h1>
+  <div class="sub">所有 Agent 会话的实时状态 · 点击卡片进入详情</div>
+  <div class="grid">
+    <div class="card scard" data-p="sess">
+      <div class="top"><h3>迭代 RAG 检索评估模块</h3><span class="tag run">运行中</span></div>
+      <div class="proj">~/code/rag-learn · 无人值守 · trust 档</div>
+      <div class="todos-mini"><span class="done">●●●</span>○○ 已完成 3 / 5 · 进行中：补充混合检索评测</div>
+      <div class="prog"><i style="width:60%"></i></div>
+      <div class="meta"><span>已运行 <b>2h 41m</b></span><span>花费 <b>¥1.86</b> / ¥5</span><span>工具调用 <b>87</b></span></div>
+    </div>
+    <div class="card scard" data-p="sess">
+      <div class="top"><h3>修复登录页 token 过期报错</h3><span class="tag wait">等待审批</span></div>
+      <div class="proj">~/code/myagent · CLI 会话 · strict 档</div>
+      <div class="todos-mini"><span class="done">●</span>○○ 已完成 1 / 3 · 进行中：定位 refresh 逻辑</div>
+      <div class="prog"><i style="width:34%"></i></div>
+      <div class="meta"><span>已运行 <b>18m</b></span><span>花费 <b>¥0.42</b></span><span>工具调用 <b>15</b></span></div>
+    </div>
+    <div class="card scard" data-p="sess">
+      <div class="top"><h3>给 CLI 加 /cost 命令</h3><span class="tag done">已完成</span></div>
+      <div class="proj">~/code/myagent · 昨晚 23:40</div>
+      <div class="todos-mini"><span class="done">●●●●</span> 已完成 4 / 4 · 优雅终止收尾</div>
+      <div class="prog"><i style="width:100%"></i></div>
+      <div class="meta"><span>用时 <b>52m</b></span><span>花费 <b>¥0.98</b></span><span>新增记忆 <b>2 条</b></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 会话详情 ================= -->
+<div class="page" id="p-sess">
+  <h1>修复登录页 token 过期报错 <span class="tag wait">等待审批</span></h1>
+  <div class="sub">~/code/myagent · 会话 #a3f9 · strict 档 · 主模型 claude-sonnet</div>
+  <div class="sess">
+    <div class="chat">
+      <div class="chatlog">
+        <div class="msg u"><div class="who">你 · 21:02</div>登录态过期后页面直接白屏，帮我修一下，应该有 refresh token 的逻辑但是没生效。</div>
+        <div class="msg a"><div class="who">MyAgent</div>我先建个任务清单，然后定位 refresh 相关代码。
+          <div class="tool"><div class="hd">▸ <span class="pill">todo</span> todo_write · 3 项任务</div></div>
+          <div class="tool"><div class="hd">▸ <span class="pill g">read</span> Grep "refresh" → 7 个文件命中</div></div>
+          <div class="subtask"><div class="hd">◇ <b>探索鉴权链路</b> · 子代理 explore(deepseek) · 12 次工具调用 · 4.2k tokens · 结论已回流</div></div>
+          找到了：<code>src/auth/token.ts:45</code> 的刷新判断写的是 <code>&gt;</code> 应为 <code>&gt;=</code>，且 401 拦截器没有挂到 axios 实例上。修改如下：
+          <div class="tool"><div class="hd">▾ <span class="pill y">edit</span> Edit src/auth/token.ts</div>
+            <div class="bd"><div class="diff">
+              <span class="c"> 43  export function isExpired(t: Token) {</span>
+              <span class="d">- 45    return Date.now() &gt; t.exp * 1000;</span>
+              <span class="a">+ 45    return Date.now() + 30_000 &gt;= t.exp * 1000; // 提前 30s 视为过期</span>
+              <span class="c"> 46  }</span>
+            </div></div>
+          </div>
+        </div>
+        <div class="turncost">本轮 12.4k in / 1.8k out · 缓存命中 78% · 累计 89k（≈¥0.37）</div>
+        <div class="appr">
+          <b>⚠ 审批请求</b> — MyAgent 想要修改 <code>src/api/interceptor.ts</code>（+6 / -2 行）
+          <div class="bd" style="padding:8px 0 0"><div class="diff">
+            <span class="c"> 18  api.interceptors.response.use(</span>
+            <span class="d">- 19    (res) =&gt; res,</span>
+            <span class="a">+ 19    (res) =&gt; res,</span>
+            <span class="a">+ 20    async (err) =&gt; {</span>
+            <span class="a">+ 21      if (err.response?.status === 401) {</span>
+            <span class="a">+ 22        await refreshToken();</span>
+            <span class="a">+ 23        return api(err.config);</span>
+            <span class="a">+ 24      }</span>
+            <span class="a">+ 25      throw err;</span>
+            <span class="d">- 26    );</span>
+          </div></div>
+          <div class="opts">
+            <span class="btn pri">允许一次</span><span class="btn">本次会话允许</span>
+            <span class="btn">本项目允许</span><span class="btn">拒绝</span><span class="btn">拒绝并留言</span>
+          </div>
+        </div>
+        <div class="appr">
+          <b>⚠ 审批请求</b> — MyAgent 想要执行命令：
+          <div class="cmd mono">npm test -- --grep "auth"</div>
+          <div style="font-size:12px;color:var(--tx2);margin-bottom:10px">风险翻译：运行测试，通常无副作用 · 目的：验证 auth 修复是否通过</div>
+          <div class="opts">
+            <span class="btn pri">仅这一次</span><span class="btn">本次会话都允许</span>
+            <span class="btn">本项目永久允许</span><span class="btn">拒绝</span><span class="btn">拒绝并留言</span>
+          </div>
+        </div>
+      </div>
+      <div class="inputbar"><input placeholder="发消息给 MyAgent…（输入自动排队，Esc 硬打断）"><span class="btn pri">发送</span></div>
+    </div>
+    <div class="rail">
+      <div class="card"><h4>任务清单</h4>
+        <div class="todo done"><span class="ck"></span>定位 refresh token 失效原因</div>
+        <div class="todo ing"><span class="ck"></span>修复过期判断与 401 拦截器</div>
+        <div class="todo"><span class="ck"></span>跑测试验证并回归</div>
+      </div>
+      <div class="card"><h4>消耗</h4>
+        <div class="kv"><span>本会话累计</span><b>89k tokens</b></div>
+        <div class="kv"><span>其中子代理</span><b>4.2k（explore 便宜模型）</b></div>
+        <div class="kv"><span>估算</span><b>≈¥0.37</b></div>
+      </div>
+      <div class="card"><h4>会话</h4>
+        <div class="kv"><span>权限档</span><b>strict</b></div>
+        <div class="kv"><span>上下文</span><b>41k / 200k (20%)</b></div>
+        <div class="kv"><span>软遗忘</span><b>已压缩 3 条旧结果</b></div>
+        <div class="kv"><span>项目</span><b>未初始化 · /init 生成说明</b></div>
+        <div class="kv" style="margin-top:6px"><span class="btn" style="width:100%;text-align:center">▶ 回放模式</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 记忆面板 ================= -->
+<div class="page" id="p-mem">
+  <h1>记忆面板</h1>
+  <div class="sub">Agent 沉淀的长期记忆 · 可直接编辑 · 每次自动写入都有记录</div>
+  <div class="mem">
+    <div class="memlist">
+      <div class="mi on">🌐 preferences（全局）</div>
+      <div class="mi">📁 rag-learn / conventions</div>
+      <div class="mi">📁 rag-learn / pitfalls</div>
+      <div class="mi">📁 rag-learn / decisions</div>
+      <div class="mi">📁 myagent / conventions</div>
+      <div class="mi">📁 myagent / pitfalls</div>
+    </div>
+    <div class="card memdoc">
+      <div class="entry"><div class="dt">2026-07-18 · Agent 自动写入</div>用户偏好中文交流，但代码注释与 commit message 用英文。</div>
+      <div class="entry"><div class="dt">2026-07-24 · Agent 自动写入</div>RAG 项目用 pnpm，不是 npm。测试命令：pnpm test:eval。</div>
+      <div class="entry"><div class="dt">2026-07-28 · Agent 自动写入（来源：项目 rag-learn）</div>Chroma 连接必须显式设 timeout=10s，否则本地重启服务后首次查询会挂起 5 分钟。</div>
+      <div class="timeline">
+        <h4 style="font-size:12px;color:var(--tx3);margin-bottom:10px">「它学到了什么」时间线</h4>
+        <div class="tl">
+          <div class="e"><div class="t">今天 02:14 · 无人值守任务</div>写入 pitfalls：Nightwatch 评测脚本需 --workers=1 避免并发写库</div>
+          <div class="e"><div class="t">昨天 23:58 · 会话 #a1c2</div>写入 conventions：本项目 lint 前先跑 pnpm format</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 设置 ================= -->
+<div class="page" id="p-set">
+  <h1>设置</h1>
+  <div class="sub">由配置 Schema 自动生成 · 与 CLI /config 同一套接口</div>
+  <div class="set">
+    <div class="scope"><span class="on">全局</span><span>当前项目 (myagent)</span></div>
+    <div class="card sect"><h3>模型</h3><div class="d">角色化配置：不同任务用不同模型，省钱的关键</div>
+      <div class="frow"><label>主循环模型 main<span class="hint">复杂推理</span></label><select><option>anthropic / claude-sonnet</option><option>anthropic / claude-opus</option></select></div>
+      <div class="frow"><label>压缩摘要 cheap<span class="hint">硬压缩、会话标题</span></label><select><option>anthropic / claude-haiku</option><option>openai-compat / deepseek-chat</option></select></div>
+      <div class="frow"><label>子代理探索 explore<span class="hint">代码搜索归纳</span></label><select><option>openai-compat / deepseek-chat</option><option>openai-compat / kimi-k2</option><option>anthropic / claude-haiku</option></select></div>
+      <div class="frow"><label>OpenAI 兼容端点<span class="hint">baseUrl</span></label><input value="https://api.deepseek.com/v1"></div>
+      <div class="frow"><label>API Key<span class="hint">脱敏存储</span></label><input type="password" value="············3f9a"></div>
+    </div>
+    <div class="card sect"><h3>权限规则</h3><div class="d">deny 任何档位不豁免 · 档位仅影响"默认问不问"</div>
+      <div class="rule"><span class="tag done" style="background:#14321f;color:var(--ok)">allow</span><code>Bash(npm test *)</code><span class="x">✕</span></div>
+      <div class="rule"><span class="tag done" style="background:#14321f;color:var(--ok)">allow</span><code>Bash(git status|diff|log *)</code><span class="x">✕</span></div>
+      <div class="rule"><span class="tag wait">ask</span><code>Bash(git commit *)</code><span class="x">✕</span></div>
+      <div class="rule"><span class="tag err">deny</span><code>Bash(rm -rf *)</code><span class="x">✕</span></div>
+      <div class="rule"><span class="tag err">deny</span><code>Edit(~/.ssh/**)</code><span class="x">✕</span></div>
+      <div style="margin-top:10px"><span class="btn">+ 添加规则</span></div>
+    </div>
+    <div class="card sect"><h3>行为</h3>
+      <div class="frow"><label>硬压缩触发阈值</label><input value="0.9"></div>
+      <div class="frow"><label>审批超时（秒）<span class="hint">超时自动拒绝 · fail-closed</span></label><input value="300"></div>
+      <div class="frow"><label>优雅终止阶段（分钟）<span class="hint">依次注入警告：收窄范围 → 收尾 → 只输出总结</span></label><input value="30, 10, 2"></div>
+    </div>
+    <div class="card sect"><h3>服务器与通知</h3>
+      <div class="frow"><label>监听地址<span class="hint">改非 localhost 需设访问密码</span></label><input value="127.0.0.1"></div>
+      <div class="frow"><label>访问密码</label><input type="password" placeholder="未设置"></div>
+      <div class="frow"><label>通知 webhook<span class="hint">企业微信 / Bark / 邮件网关</span></label><input placeholder="https://..."></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+function go(p){
+  document.querySelectorAll('.page').forEach(e=>e.classList.remove('on'));
+  document.getElementById('p-'+p).classList.add('on');
+  document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('on',e.dataset.p===p));
+  document.querySelector('.main').scrollTop=0;
+}
+document.querySelectorAll('[data-p]').forEach(e=>e.addEventListener('click',()=>go(e.dataset.p)));
+document.querySelectorAll('.tool .hd,.subtask .hd').forEach(h=>h.addEventListener('click',()=>{
+  const b=h.parentElement.querySelector('.bd'); if(b) b.style.display=b.style.display==='none'?'':'none';
+}));
+</script>
+</body>
+</html>

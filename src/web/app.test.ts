@@ -1,0 +1,154 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { ConfigService } from "../config/service.js";
+import { createWebApp } from "./app.js";
+
+async function fixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-api-"));
+  const service = new ConfigService({
+    cwd: path.join(root, "project"),
+    homeDir: path.join(root, "home"),
+  });
+  return { app: createWebApp(service), service };
+}
+
+test("Web API 暴露 Schema 和脱敏配置", async () => {
+  const { app } = await fixture();
+  const schemaResponse = await app.request("/api/config/schema");
+  assert.equal(schemaResponse.status, 200);
+  const schema = await schemaResponse.json();
+  assert.deepEqual(
+    schema.fields.map((field: { key: string }) => field.key),
+    ["providers", "models", "permissions", "context", "server.host", "server.password"],
+  );
+
+  const configResponse = await app.request("/api/config?scope=global");
+  assert.equal(configResponse.status, 200);
+  const payload = await configResponse.json();
+  assert.equal(payload.scope, "global");
+  assert.equal(payload.config.providers[0].apiKey, "");
+});
+
+test("Web API 保存 OpenAI-compatible 第三方渠道", async () => {
+  const { app, service } = await fixture();
+  const config = await service.readPublic("global");
+  config.providers.push({
+    id: "moonshot",
+    name: "Moonshot",
+    enabled: true,
+    protocol: "openai-compatible",
+    baseUrl: "https://api.moonshot.cn/v1",
+    apiKey: "moonshot-secret",
+    hasApiKey: false,
+    models: ["kimi-k2"],
+  });
+  config.models.explore = {
+    providerId: "moonshot",
+    model: "kimi-k2",
+  };
+
+  const response = await app.request("/api/config?scope=global", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.saved, true);
+  assert.equal(payload.config.providers[1].hasApiKey, true);
+  assert.equal(payload.config.providers[1].apiKey, "");
+});
+
+test("Web API 对无效配置返回可读问题列表", async () => {
+  const { app, service } = await fixture();
+  const config = await service.readPublic("global");
+  config.providers[0]!.baseUrl = "bad-url";
+
+  const response = await app.request("/api/config", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  assert.equal(response.status, 400);
+  const payload = await response.json();
+  assert.ok(payload.issues.some((issue: string) => issue.includes("Base URL")));
+});
+
+test("连接测试在缺少 API Key 时返回明确结果", async () => {
+  const { app } = await fixture();
+  const response = await app.request("/api/config/test?scope=global", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      providerId: "anthropic",
+      model: "claude-sonnet-4-5",
+    }),
+  });
+  assert.equal(response.status, 422);
+  const payload = await response.json();
+  assert.equal(payload.ok, false);
+  assert.equal(payload.reachable, false);
+  assert.match(payload.message, /API Key/);
+});
+
+test("记忆 API 列出四类文档并原子保存项目记忆", async () => {
+  const { app, service } = await fixture();
+  const listResponse = await app.request("/api/memory");
+  assert.equal(listResponse.status, 200);
+  const initial = await listResponse.json();
+  assert.deepEqual(
+    initial.documents.map(
+      (document: { id: string }) => document.id,
+    ),
+    ["preferences", "conventions", "pitfalls", "decisions"],
+  );
+
+  const saveResponse = await app.request("/api/memory/pitfalls", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      content: "- 测试必须串行运行\n",
+    }),
+  });
+  assert.equal(saveResponse.status, 200);
+  assert.equal(
+    await readFile(
+      path.join(
+        service.cwd,
+        ".myagent",
+        "memory",
+        "pitfalls.md",
+      ),
+      "utf8",
+    ),
+    "- 测试必须串行运行\n",
+  );
+});
+
+test("Web /run 预览返回待确认的路径硬边界", async () => {
+  const { app } = await fixture();
+  const response = await app.request("/api/run/preview", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      command:
+        '/run 提升覆盖率 --goal "npm test 全过" --bounds "不改 src/api/" --permission trust',
+    }),
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.task.permission, "trust");
+  assert.deepEqual(
+    payload.task.hardRules.map(
+      (rule: { pattern: string }) => rule.pattern,
+    ),
+    [
+      "Edit(*src/api/*)",
+      "MultiEdit(*src/api/*)",
+      "Write(*src/api/*)",
+    ],
+  );
+});

@@ -1,0 +1,160 @@
+import { EventEmitter } from "node:events";
+import { mkdir, appendFile, readFile } from "node:fs/promises";
+import path from "node:path";
+import type { AgentEvent, RecordedEvent } from "./types.js";
+import type { ToolCall } from "./types.js";
+
+export class AgentEventBus {
+  readonly #emitter = new EventEmitter();
+
+  emit(event: AgentEvent): void {
+    this.#emitter.emit("event", event);
+  }
+
+  subscribe(listener: (event: AgentEvent) => void): () => void {
+    this.#emitter.on("event", listener);
+    return () => this.#emitter.off("event", listener);
+  }
+}
+
+export class SessionStore {
+  readonly #filePath: string;
+  readonly #sessionId: string;
+  #seq = 0;
+  #initialized = false;
+  #writeTail: Promise<void> = Promise.resolve();
+
+  constructor(filePath: string, sessionId: string) {
+    this.#filePath = filePath;
+    this.#sessionId = sessionId;
+  }
+
+  attach(bus: AgentEventBus): () => void {
+    return bus.subscribe((event) => {
+      this.#writeTail = this.#writeTail.then(async () => {
+        await this.#initializeSequence();
+        const record: RecordedEvent = {
+          seq: ++this.#seq,
+          ts: new Date().toISOString(),
+          sessionId: this.#sessionId,
+          event,
+        };
+        await mkdir(path.dirname(this.#filePath), { recursive: true });
+        await appendFile(this.#filePath, `${JSON.stringify(record)}\n`, "utf8");
+      });
+    });
+  }
+
+  async flush(): Promise<void> {
+    await this.#writeTail;
+  }
+
+  async readAll(): Promise<RecordedEvent[]> {
+    await this.flush();
+    try {
+      const content = await readFile(this.#filePath, "utf8");
+      return content
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as RecordedEvent);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
+
+  async #initializeSequence(): Promise<void> {
+    if (this.#initialized) return;
+    this.#initialized = true;
+    const existing = await this.readAllWithoutFlush();
+    this.#seq = existing.at(-1)?.seq ?? 0;
+  }
+
+  async readAllWithoutFlush(): Promise<RecordedEvent[]> {
+    try {
+      const content = await readFile(this.#filePath, "utf8");
+      return content
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as RecordedEvent);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
+}
+
+export interface AgentTurnTrace {
+  turn: number;
+  ts: string;
+  request?: unknown;
+  response?: unknown;
+  tools: Array<{
+    call: ToolCall;
+    permission: string;
+    result?: unknown;
+    ms: number;
+  }>;
+  usage?: { input: number; output: number; cached: number };
+}
+
+export class TraceStore {
+  readonly #filePath: string;
+  #turn = 0;
+  #initialized = false;
+  #writeTail: Promise<void> = Promise.resolve();
+
+  constructor(filePath: string) {
+    this.#filePath = filePath;
+  }
+
+  record(
+    trace: Omit<AgentTurnTrace, "turn" | "ts">,
+  ): void {
+    this.#writeTail = this.#writeTail.then(async () => {
+      await this.#initializeTurn();
+      const record: AgentTurnTrace = {
+        turn: ++this.#turn,
+        ts: new Date().toISOString(),
+        ...trace,
+      };
+      await mkdir(path.dirname(this.#filePath), {
+        recursive: true,
+      });
+      await appendFile(
+        this.#filePath,
+        `${JSON.stringify(record)}\n`,
+        "utf8",
+      );
+    });
+  }
+
+  async flush(): Promise<void> {
+    await this.#writeTail;
+  }
+
+  async readAll(): Promise<AgentTurnTrace[]> {
+    await this.flush();
+    return await this.#readAllWithoutFlush();
+  }
+
+  async #initializeTurn(): Promise<void> {
+    if (this.#initialized) return;
+    this.#initialized = true;
+    const existing = await this.#readAllWithoutFlush();
+    this.#turn = existing.at(-1)?.turn ?? 0;
+  }
+
+  async #readAllWithoutFlush(): Promise<AgentTurnTrace[]> {
+    try {
+      const content = await readFile(this.#filePath, "utf8");
+      return content
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as AgentTurnTrace);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
+}
