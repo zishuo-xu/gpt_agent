@@ -98,6 +98,41 @@ test("ContextManager 仅注入其他项目记忆标题索引与完整路径", as
   assert.doesNotMatch(prepared.system, /完整解释不应直接注入/);
 });
 
+test("出现探索工具后生成并注入仓库签名地图", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-context-map-"));
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-context-home-"),
+  );
+  await mkdir(path.join(cwd, "src"), { recursive: true });
+  await writeFile(
+    path.join(cwd, "src", "helper.ts"),
+    "export function helper(value: number): number {\n  return value * 2;\n}\n",
+    "utf8",
+  );
+  const context = new ContextManager({ cwd, homeDir });
+
+  // 无探索历史：不生成仓库地图
+  const plain = await context.prepare("base", [
+    { role: "user", content: "开始" },
+  ]);
+  assert.doesNotMatch(plain.system, /仓库签名地图/);
+
+  // 出现 Grep 工具结果后：生成并注入
+  const prepared = await context.prepare("base", [
+    { role: "user", content: "探索" },
+    {
+      role: "tool",
+      toolCallId: "grep-1",
+      toolName: "Grep",
+      target: "helper.ts",
+      content: "helper.ts:1",
+      isError: false,
+    },
+  ]);
+  assert.match(prepared.system, /仓库签名地图/);
+  assert.match(prepared.system, /fn helper\(value\)/);
+});
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

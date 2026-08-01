@@ -8,7 +8,12 @@ import {
   type Key,
 } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
-import { ConfigService } from "./config/service.js";
+import { ConfigService, type ConfigScope } from "./config/service.js";
+import {
+  toPublicConfig,
+  type ModelRole,
+  type MyAgentConfig,
+} from "./config/schema.js";
 import { AgentSessionManager } from "./core/session-manager.js";
 import { AgentSession } from "./core/session.js";
 import {
@@ -19,6 +24,7 @@ import type {
   AgentEvent,
   ApprovalAnswer,
   PermissionMode,
+  PermissionRule,
 } from "./core/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -144,6 +150,8 @@ async function runCli(): Promise<void> {
           "/switch <id>                       切换/恢复会话",
           "/compact                           立即压缩当前会话上下文",
           "/init                              只读扫描并生成 AGENTS.md 草稿",
+          "/config [global|project]           查看生效配置摘要或指定作用域配置",
+          "/config set <key> <value> [global|project] 修改配置项",
           "/allow [once|session|project|global] 回答并选择记忆范围",
           "/deny [留言]                       拒绝，可附纠正意见",
           "/exit                              退出",
@@ -263,6 +271,11 @@ async function runCli(): Promise<void> {
       readline.prompt();
       return;
     }
+    if (line === "/config" || line.startsWith("/config ")) {
+      await handleConfigCommand(line);
+      readline.prompt();
+      return;
+    }
     if (line.startsWith("/allow") || line.startsWith("/deny")) {
       if (!pendingApprovalCallId) {
         output.write("当前没有待处理审批。\n");
@@ -278,6 +291,57 @@ async function runCli(): Promise<void> {
     }
     output.write(`未知命令：${line}。输入 /help 查看可用命令。\n`);
     readline.prompt();
+  }
+
+  async function handleConfigCommand(line: string): Promise<void> {
+    const rest = line === "/config" ? "" : line.slice("/config ".length).trim();
+    try {
+      if (!rest) {
+        output.write(
+          formatEffectiveConfig(await configService.readEffective()),
+        );
+        return;
+      }
+      if (rest === "global" || rest === "project") {
+        output.write(
+          JSON.stringify(
+            await configService.readPublic(rest as ConfigScope),
+            null,
+            2,
+          ) + "\n",
+        );
+        return;
+      }
+      if (rest.startsWith("set ")) {
+        const body = rest.slice("set ".length).trim();
+        const spaceIndex = body.indexOf(" ");
+        if (spaceIndex < 0) {
+          output.write("用法：/config set <key> <value> [global|project]\n");
+          return;
+        }
+        const keyPath = body.slice(0, spaceIndex);
+        let value = body.slice(spaceIndex + 1).trim();
+        let scope: ConfigScope = "project";
+        const lastToken = value.split(/\s+/).at(-1) ?? "";
+        if (
+          (lastToken === "global" || lastToken === "project") &&
+          value.length > lastToken.length
+        ) {
+          scope = lastToken;
+          value = value.slice(0, value.length - lastToken.length).trimEnd();
+        }
+        const config = await configService.read(scope);
+        setConfigValue(config, keyPath, value);
+        await configService.write(scope, config);
+        output.write(`已更新 ${scope} 作用域配置项 ${keyPath}。\n`);
+        return;
+      }
+      output.write(
+        "用法：/config 摘要 | /config global|project 查看 | /config set <key> <value> [global|project]\n",
+      );
+    } catch (error) {
+      output.write(`${error instanceof Error ? error.message : "配置操作失败"}\n`);
+    }
   }
 
   function startRun(task: RunTaskOptions): void {
@@ -406,6 +470,63 @@ async function runCli(): Promise<void> {
       renderEvent(record.event);
       if (!closed) readline.prompt(true);
     });
+  }
+}
+
+function formatEffectiveConfig(config: MyAgentConfig): string {
+  const counts: Record<PermissionRule["effect"], number> = {
+    allow: 0,
+    ask: 0,
+    deny: 0,
+  };
+  for (const rule of config.permissions.rules) counts[rule.effect]++;
+  const modelRoles = (["main", "cheap", "explore"] as ModelRole[])
+    .map(
+      (role) =>
+        `${role}=${config.models[role].providerId}/${config.models[role].model}`,
+    )
+    .join(" · ");
+  return (
+    [
+      `权限档：${config.permissions.mode} · 审批超时 ${config.permissions.approvalTimeoutMs}ms`,
+      `权限规则：allow ${counts.allow} / ask ${counts.ask} / deny ${counts.deny}`,
+      `角色模型：${modelRoles}`,
+      `上下文：压缩阈值 ${config.context.compactAtEstimatedTokens} tokens · 保留 ${config.context.keepRecentTurns} 轮`,
+      `Web：host ${config.server.host}${config.server.password ? " · 已设访问密码" : ""}`,
+    ].join("\n") + "\n"
+  );
+}
+
+function setConfigValue(
+  config: MyAgentConfig,
+  keyPath: string,
+  rawValue: string,
+): void {
+  const segments = keyPath.split(".");
+  if (segments.length < 1) throw new Error("配置键不能为空");
+  let target: Record<string, unknown> =
+    config as unknown as Record<string, unknown>;
+  for (const segment of segments.slice(0, -1)) {
+    const next = target[segment];
+    if (!next || typeof next !== "object") {
+      throw new Error(`配置项 ${keyPath} 不存在`);
+    }
+    target = next as Record<string, unknown>;
+  }
+  const leaf = segments.at(-1)!;
+  const current = target[leaf];
+  if (typeof current === "number") {
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) throw new Error(`配置项 ${keyPath} 需要数字`);
+    target[leaf] = value;
+  } else if (typeof current === "boolean") {
+    const normalized = rawValue.toLowerCase();
+    if (!["true", "false"].includes(normalized)) {
+      throw new Error(`配置项 ${keyPath} 需要 true/false`);
+    }
+    target[leaf] = normalized === "true";
+  } else {
+    target[leaf] = rawValue;
   }
 }
 

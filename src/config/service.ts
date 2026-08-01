@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  access,
   mkdir,
   open,
   readFile,
@@ -77,6 +76,19 @@ export class ConfigService {
   }
 
   async read(scope: ConfigScope): Promise<MyAgentConfig> {
+    return normalizeConfig(await this.#readRaw(scope));
+  }
+
+  async readPublic(scope: ConfigScope): Promise<PublicMyAgentConfig> {
+    return toPublicConfig(await this.read(scope));
+  }
+
+  /**
+   * 读取作用域原始配置；文件不存在返回 undefined。
+   */
+  async #readRaw(
+    scope: ConfigScope,
+  ): Promise<Record<string, unknown> | undefined> {
     const filePath = this.pathFor(scope);
     try {
       const text = await readFile(filePath, "utf8");
@@ -84,42 +96,50 @@ export class ConfigService {
       const parsed = parse(text, errors, {
         allowTrailingComma: true,
         disallowComments: false,
-      }) as Partial<MyAgentConfig> | undefined;
+      }) as Record<string, unknown> | undefined;
       if (errors.length > 0) {
         throw new ConfigValidationError(["配置文件不是有效的 JSONC"]);
       }
-      return normalizeConfig(parsed);
+      return parsed ?? {};
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return scope === "project"
-          ? await this.read("global")
-          : normalizeConfig();
+        return undefined;
       }
       throw error;
     }
   }
 
-  async readPublic(scope: ConfigScope): Promise<PublicMyAgentConfig> {
-    return toPublicConfig(await this.read(scope));
-  }
-
+  /**
+   * 生效配置 = 全局层与项目层深合并：项目层显式设置的字段覆盖全局层；
+   * providers 按 id 合并（项目层 API Key 为空时继承全局层）；
+   * permissions.rules 两层拼接。任一文件缺失则退化为另一层 + Schema 默认。
+   */
   async readEffective(): Promise<MyAgentConfig> {
-    try {
-      await access(this.pathFor("project"));
-      return await this.read("project");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return await this.read("global");
-    }
+    const [globalRaw, projectRaw] = await Promise.all([
+      this.#readRaw("global"),
+      this.#readRaw("project"),
+    ]);
+    return normalizeConfig(mergeLayers(globalRaw, projectRaw));
   }
 
   async addPermissionRule(
     scope: ConfigScope,
     rule: PermissionRule,
   ): Promise<void> {
-    const config = await this.read(scope);
+    const raw = (await this.#readRaw(scope)) ?? {};
+    const rawPermissions = (raw.permissions ?? {}) as { rules?: unknown };
+    const current = Array.isArray(rawPermissions.rules)
+      ? rawPermissions.rules
+      : [];
+    const rules: PermissionRule[] = current.map((candidate) => {
+      const item = candidate as { effect?: unknown; pattern?: unknown };
+      return {
+        effect: item.effect as PermissionRule["effect"],
+        pattern: String(item.pattern),
+      };
+    });
     if (
-      config.permissions.rules.some(
+      rules.some(
         (candidate) =>
           candidate.effect === rule.effect &&
           candidate.pattern === rule.pattern,
@@ -127,8 +147,27 @@ export class ConfigService {
     ) {
       return;
     }
-    config.permissions.rules.push(rule);
-    await this.write(scope, config);
+    rules.push(rule);
+    // 字段级写入：只修改 permissions.rules，避免把默认/全局配置复制进作用域文件
+    await this.writeField(scope, "permissions.rules", rules);
+  }
+
+  async writeField(
+    scope: ConfigScope,
+    keyPath: string,
+    value: unknown,
+  ): Promise<void> {
+    const filePath = this.pathFor(scope);
+    const currentText = await readTextOrTemplate(filePath);
+    const formatting = { insertSpaces: true, tabSize: 2, eol: "\n" };
+    const nextText = applyEdits(
+      currentText,
+      modify(currentText, keyPath.split("."), value, {
+        formattingOptions: formatting,
+      }),
+    );
+    await atomicWrite(filePath, nextText);
+    await this.#notifyListeners();
   }
 
   async write(
@@ -161,6 +200,82 @@ export class ConfigService {
       listener(config);
     }
   }
+}
+
+function mergeLayers(
+  globalRaw: Record<string, unknown> | undefined,
+  projectRaw: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const global = globalRaw ?? {};
+  const project = projectRaw ?? {};
+  const merged: Record<string, unknown> = {};
+
+  // 标量 Schema 字段：项目层显式设置则覆盖全局层
+  for (const field of CONFIG_SCHEMA) {
+    if (!isScalarSchemaField(field.type)) continue;
+    if (project[field.key] !== undefined) {
+      merged[field.key] = project[field.key];
+    } else if (global[field.key] !== undefined) {
+      merged[field.key] = global[field.key];
+    }
+  }
+
+  // providers：按 id 合并，项目层覆盖同 id 全局项；API Key 项目层为空时继承全局层
+  const providerMap = new Map<string, Record<string, unknown>>();
+  for (const candidate of [
+    ...(Array.isArray(global.providers) ? global.providers : []),
+    ...(Array.isArray(project.providers) ? project.providers : []),
+  ]) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const provider = candidate as Record<string, unknown>;
+    const id = String(provider.id ?? "");
+    const existing = providerMap.get(id);
+    providerMap.set(id, {
+      ...(existing ?? {}),
+      ...provider,
+      apiKey: String(provider.apiKey ?? "") || String(existing?.apiKey ?? ""),
+    });
+  }
+  merged.providers = [...providerMap.values()];
+
+  // models：角色级覆盖（项目层完整指定某角色则整体覆盖）
+  const models: Record<string, unknown> = {};
+  for (const role of ["main", "cheap", "explore"]) {
+    const globalRole = (global.models as Record<string, unknown> | undefined)?.[role];
+    const projectRole = (project.models as Record<string, unknown> | undefined)?.[role];
+    if (
+      projectRole &&
+      typeof projectRole === "object" &&
+      (projectRole as { providerId?: unknown }).providerId
+    ) {
+      models[role] = projectRole;
+    } else if (globalRole) {
+      models[role] = globalRole;
+    }
+  }
+  merged.models = models;
+
+  // permissions：mode / approvalTimeoutMs 字段级覆盖，rules 两层拼接
+  const globalPermissions = (global.permissions ?? {}) as Record<string, unknown>;
+  const projectPermissions = (project.permissions ?? {}) as Record<string, unknown>;
+  merged.permissions = {
+    ...globalPermissions,
+    ...projectPermissions,
+    rules: [
+      ...(Array.isArray(globalPermissions.rules) ? globalPermissions.rules : []),
+      ...(Array.isArray(projectPermissions.rules) ? projectPermissions.rules : []),
+    ],
+  };
+
+  merged.context = {
+    ...((global.context ?? {}) as Record<string, unknown>),
+    ...((project.context ?? {}) as Record<string, unknown>),
+  };
+  merged.server = {
+    ...((global.server ?? {}) as Record<string, unknown>),
+    ...((project.server ?? {}) as Record<string, unknown>),
+  };
+  return merged;
 }
 
 function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {

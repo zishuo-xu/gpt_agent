@@ -99,7 +99,7 @@ test("项目与全局批准规则写入 permissions 且保留已有配置", asyn
   assert.match(raw, /Bash\(git commit \*\)/);
 });
 
-test("首次写入项目批准规则会继承全局模型配置与 API Key", async () => {
+test("项目层只存覆盖项，生效配置为全局与项目的深合并", async () => {
   const service = await fixture();
   const global = await service.readPublic("global");
   global.providers.push({
@@ -123,14 +123,39 @@ test("首次写入项目批准规则会继承全局模型配置与 API Key", asy
     pattern: "Bash(pnpm test *)",
   });
 
-  const project = await service.read("project");
-  assert.equal(project.models.main.providerId, "third-party");
+  // 项目文件只含新增规则，不复制全局渠道与 API Key
+  const raw = await readFile(service.pathFor("project"), "utf8");
+  assert.match(raw, /Bash\(pnpm test \*\)/);
+  assert.doesNotMatch(raw, /global-secret/);
+  assert.doesNotMatch(raw, /third-party/);
+
+  // 生效配置 = 全局模型/渠道 + 项目规则
+  const effective = await service.readEffective();
+  assert.equal(effective.models.main.providerId, "third-party");
   assert.equal(
-    project.providers.find((provider) => provider.id === "third-party")
+    effective.providers.find((provider) => provider.id === "third-party")
       ?.apiKey,
     "global-secret",
   );
-  assert.deepEqual(project.permissions.rules, [
+  assert.deepEqual(effective.permissions.rules, [
+    { effect: "allow", pattern: "Bash(pnpm test *)" },
+  ]);
+});
+
+test("生效配置拼接全局与项目两层权限规则", async () => {
+  const service = await fixture();
+  await service.addPermissionRule("global", {
+    effect: "deny",
+    pattern: "Bash(rm -rf *)",
+  });
+  await service.addPermissionRule("project", {
+    effect: "allow",
+    pattern: "Bash(pnpm test *)",
+  });
+
+  const effective = await service.readEffective();
+  assert.deepEqual(effective.permissions.rules, [
+    { effect: "deny", pattern: "Bash(rm -rf *)" },
     { effect: "allow", pattern: "Bash(pnpm test *)" },
   ]);
 });
