@@ -167,9 +167,11 @@ export function createWebApp(
     try {
       const body = (await context.req.json()) as {
         task?: string;
+        message?: string;
         confirmBounds?: boolean;
       };
-      const task = body.task?.trim();
+      // 前端对"已有会话发消息"使用 message 字段，对"新建会话"使用 task；此处统一兼容
+      const task = (body.task ?? body.message)?.trim();
       if (!task) return context.json({ error: "消息不能为空" }, 400);
       if (task.startsWith("/run")) {
         if (session.isProcessing()) {

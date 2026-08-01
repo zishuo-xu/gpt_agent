@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { ConfigService } from "../config/service.js";
 import { createWebApp } from "./app.js";
+import type { WebSessionManager } from "./sessions.js";
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "myagent-api-"));
@@ -151,4 +152,35 @@ test("Web /run 预览返回待确认的路径硬边界", async () => {
       "Write(*src/api/*)",
     ],
   );
+});
+
+test("已有会话发消息兼容 message 字段（与 task 一致）", async () => {
+  const { service } = await fixture();
+  const fakeSession = {
+    id: "sess-test",
+    isProcessing: () => false,
+    sendInput: async () => undefined,
+    startRunTask: () => undefined,
+  } as never;
+  const fakeManager = {
+    get: (id: string) => (id === "sess-test" ? fakeSession : undefined),
+  } as unknown as WebSessionManager;
+  const app = createWebApp(service, fakeManager);
+
+  const response = await app.request("/api/sessions/sess-test/input", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "第二条消息" }),
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.accepted, true);
+
+  // 空消息仍被拒绝
+  const empty = await app.request("/api/sessions/sess-test/input", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "   " }),
+  });
+  assert.equal(empty.status, 400);
 });
