@@ -182,9 +182,17 @@ export class ConfigService {
     const formatting = { insertSpaces: true, tabSize: 2, eol: "\n" };
     let nextText = currentText;
     for (const field of CONFIG_SCHEMA) {
+      // 带点的键（如 server.host）写入嵌套路径，值从嵌套对象取
+      const segments = field.key.split(".");
+      let value: unknown = merged[field.key];
+      if (segments.length === 2) {
+        value = (
+          merged[segments[0]!] as Record<string, unknown> | undefined
+        )?.[segments[1]!];
+      }
       nextText = applyEdits(
         nextText,
-        modify(nextText, [field.key], merged[field.key], {
+        modify(nextText, segments, value, {
           formattingOptions: formatting,
         }),
       );
@@ -210,9 +218,10 @@ function mergeLayers(
   const project = projectRaw ?? {};
   const merged: Record<string, unknown> = {};
 
-  // 标量 Schema 字段：项目层显式设置则覆盖全局层
+  // 标量 Schema 字段：项目层显式设置则覆盖全局层（server.host 等嵌套键除外）
   for (const field of CONFIG_SCHEMA) {
     if (!isScalarSchemaField(field.type)) continue;
+    if (field.key.includes(".")) continue;
     if (project[field.key] !== undefined) {
       merged[field.key] = project[field.key];
     } else if (global[field.key] !== undefined) {
@@ -371,6 +380,7 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
         ? config.context.keepRecentTurns
         : 4,
   };
+  const rawConfig = config as Record<string, unknown>;
   const normalized: MyAgentConfig = {
     providers,
     models,
@@ -380,15 +390,20 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
       host:
         typeof config.server?.host === "string"
           ? config.server.host
-          : "127.0.0.1",
+          : typeof rawConfig["server.host"] === "string"
+            ? String(rawConfig["server.host"])
+            : "127.0.0.1",
       password:
         typeof config.server?.password === "string"
           ? config.server.password
-          : "",
+          : typeof rawConfig["server.password"] === "string"
+            ? String(rawConfig["server.password"])
+            : "",
     },
   };
   for (const field of CONFIG_SCHEMA) {
     if (!isScalarSchemaField(field.type)) continue;
+    if (field.key.includes(".")) continue;
     normalized[field.key] = normalizeScalarField(
       field.type,
       config[field.key],
@@ -441,6 +456,7 @@ function mergeSecrets(
   };
   for (const field of CONFIG_SCHEMA) {
     if (!isScalarSchemaField(field.type)) continue;
+    if (field.key.includes(".")) continue;
     merged[field.key] = normalizeScalarField(
       field.type,
       incoming[field.key] ?? existing[field.key],

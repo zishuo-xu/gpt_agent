@@ -198,6 +198,20 @@ test("角色模型 fallback 链与各自单价可持久化", async () => {
   );
 });
 
+test("server.host 与 server.password 写入嵌套结构并可读回", async () => {
+  const service = await fixture();
+  const config = await service.readPublic("project");
+  config.server.host = "0.0.0.0";
+  config.server.password = "secret-key";
+  await service.write("project", config);
+
+  const raw = await readFile(service.pathFor("project"), "utf8");
+  assert.match(raw, /"server": \{\s*"host": "0\.0\.0\.0"/s);
+  const readBack = await service.read("project");
+  assert.equal(readBack.server.host, "0.0.0.0");
+  assert.equal(readBack.server.password, "secret-key");
+});
+
 test("Schema 新增标量字段无需修改 ConfigService 即可默认展示并持久化", async () => {
   CONFIG_SCHEMA.push({
     key: "experimentalLimit",
