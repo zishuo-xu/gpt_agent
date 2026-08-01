@@ -65,6 +65,7 @@ interface WriteArgs {
 interface BashArgs {
   command: string;
   timeoutMs?: number;
+  background?: boolean;
 }
 
 export class ToolExecutor {
@@ -256,6 +257,7 @@ export class ToolExecutor {
           cwd: this.#cwd,
           timeoutMs: args.timeoutMs ?? 120_000,
           signal,
+          ...(args.background ? { background: true } : {}),
         });
       }
     }

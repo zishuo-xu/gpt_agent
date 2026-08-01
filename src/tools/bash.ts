@@ -6,6 +6,7 @@ export interface BashOptions {
   cwd: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  background?: boolean;
 }
 
 function abortError(): Error {
@@ -18,6 +19,28 @@ export async function runBash(
 ): Promise<ToolExecutionResult> {
   if (options.signal?.aborted) {
     throw abortError();
+  }
+
+  // 后台执行：启动 detached 进程立即返回，不阻塞主循环；输出不采集
+  if (options.background) {
+    const child = spawn(command, {
+      cwd: options.cwd,
+      shell: true,
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    const pid = child.pid ?? 0;
+    return {
+      summary: `命令已在后台启动（pid ${pid}）`,
+      output: {
+        background: true,
+        pid,
+        hint: "后台进程不阻塞当前循环；如需查看状态或输出请另行运行 ps / 日志命令。",
+      },
+      aborted: false,
+      isError: false,
+    };
   }
 
   return await new Promise<ToolExecutionResult>((resolve, reject) => {

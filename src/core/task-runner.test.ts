@@ -14,7 +14,10 @@ import type {
   ModelResponse,
 } from "../model/types.js";
 import { AgentEventBus } from "./events.js";
-import { TaskRunner } from "./task-runner.js";
+import {
+  formatSubagentConclusion,
+  TaskRunner,
+} from "./task-runner.js";
 import type { AgentEvent } from "./types.js";
 
 class ScriptedClient implements ModelClient {
@@ -183,4 +186,71 @@ test("TaskRunner 中途失败时返回部分结论且不向上抛错", async () 
   const end = events.find((event) => event.type === "task_end");
   assert.equal(end?.type, "task_end");
   if (end?.type === "task_end") assert.equal(end.status, "failed");
+});
+
+test("三段式结论解析：完整、缺失段与无结构回退", () => {
+  assert.equal(
+    formatSubagentConclusion(
+      "## Conclusion\n修复了登录 bug。\n## Key evidence\nsrc/auth.ts:1\n## Unconfirmed\n未验证重试路径。",
+    ),
+    [
+      "结论：修复了登录 bug。",
+      "关键证据：src/auth.ts:1",
+      "未能确认：未验证重试路径。",
+    ].join("\n"),
+  );
+  assert.equal(
+    formatSubagentConclusion(
+      "Conclusion: 结论 A\nKey evidence: src/a.ts:2\nUnconfirmed: 无。",
+    ),
+    [
+      "结论：结论 A",
+      "关键证据：src/a.ts:2",
+      "未能确认：无。",
+    ].join("\n"),
+  );
+  assert.equal(
+    formatSubagentConclusion("普通文本，没有分段结构"),
+    "普通文本，没有分段结构",
+  );
+});
+
+test("超过并发上限的子代理被立即拒绝", async () => {
+  class GateClient implements ModelClient {
+    readonly #pending: Array<(value: ModelResponse) => void> = [];
+    async complete(): Promise<ModelResponse> {
+      return new Promise((resolve) => {
+        this.#pending.push(resolve);
+      });
+    }
+    releaseAll(): void {
+      for (const resolve of this.#pending.splice(0)) {
+        resolve(response("done", []));
+      }
+    }
+  }
+  const client = new GateClient();
+  const bus = new AgentEventBus();
+  const runner = new TaskRunner({
+    cwd: await mkdtemp(path.join(os.tmpdir(), "myagent-task-concurrent-")),
+    bus,
+    mode: "normal",
+    client,
+  });
+  const signal = new AbortController().signal;
+  const pending = Array.from({ length: 4 }, () =>
+    runner.run({ description: "并发任务", prompt: "执行" }, signal),
+  );
+  // 让 4 个 runner 先进入并占用并发计数
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const fifth = await runner.run(
+    { description: "第五个任务", prompt: "执行" },
+    signal,
+  );
+  assert.equal(fifth.isError, true);
+  assert.match(String(fifth.output), /最多 4 个/);
+  assert.match(String(fifth.summary), /并发/);
+  client.releaseAll();
+  const rest = await Promise.all(pending);
+  assert.equal(rest.filter((result) => !result.isError).length, 4);
 });

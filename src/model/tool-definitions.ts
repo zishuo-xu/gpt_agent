@@ -197,6 +197,11 @@ export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
           type: "number",
           description: "Optional timeout in milliseconds",
         },
+        background: {
+          type: "boolean",
+          description:
+            "Start the command in the background and return immediately without waiting or collecting output",
+        },
       },
       required: ["command"],
       additionalProperties: false,

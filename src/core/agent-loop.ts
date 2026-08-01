@@ -367,10 +367,26 @@ function modelErrorTrace(error: unknown):
 function riskFor(call: ToolCall): string {
   if (call.tool === "Bash") {
     const command = (call.args as { command?: string }).command ?? call.target;
-    if (/^(npm|pnpm|yarn) (install|add)\b/.test(command)) {
+    if (/^(npm|pnpm|yarn) (install|add|remove|rm)\b/.test(command)) {
       return "将修改依赖清单与 lock 文件";
     }
     if (/^git push\b/.test(command)) return "将向远端推送提交";
+    if (
+      /^git (reset|clean|checkout)\b/.test(command) ||
+      /^git checkout --/.test(command)
+    ) {
+      return "⚠ 将重置或丢弃工作区改动，不可轻松恢复";
+    }
+    if (/^rm\s/.test(command)) {
+      return "⚠ 将删除文件，删除后不可恢复";
+    }
+    if (/^sudo\b/.test(command)) {
+      return "⚠ 将以管理员权限执行，影响面较大";
+    }
+    if (/\b(curl|wget)\b.*\|\s*(ba)?sh\b/.test(command)) {
+      return "⚠ 将下载并直接执行远程脚本";
+    }
+    if (/^(pkill|kill)\b/.test(command)) return "将终止进程";
     return "命令副作用未知；中止不能撤销已经发生的副作用";
   }
   if (call.tool === "Write") return "将新建或完整覆盖文件";

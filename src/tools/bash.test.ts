@@ -91,3 +91,32 @@ test("Bash 非零退出标记为错误并保留 stderr", async () => {
     /failed/,
   );
 });
+
+test("background 命令立即返回且进程在后台运行", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-bg-"));
+  const pidFile = path.join(directory, "bg.pid");
+  const startedAt = Date.now();
+  const result = await runBash(
+    `${process.execPath} -e "require('fs').writeFileSync('${pidFile}', String(process.pid)); setInterval(() => {}, 1000)"`,
+    { cwd: directory, background: true },
+  );
+
+  assert.equal(result.isError, false);
+  assert.match(result.summary, /后台启动/);
+  assert.ok(
+    Date.now() - startedAt < 1500,
+    "background 应立即返回而不等待命令结束",
+  );
+  const output = result.output as { pid: number };
+  assert.ok(typeof output.pid === "number" && output.pid > 0);
+
+  const pid = await readChildPid(pidFile);
+  assert.ok(pid, "后台进程应真实启动并记录 pid");
+
+  // 清理后台进程组，避免测试残留孤儿进程
+  try {
+    process.kill(-output.pid, "SIGTERM");
+  } catch {
+    // 进程已自行退出
+  }
+});

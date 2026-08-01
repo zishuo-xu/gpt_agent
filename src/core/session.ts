@@ -428,7 +428,7 @@ export class AgentSession {
     }
     if (options.budgetCny !== undefined && !this.#pricing?.main) {
       throw new Error(
-        "尚未为 main 角色模型配置人民币单价，无法可靠执行 --budget",
+        "--budget 需要模型单价：请在 Web 设置页的“角色模型 → 费用与 fallback”中为 main 模型填写单价；或去掉 --budget，仅用 --until 控制时长",
       );
     }
     const previousMode = this.#permissions.mode;

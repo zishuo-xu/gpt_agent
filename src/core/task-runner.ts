@@ -39,6 +39,11 @@ export interface TaskRunnerOptions {
   recordTrace?: AgentLoopOptions["recordTrace"];
 }
 
+/** 同时运行的子代理数量上限（设计约定：并发 ≤ 4） */
+const MAX_CONCURRENT_RUNNERS = 4;
+
+let activeRunners = 0;
+
 export class TaskRunner {
   readonly #cwd: string;
   readonly #bus: AgentEventBus;
@@ -75,6 +80,14 @@ export class TaskRunner {
         isError: true,
       };
     }
+    if (activeRunners >= MAX_CONCURRENT_RUNNERS) {
+      return {
+        summary: "子代理失败：并发任务数已达上限",
+        output: `未执行；同时运行的子代理最多 ${MAX_CONCURRENT_RUNNERS} 个，请稍后再试。`,
+        isError: true,
+      };
+    }
+    activeRunners += 1;
     const taskId = randomUUID().slice(0, 8);
     this.#bus.emit({
       type: "task_start",
@@ -192,9 +205,9 @@ export class TaskRunner {
     try {
       signal.addEventListener("abort", onAbort, { once: true });
       await loop.run();
-      const summary =
-        texts.at(-1)?.trim() ||
-        "子代理未返回文本结论。";
+      const summary = formatSubagentConclusion(
+        texts.at(-1)?.trim() || "",
+      ) || "子代理未返回文本结论。";
       const status = interrupted
         ? "interrupted"
         : "completed";
@@ -234,7 +247,68 @@ export class TaskRunner {
         isError: true,
       };
     } finally {
+      activeRunners -= 1;
       signal.removeEventListener("abort", onAbort);
     }
   }
+}
+
+const THREE_SECTION_HEADERS = [
+  "Conclusion",
+  "Key evidence",
+  "Unconfirmed",
+] as const;
+
+/**
+ * 宽容解析子代理三段式结论（Conclusion / Key evidence / Unconfirmed），
+ * 缺失的段标注"（未提供）"；无法识别结构时原样返回。
+ */
+export function formatSubagentConclusion(raw: string): string {
+  const extracted = extractSections(raw);
+  if (!extracted) return raw;
+  return [
+    `结论：${extracted.conclusion || "（未提供）"}`,
+    `关键证据：${extracted.evidence || "（未提供）"}`,
+    `未能确认：${extracted.unconfirmed || "（未提供）"}`,
+  ].join("\n");
+}
+
+function extractSections(
+  text: string,
+): { conclusion: string; evidence: string; unconfirmed: string } | undefined {
+  const lines = text.split(/\r?\n/);
+  const markers: Array<{ header: string; index: number }> = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const cleanedHeader = lines[index]!
+      .trim()
+      .replace(/^#{1,6}\s*/, "");
+    const header = THREE_SECTION_HEADERS.find(
+      (candidate) =>
+        cleanedHeader === candidate ||
+        cleanedHeader.startsWith(`${candidate}:`) ||
+        cleanedHeader.startsWith(`${candidate}：`),
+    );
+    if (header) markers.push({ header, index });
+  }
+  if (markers.length < 2) return undefined;
+  const section = (header: string): string => {
+    const start = markers.find((marker) => marker.header === header);
+    if (!start) return "";
+    const end = markers.find((marker) => marker.index > start.index);
+    const firstLine = lines[start.index]!
+      .replace(/^#{1,6}\s*/, "")
+      .replace(header, "")
+      .replace(/^[：:]\s*/, "")
+      .trim();
+    const rest = lines
+      .slice(start.index + 1, end?.index)
+      .join("\n")
+      .trim();
+    return [firstLine, rest].filter(Boolean).join("\n");
+  };
+  return {
+    conclusion: section("Conclusion"),
+    evidence: section("Key evidence"),
+    unconfirmed: section("Unconfirmed"),
+  };
 }
