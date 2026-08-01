@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { AppSidebar } from "./SessionApp";
 
 type Scope = "global" | "project";
 type Protocol = "anthropic" | "openai-compatible";
@@ -87,6 +88,7 @@ export function App() {
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [revealedKey, setRevealedKey] = useState(false);
   const [testingKey, setTestingKey] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
@@ -116,6 +118,7 @@ export function App() {
         const next = payload.config as Config;
         setConfig(next);
         setSelectedProviderId(next.providers[0]?.id ?? "");
+        setDirty(false);
       })
       .catch((error) => {
         if (error.name !== "AbortError") {
@@ -125,6 +128,13 @@ export function App() {
       .finally(() => setLoading(false));
     return () => controller.abort();
   }, [scope]);
+
+  // 成功提示 4 秒后自动消失
+  useEffect(() => {
+    if (notice?.tone !== "ok") return;
+    const timer = window.setTimeout(() => setNotice(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const selectedProvider = useMemo(
     () =>
@@ -149,6 +159,7 @@ export function App() {
 
   function replaceConfig(recipe: (current: Config) => Config) {
     setNotice(null);
+    setDirty(true);
     setConfig((current) => (current ? recipe(current) : current));
   }
 
@@ -472,6 +483,7 @@ export function App() {
         throw new Error((payload.issues ?? [payload.error]).join("；"));
       }
       setConfig(payload.config);
+      setDirty(false);
       if (!options.quiet) {
         setNotice({ tone: "ok", text: "配置已保存。" });
       }
@@ -528,46 +540,15 @@ export function App() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">◆</span>
-          <span>MyAgent</span>
-        </div>
-        <nav aria-label="主导航">
-          <button
-            className="nav-item"
-            onClick={() => {
-              window.location.hash = "sessions";
-            }}
-          >
-            <span>▦</span>监控台
-          </button>
-          <button
-            className="nav-item"
-            onClick={() => {
-              window.location.hash = "sessions";
-            }}
-          >
-            <span>◉</span>会话详情
-          </button>
-          <button
-            className="nav-item"
-            onClick={() => {
-              window.location.hash = "memory";
-            }}
-          >
-            <span>✎</span>记忆面板
-          </button>
-          <button className="nav-item active">
-            <span>⚙</span>设置
-          </button>
-        </nav>
-        <div className="local-state">
-          <span className="status-dot" />
-          本机服务
-          <small>{window.location.host}</small>
-        </div>
-      </aside>
+      <AppSidebar
+        active="settings"
+        onDashboard={() => {
+          window.location.hash = "sessions";
+        }}
+        onSession={() => {
+          window.location.hash = "sessions";
+        }}
+      />
 
       <main>
         <header className="page-header">
@@ -577,9 +558,10 @@ export function App() {
             <p>管理模型供应商，并为每个模型独立验证连接状态。</p>
           </div>
           <button
-            className="save-button"
+            className={`save-button${dirty ? " dirty" : ""}`}
             onClick={() => void save()}
             disabled={saving || loading}
+            title={dirty ? "有未保存的更改" : undefined}
           >
             {saving ? "保存中…" : "保存更改"}
           </button>
@@ -678,7 +660,18 @@ export function App() {
                         </button>
                         <button
                           className="delete-provider-button"
-                          onClick={() => removeProvider(selectedIndex)}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `确认删除供应商「${
+                                  selectedProvider.name ||
+                                  selectedProvider.id
+                                }」？相关角色会切换到其他供应商。`,
+                              )
+                            ) {
+                              removeProvider(selectedIndex);
+                            }
+                          }}
                           disabled={config.providers.length === 1}
                         >
                           删除供应商

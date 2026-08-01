@@ -82,6 +82,7 @@ export function SessionApp() {
     useState<RunBoundsPreview | null>(null);
   const chatStreamRef = useRef<HTMLDivElement>(null);
   const previousStatuses = useRef<Record<string, SessionStatus>>({});
+  const seenSeqs = useRef<Set<number>>(new Set());
 
   const selected = useMemo(
     () => sessions.find((session) => session.id === selectedId),
@@ -90,9 +91,14 @@ export function SessionApp() {
   const busy =
     selected?.status === "running" ||
     selected?.status === "waiting_permission";
-  const visibleEvents = replay
-    ? events.slice(0, replayCursor)
-    : events;
+  const visibleEvents = useMemo(
+    () => (replay ? events.slice(0, replayCursor) : events),
+    [replay, events, replayCursor],
+  );
+  const displayItems = useMemo(
+    () => buildDisplayItems(visibleEvents),
+    [visibleEvents],
+  );
   const latestTodos = useMemo(() => {
     const update = [...events]
       .reverse()
@@ -153,6 +159,7 @@ export function SessionApp() {
     setReplay(false);
     setReplayCursor(0);
     setResolvedPermissions(new Set());
+    seenSeqs.current = new Set();
     const source = new EventSource(
       `/api/sessions/${selectedId}/stream`,
     );
@@ -160,15 +167,9 @@ export function SessionApp() {
       const record = JSON.parse(
         messageEvent.data,
       ) as SessionEvent;
-      setEvents((current) => {
-        if (current.some((item) => item.seq === record.seq)) {
-          return current;
-        }
-        return [...current, record].sort(
-          (a, b) => a.seq - b.seq,
-        );
-      });
-      void refreshSessions();
+      if (seenSeqs.current.has(record.seq)) return;
+      seenSeqs.current.add(record.seq);
+      setEvents((current) => [...current, record]);
     };
     source.onerror = () => {
       if (source.readyState === EventSource.CLOSED) {
@@ -404,17 +405,17 @@ export function SessionApp() {
                       正在连接会话事件流…
                     </div>
                   )}
-                  {visibleEvents.map((record, index) => (
-                    <EventCard
-                      key={record.seq}
-                      record={record}
-                      allEvents={visibleEvents}
-                      index={index}
+                  {displayItems.map((item) => (
+                    <ItemCard
+                      key={item.seq}
+                      item={item}
                       locallyResolved={resolvedPermissions}
                       feedback={
-                        permissionFeedback[
-                          String(record.event.call?.id ?? "")
-                        ] ?? ""
+                        item.kind === "approval"
+                          ? (permissionFeedback[
+                              String(item.event.call.id)
+                            ] ?? "")
+                          : ""
                       }
                       onFeedback={(callId, value) =>
                         setPermissionFeedback((current) => ({
@@ -855,10 +856,187 @@ function RunBoundsConfirmation(props: {
   );
 }
 
-function EventCard(props: {
-  record: SessionEvent;
-  allEvents: SessionEvent[];
-  index: number;
+type DisplayItem =
+  | {
+      kind: "message";
+      seq: number;
+      ts: string;
+      author: "user" | "assistant";
+      text: string;
+      queued?: boolean;
+      started?: boolean;
+    }
+  | {
+      kind: "tool";
+      seq: number;
+      call: Record<string, any>;
+      result?: Record<string, any>;
+    }
+  | {
+      kind: "approval";
+      seq: number;
+      ts: string;
+      event: Record<string, any>;
+      resolvedByEvent: boolean;
+    }
+  | {
+      kind: "subtask";
+      seq: number;
+      start: Record<string, any>;
+      end?: Record<string, any>;
+    }
+  | { kind: "cost"; seq: number; event: Record<string, any> }
+  | { kind: "system"; seq: number; text: string; tone?: string };
+
+/**
+ * 事件流 → 显示条目：单次遍历完成 delta 合并、call/result 配对、
+ * 审批 resolved 判定，渲染层不再做 O(n) 回看。
+ */
+function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
+  const toolResults = new Map<string, Record<string, any>>();
+  const startedQueues = new Set<string>();
+  const taskEnds = new Map<string, Record<string, any>>();
+  for (const { event } of events) {
+    if (event.type === "tool_result") {
+      toolResults.set(String(event.callId), event);
+    } else if (event.type === "permission_denied") {
+      toolResults.set(String(event.call?.id), event);
+    } else if (event.type === "user" && event.queueId) {
+      startedQueues.add(String(event.queueId));
+    } else if (event.type === "task_end") {
+      taskEnds.set(String(event.taskId), event);
+    }
+  }
+
+  const items: DisplayItem[] = [];
+  const system = (seq: number, text: string, tone?: string) =>
+    items.push({ kind: "system", seq, text, tone });
+
+  for (let index = 0; index < events.length; index += 1) {
+    const { seq, ts, event } = events[index]!;
+    switch (event.type) {
+      case "user":
+        if (!event.queueId) {
+          items.push({
+            kind: "message",
+            seq,
+            ts,
+            author: "user",
+            text: String(event.text),
+          });
+        }
+        break;
+      case "user_queued":
+        items.push({
+          kind: "message",
+          seq,
+          ts,
+          author: "user",
+          text: String(event.text),
+          queued: true,
+          started: startedQueues.has(String(event.queueId)),
+        });
+        break;
+      case "text_delta": {
+        let text = String(event.text);
+        while (events[index + 1]?.event.type === "text_delta") {
+          index += 1;
+          text += String(events[index]!.event.text);
+        }
+        items.push({ kind: "message", seq, ts, author: "assistant", text });
+        break;
+      }
+      case "tool_call":
+        items.push({
+          kind: "tool",
+          seq,
+          call: event.call,
+          result: toolResults.get(String(event.call.id)),
+        });
+        break;
+      case "ask_permission":
+        items.push({
+          kind: "approval",
+          seq,
+          ts,
+          event,
+          resolvedByEvent: toolResults.has(String(event.call.id)),
+        });
+        break;
+      case "task_start":
+        items.push({
+          kind: "subtask",
+          seq,
+          start: event,
+          end: taskEnds.get(String(event.taskId)),
+        });
+        break;
+      case "cost_update":
+        items.push({ kind: "cost", seq, event });
+        break;
+      case "context_compacted":
+        system(seq, `上下文已压缩 · 保留 ${(event.ratio * 100).toFixed(1)}%`);
+        break;
+      case "model_fallback":
+        system(
+          seq,
+          `${event.role} 模型已降级：${event.from} → ${event.to}`,
+          "warning",
+        );
+        break;
+      case "run_started":
+        system(
+          seq,
+          `无人值守任务 #${event.taskId} 已启动 · ${event.permissionMode} 档`,
+          "running",
+        );
+        break;
+      case "wrapup_warning":
+        system(seq, `任务进入 ${event.level} 阶段 · ${event.message}`, "warning");
+        break;
+      case "run_finished":
+        system(
+          seq,
+          `无人值守任务 ${statusLabel(event.status)}${
+            event.reason ? ` · ${event.reason}` : ""
+          }`,
+          "done",
+        );
+        break;
+      case "need_user":
+        system(seq, `需要你的决定：${event.question}`, "warning");
+        break;
+      case "done":
+        system(seq, "✓ 本轮任务已完成", "done");
+        break;
+      case "error":
+        system(seq, `运行失败：${event.message}`, "error");
+        break;
+      case "interrupted":
+        system(seq, "任务已中止");
+        break;
+      case "notify":
+        system(
+          seq,
+          String(event.message),
+          event.level === "error"
+            ? "error"
+            : event.level === "warn"
+              ? "warning"
+              : undefined,
+        );
+        break;
+      default:
+        // tool_result / task_end / permission_denied 已并入对应卡片；
+        // todo_update / task_event 无需展示。
+        break;
+    }
+  }
+  return items;
+}
+
+function ItemCard(props: {
+  item: DisplayItem;
   locallyResolved: Set<string>;
   feedback: string;
   onFeedback: (callId: string, value: string) => void;
@@ -869,60 +1047,26 @@ function EventCard(props: {
     feedback?: string,
   ) => Promise<void>;
 }) {
-  const event = props.record.event;
-  const time = formatTime(props.record.ts);
-  if (event.type === "user") {
-    if (event.queueId) return null;
+  const { item } = props;
+
+  if (item.kind === "message") {
     return (
-      <article className="web-message user-message">
-        <span className="message-author">你 · {time}</span>
-        <RichText text={String(event.text)} />
-      </article>
-    );
-  }
-  if (event.type === "user_queued") {
-    const started = props.allEvents.some(
-      (later) =>
-        later.event.type === "user" &&
-        later.event.queueId === event.queueId,
-    );
-    return (
-      <article className="web-message user-message queued-message">
+      <article
+        className={`web-message ${
+          item.author === "user" ? "user-message" : "assistant-message"
+        }${item.queued ? " queued-message" : ""}`}
+      >
         <span className="message-author">
-          你 · {time} <em>{started ? "已处理" : "已排队"}</em>
+          {item.author === "user" ? "你" : "MyAgent"} · {formatTime(item.ts)}
+          {item.queued && <em>{item.started ? "已处理" : "已排队"}</em>}
         </span>
-        <RichText text={String(event.text)} />
+        <RichText text={item.text} />
       </article>
     );
   }
-  if (event.type === "text_delta") {
-    const prev = props.index > 0 ? props.allEvents[props.index - 1] : null;
-    if (prev && prev.event.type === "text_delta") return null;
-    let merged = String(event.text);
-    for (let i = props.index + 1; i < props.allEvents.length; i++) {
-      if (props.allEvents[i].event.type === "text_delta") {
-        merged += String(props.allEvents[i].event.text);
-      } else {
-        break;
-      }
-    }
-    return (
-      <article className="web-message assistant-message">
-        <span className="message-author">MyAgent · {time}</span>
-        <RichText text={merged} />
-      </article>
-    );
-  }
-  if (event.type === "tool_call") {
-    const result = props.allEvents
-      .slice(props.index + 1)
-      .find(
-        (candidate) =>
-          (candidate.event.type === "tool_result" &&
-            candidate.event.callId === event.call.id) ||
-          (candidate.event.type === "permission_denied" &&
-            candidate.event.call?.id === event.call.id),
-      )?.event;
+
+  if (item.kind === "tool") {
+    const { call, result } = item;
     const toolStateClass = !result
       ? "tool-running"
       : result.type === "permission_denied"
@@ -935,9 +1079,9 @@ function EventCard(props: {
         <summary>
           <span className="tool-chevron">›</span>
           <span className="tool-badge">
-            {String(event.call.tool).toLowerCase()}
+            {String(call.tool).toLowerCase()}
           </span>
-          <code>{event.call.target}</code>
+          <code>{call.target}</code>
           <span className="tool-state">
             {!result
               ? "运行中"
@@ -949,9 +1093,7 @@ function EventCard(props: {
           </span>
         </summary>
         <div className="tool-detail">
-          {event.call.purpose && (
-            <p>目的：{event.call.purpose}</p>
-          )}
+          {call.purpose && <p>目的：{call.purpose}</p>}
           {result?.summary && <p>{result.summary}</p>}
           {result?.reason && <p>{result.reason}</p>}
           {typeof result?.output === "string" && (
@@ -967,35 +1109,15 @@ function EventCard(props: {
       </details>
     );
   }
-  if (event.type === "tool_result") {
-    const hasCall = props.allEvents
-      .slice(0, props.index)
-      .some(
-        (candidate) =>
-          candidate.event.type === "tool_call" &&
-          candidate.event.call.id === event.callId,
-      );
-    if (hasCall) return null;
-  }
-  if (event.type === "ask_permission") {
+
+  if (item.kind === "approval") {
+    const { event } = item;
     const callId = String(event.call.id);
-    const resolvedByEvent = props.allEvents
-      .slice(props.index + 1)
-      .some(
-        (candidate) =>
-          (candidate.event.type === "tool_result" &&
-            candidate.event.callId === callId) ||
-          (candidate.event.type === "permission_denied" &&
-            candidate.event.call?.id === callId),
-      );
     const resolved =
-      resolvedByEvent ||
-      props.locallyResolved.has(callId);
+      item.resolvedByEvent || props.locallyResolved.has(callId);
     return (
       <section
-        className={`web-approval-card ${
-          resolved ? "resolved" : ""
-        }`}
+        className={`web-approval-card ${resolved ? "resolved" : ""}`}
       >
         <div className="approval-heading">
           <strong>⚠ 审批请求</strong>
@@ -1004,9 +1126,7 @@ function EventCard(props: {
           </span>
         </div>
         <p>{event.risk}</p>
-        <DiffOrOutput
-          text={String(event.detail || event.call.target)}
-        />
+        <DiffOrOutput text={String(event.detail || event.call.target)} />
         {!resolved ? (
           <>
             <div className="approval-actions">
@@ -1020,42 +1140,28 @@ function EventCard(props: {
               </button>
               <button
                 onClick={() =>
-                  void props.onPermission(
-                    callId,
-                    true,
-                    "session",
-                  )
+                  void props.onPermission(callId, true, "session")
                 }
               >
                 本次会话允许
               </button>
               <button
                 onClick={() =>
-                  void props.onPermission(
-                    callId,
-                    true,
-                    "project",
-                  )
+                  void props.onPermission(callId, true, "project")
                 }
               >
                 本项目允许
               </button>
               <button
                 onClick={() =>
-                  void props.onPermission(
-                    callId,
-                    true,
-                    "global",
-                  )
+                  void props.onPermission(callId, true, "global")
                 }
               >
                 全局允许
               </button>
               <button
                 className="reject-button"
-                onClick={() =>
-                  void props.onPermission(callId, false)
-                }
+                onClick={() => void props.onPermission(callId, false)}
               >
                 拒绝
               </button>
@@ -1064,10 +1170,7 @@ function EventCard(props: {
               <input
                 value={props.feedback}
                 onChange={(changeEvent) =>
-                  props.onFeedback(
-                    callId,
-                    changeEvent.target.value,
-                  )
+                  props.onFeedback(callId, changeEvent.target.value)
                 }
                 placeholder="拒绝并留言，例如：别用 npm，用 pnpm"
               />
@@ -1092,43 +1195,13 @@ function EventCard(props: {
       </section>
     );
   }
-  if (
-    event.type === "permission_denied" ||
-    event.type === "todo_update" ||
-    event.type === "task_event"
-  ) {
-    return null;
-  }
-  if (event.type === "cost_update") {
-    const cached = Number(event.cached ?? 0);
-    const input = Number(event.input ?? 0);
-    const cacheRate =
-      input > 0
-        ? Math.round((cached / input) * 100)
-        : 0;
-    return (
-      <div className="web-cost-line">
-        本轮 {formatTokens(event.input)} in /{" "}
-        {formatTokens(event.output)} out · 缓存命中{" "}
-        {cacheRate}% · 累计 {formatTokens(event.totalTokens)}
-        {event.totalCostCny
-          ? `（≈¥${Number(event.totalCostCny).toFixed(4)}）`
-          : ""}
-      </div>
-    );
-  }
-  if (event.type === "task_start") {
-    const end = props.allEvents
-      .slice(props.index + 1)
-      .find(
-        (candidate) =>
-          candidate.event.type === "task_end" &&
-          candidate.event.taskId === event.taskId,
-      )?.event;
+
+  if (item.kind === "subtask") {
+    const { start, end } = item;
     return (
       <details className="subtask-card">
         <summary>
-          ◇ <strong>{event.description}</strong>
+          ◇ <strong>{start.description}</strong>
           <span>
             子代理 explore ·{" "}
             {end
@@ -1146,75 +1219,24 @@ function EventCard(props: {
       </details>
     );
   }
-  if (event.type === "task_end") return null;
-  if (event.type === "context_compacted") {
+
+  if (item.kind === "cost") {
+    const { event } = item;
+    const cached = Number(event.cached ?? 0);
+    const input = Number(event.input ?? 0);
+    const cacheRate = input > 0 ? Math.round((cached / input) * 100) : 0;
     return (
-      <SystemLine>
-        上下文已压缩 · 保留{" "}
-        {(event.ratio * 100).toFixed(1)}%
-      </SystemLine>
+      <div className="web-cost-line">
+        本轮 {formatTokens(event.input)} in / {formatTokens(event.output)}{" "}
+        out · 缓存命中 {cacheRate}% · 累计 {formatTokens(event.totalTokens)}
+        {event.totalCostCny
+          ? `（≈¥${Number(event.totalCostCny).toFixed(4)}）`
+          : ""}
+      </div>
     );
   }
-  if (event.type === "model_fallback") {
-    return (
-      <SystemLine tone="warning">
-        {event.role} 模型已降级：{event.from} → {event.to}
-      </SystemLine>
-    );
-  }
-  if (event.type === "run_started") {
-    return (
-      <SystemLine tone="running">
-        无人值守任务 #{event.taskId} 已启动 ·{" "}
-        {event.permissionMode} 档
-      </SystemLine>
-    );
-  }
-  if (event.type === "wrapup_warning") {
-    return (
-      <SystemLine tone="warning">
-        任务进入 {event.level} 阶段 · {event.message}
-      </SystemLine>
-    );
-  }
-  if (event.type === "run_finished") {
-    return (
-      <SystemLine tone="done">
-        无人值守任务 {statusLabel(event.status)}
-        {event.reason ? ` · ${event.reason}` : ""}
-      </SystemLine>
-    );
-  }
-  if (event.type === "need_user") {
-    return (
-      <SystemLine tone="warning">
-        需要你的决定：{event.question}
-      </SystemLine>
-    );
-  }
-  if (event.type === "done") {
-    return (
-      <SystemLine tone="done">✓ 本轮任务已完成</SystemLine>
-    );
-  }
-  if (event.type === "error") {
-    return (
-      <SystemLine tone="error">
-        运行失败：{event.message}
-      </SystemLine>
-    );
-  }
-  if (event.type === "interrupted") {
-    return <SystemLine>任务已中止</SystemLine>;
-  }
-  if (event.type === "notify") {
-    return (
-      <SystemLine tone={event.level === "error" ? "error" : event.level === "warn" ? "warning" : undefined}>
-        {event.message}
-      </SystemLine>
-    );
-  }
-  return null;
+
+  return <SystemLine tone={item.tone}>{item.text}</SystemLine>;
 }
 
 function RichText(props: { text: string }) {
@@ -1253,12 +1275,13 @@ function renderInline(text: string): ReactNode[] {
 
 function DiffOrOutput(props: { text: string }) {
   const lines = props.text.split(/\r?\n/);
-  const isDiff = lines.some(
-    (line) =>
-      line.startsWith("+") ||
-      line.startsWith("-") ||
-      line.startsWith(" "),
+  // 同时存在 +/- 行（或带 diff 头）才按 diff 渲染，避免缩进文本误判
+  const hasMarker = lines.some(
+    (line) => line.startsWith("@@") || line.startsWith("diff --git"),
   );
+  const hasAdd = lines.some((line) => line.startsWith("+"));
+  const hasRemove = lines.some((line) => line.startsWith("-"));
+  const isDiff = hasMarker || (hasAdd && hasRemove);
   return (
     <pre className={isDiff ? "diff-output" : "tool-output"}>
       {lines.map((line, index) => (

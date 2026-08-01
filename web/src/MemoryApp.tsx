@@ -32,7 +32,10 @@ export function MemoryApp() {
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{
+    tone: "ok" | "error";
+    text: string;
+  } | null>(null);
   const selected = useMemo(
     () => documents.find((document) => document.id === selectedId),
     [documents, selectedId],
@@ -57,9 +60,10 @@ export function MemoryApp() {
         setDraft(current.content);
       }
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "读取记忆失败",
-      );
+      setNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : "读取记忆失败",
+      });
     } finally {
       setLoading(false);
     }
@@ -70,6 +74,13 @@ export function MemoryApp() {
     void load();
   }, []);
 
+  // 成功提示 4 秒后自动消失
+  useEffect(() => {
+    if (notice?.tone !== "ok") return;
+    const timer = window.setTimeout(() => setNotice(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   useEffect(() => {
     if (selected) setDraft(selected.content);
   }, [selectedId, selected?.content]);
@@ -77,7 +88,7 @@ export function MemoryApp() {
   async function save(content = draft) {
     if (!selected) return;
     setSaving(true);
-    setNotice("");
+    setNotice(null);
     try {
       const response = await fetch(`/api/memory/${selected.id}`, {
         method: "PUT",
@@ -96,11 +107,15 @@ export function MemoryApp() {
         ),
       );
       setDraft(content);
-      setNotice(content ? "记忆已保存。" : "记忆文档已清空。");
+      setNotice({
+        tone: "ok",
+        text: content ? "记忆已保存。" : "记忆文档已清空。",
+      });
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "保存失败",
-      );
+      setNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : "保存失败",
+      });
     } finally {
       setSaving(false);
     }
@@ -134,7 +149,9 @@ export function MemoryApp() {
             {saving ? "保存中…" : "保存更改"}
           </button>
         </header>
-        {notice && <div className="notice ok">{notice}</div>}
+        {notice && (
+          <div className={`notice ${notice.tone}`}>{notice.text}</div>
+        )}
         <div className="memory-workspace">
           <aside className="memory-list">
             {documents.map((document) => (
