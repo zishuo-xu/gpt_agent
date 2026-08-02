@@ -29,6 +29,8 @@ export class ContextManager {
   readonly #stateDir: string;
   #todos: TodoItem[] = [];
   #repoMap: RepoMap | null = null;
+  /** 跨项目记忆索引：会话内惰性生成一次，保证 system 前缀稳定（利于 prompt cache） */
+  #crossProjectIndex: string | null = null;
 
   constructor(options: ContextManagerOptions = {}) {
     this.#cwd = options.cwd;
@@ -82,8 +84,11 @@ export class ContextManager {
           path.join(this.#cwd, ".myagent", "memory", fileName),
         );
       }
+      // 跨项目索引是低频稳定内容：会话内只生成一次，避免每轮重扫破坏 system 前缀缓存
       const crossProjectIndex =
-        await this.#buildCrossProjectMemoryIndex();
+        this.#crossProjectIndex ??
+        (await this.#buildCrossProjectMemoryIndex());
+      this.#crossProjectIndex = crossProjectIndex;
       if (crossProjectIndex) {
         sections.push(
           [
@@ -104,22 +109,34 @@ export class ContextManager {
         }
       }
     }
+    // todos 随 TodoWrite 高频变化，绝不能进 system——否则 system 中一字节变化
+    // 会让其后整个 messages 历史的缓存失效。因此注入为独立消息，且插在
+    // 最后一条 user 消息之前，仅影响尾部缓存。
+    const preparedMessages = applySoftForgetting(
+      messages,
+      this.#keepRecentUserTurns,
+    );
     if (this.#todos.length > 0) {
-      sections.push(
-        [
-          "当前任务清单（以此快照为准，状态变化请调用 TodoWrite 全量更新）：",
-          ...this.#todos.map(
-            (todo) => `- [${todo.status}] ${todo.id}: ${todo.content}`,
-          ),
-        ].join("\n"),
-      );
+      const todosText = [
+        "当前任务清单（以此快照为准，状态变化请调用 TodoWrite 全量更新）：",
+        ...this.#todos.map(
+          (todo) => `- [${todo.status}] ${todo.id}: ${todo.content}`,
+        ),
+      ].join("\n");
+      const lastUserIndex = preparedMessages
+        .map((message, index) =>
+          message.role === "user" ? index : -1,
+        )
+        .filter((index) => index >= 0)
+        .at(-1);
+      preparedMessages.splice(lastUserIndex ?? 0, 0, {
+        role: "user",
+        content: todosText,
+      });
     }
     return {
       system: sections.join("\n\n"),
-      messages: applySoftForgetting(
-        messages,
-        this.#keepRecentUserTurns,
-      ),
+      messages: preparedMessages,
     };
   }
 

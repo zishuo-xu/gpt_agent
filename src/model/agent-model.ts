@@ -29,7 +29,7 @@ Respect tool errors and permission denials. If a tool is denied, choose a safer 
 The Bash tool runs in the project root. Avoid destructive commands, network writes, force pushes, and broad cleanup. Never use git reset, git clean, or git checkout -- to restore the workspace; if rollback is necessary, revert only your own still-current atomic edits and otherwise preserve the scene and report it.`;
 
 export class ConversationAgentModel implements AgentModel {
-  readonly #client: ModelClient;
+  #client: ModelClient;
   readonly #messages: ConversationMessage[];
   readonly #context: ContextManager;
   onTextDelta: ((text: string) => void) | undefined;
@@ -57,6 +57,18 @@ export class ConversationAgentModel implements AgentModel {
 
   addUserMessage(content: string): void {
     this.#messages.push({ role: "user", content });
+  }
+
+  /** 配置变更后替换主模型客户端（会话历史保持不变） */
+  setClient(client: ModelClient): void {
+    this.#client = client;
+  }
+
+  /** 配置变更后替换压缩模型客户端 */
+  setCompactionClient(client: ModelClient): void {
+    if (this.#compaction) {
+      this.#compaction = { ...this.#compaction, client };
+    }
   }
 
   setTodos(todos: TodoItem[]): void {

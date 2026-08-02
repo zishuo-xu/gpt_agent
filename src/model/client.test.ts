@@ -161,6 +161,76 @@ test("Anthropic tool_use 与 tool_result 正确往返", async () => {
   assert.equal(requestBody.tools[0].input_schema.type, "object");
 });
 
+test("模型误用 camelCase 键名时仍能解析，历史回传保持 wire 格式", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    provider("openai-compatible"),
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "",
+                tool_calls: [
+                  {
+                    id: "call-2",
+                    type: "function",
+                    function: {
+                      name: "Read",
+                      // 模型模仿历史键名后可能发出 camelCase
+                      arguments: JSON.stringify({ filePath: "src/b.ts" }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+
+  const result = await client.complete({
+    system: "system",
+    messages: [
+      { role: "user", content: "先读 a 再读 b" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call-1",
+            tool: "Read",
+            target: "src/a.ts",
+            args: { filePath: "src/a.ts", limit: 30 },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-1",
+        toolName: "Read",
+        content: "content of a",
+        isError: false,
+      },
+    ],
+    signal: new AbortController().signal,
+  });
+
+  // camelCase 入参被容错解析
+  assert.deepEqual(result.toolCalls[0]?.args, { filePath: "src/b.ts" });
+  // 历史回传必须是 schema 声明的 wire 键名，防止模型模仿 camelCase
+  const echoed = JSON.parse(
+    requestBody.messages[2].tool_calls[0].function.arguments,
+  );
+  assert.deepEqual(echoed, { file_path: "src/a.ts", limit: 30 });
+});
+
 test("禁用供应商、缺少 Key 和未知模型会在请求前失败", () => {
   const disabled = provider("anthropic");
   disabled.enabled = false;

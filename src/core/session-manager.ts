@@ -104,7 +104,21 @@ export class AgentSessionManager {
       for (const session of this.#sessions.values()) {
         session.applyConfigChange(config);
       }
+      // 重建模型客户端：API Key / 模型 / fallback 等配置变更即时生效
+      void this.#refreshModelClients().catch(() => undefined);
     });
+  }
+
+  /** 用最新配置重建三个角色客户端并替换到所有运行中会话 */
+  async #refreshModelClients(): Promise<void> {
+    const [main, compact, explore] = await Promise.all([
+      this.#createRoleClient("main"),
+      this.#createRoleClient("cheap"),
+      this.#createRoleClient("explore"),
+    ]);
+    for (const session of this.#sessions.values()) {
+      session.applyModelConfigChange({ main, compact, explore });
+    }
   }
 
   list(): AgentSessionSummary[] {
@@ -351,15 +365,25 @@ export class AgentSessionManager {
     timeout.unref();
     try {
       const response = await client.complete({
-        system: "你是一个标题生成器。根据用户的请求，生成一个简短的会话标题（10个字以内）。只返回标题文本，不要任何解释或标点。",
+        system:
+          "你是一个标题生成器。根据用户的请求，生成一个简短的中文会话标题（10个字以内）。只返回标题文本，不要任何解释、标点或引号。",
         messages: [{ role: "user", content: userText }],
         signal: controller.signal,
       });
-      const title = response.text.trim().replace(/[\n"'`。，,；;：:！!？?]/g, "").slice(0, 20);
-      if (title) {
-        session.title = title;
+      const title = clipTitle(response.text);
+      // 用户请求是中文但模型返回了纯英文标题时，回退到请求原文前缀
+      const fallback =
+        title && hasChinese(userText) && !hasChinese(title)
+          ? titleFrom(userText)
+          : title;
+      if (fallback) {
+        session.title = fallback;
         this.#queueIndexWrite();
       }
+    } catch {
+      // 生成失败时用首条消息的前缀兜底，避免标题永远停在「新会话」
+      session.title = titleFrom(userText);
+      this.#queueIndexWrite();
     } finally {
       clearTimeout(timeout);
     }
@@ -568,6 +592,29 @@ function stringify(value: unknown): string {
 function titleFrom(message: string): string {
   const compact = message.replace(/\s+/g, " ").trim();
   return compact.length > 36 ? `${compact.slice(0, 36)}…` : compact;
+}
+
+/** 是否包含 CJK 字符（用于标题语言守卫） */
+function hasChinese(text: string): boolean {
+  return /[\u4e00-\u9fff]/.test(text);
+}
+
+/** 清洗标点并按长度智能截断：优先在单词/分词边界切断，避免英文残词 */
+function clipTitle(text: string, max = 20): string {
+  const cleaned = text
+    .replace(/[\n"'`。，,；;：:！!？?]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  if (cleaned.length <= max) return cleaned;
+  const cut = cleaned.slice(0, max);
+  const boundary = Math.max(
+    cut.lastIndexOf(" "),
+    cut.lastIndexOf("-"),
+    cut.lastIndexOf("/"),
+  );
+  if (boundary > max * 0.4) return `${cut.slice(0, boundary).trimEnd()}…`;
+  return `${cut.trimEnd()}…`;
 }
 
 async function atomicWriteJson(

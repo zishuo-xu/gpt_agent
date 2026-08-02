@@ -81,6 +81,7 @@ export class AgentSession {
   readonly #model: ConversationAgentModel;
   readonly #permissions: PermissionEngine;
   readonly #tools: ToolExecutor;
+  readonly #taskRunner: TaskRunner | undefined;
   readonly #store: SessionStore;
   readonly #traceStore: TraceStore;
   readonly #events: AgentSessionEvent[] = [];
@@ -194,6 +195,7 @@ export class AgentSession {
           recordTrace: (trace) => this.#traceStore.record(trace),
         })
       : undefined;
+    this.#taskRunner = taskRunner;
     this.#tools = new ToolExecutor(
       options.cwd,
       undefined,
@@ -329,6 +331,17 @@ export class AgentSession {
       ...config.permissions.rules,
     ]);
     this.#approvalTimeoutMs = config.permissions.approvalTimeoutMs;
+  }
+
+  /** 配置变更后替换各角色模型客户端（API Key、模型、fallback 等即时生效） */
+  applyModelConfigChange(clients: {
+    main?: ModelClient | undefined;
+    compact?: ModelClient | undefined;
+    explore?: ModelClient | undefined;
+  }): void {
+    if (clients.main) this.#model.setClient(clients.main);
+    if (clients.compact) this.#model.setCompactionClient(clients.compact);
+    if (clients.explore) this.#taskRunner?.setClient(clients.explore);
   }
 
   setPermissionMode(mode: PermissionMode): void {

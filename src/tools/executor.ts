@@ -350,17 +350,18 @@ function validateArgs(call: ToolCall): string | undefined {
   if (call.tool === "Read" || call.tool === "Edit" || call.tool === "MultiEdit" || call.tool === "Write") {
     const filePath = (args as { filePath?: unknown }).filePath;
     if (typeof filePath !== "string" || filePath.trim() === "") {
-      return `参数错误：${call.tool} 需要非空的 filePath 参数。请提供要操作的文件路径，例如 "src/index.ts"。`;
+      // 报错文案使用 schema 的 wire 键名，避免模型从错误反馈中学到 camelCase
+      return `参数错误：${call.tool} 需要非空的 file_path 参数。请提供要操作的文件路径，例如 "src/index.ts"。`;
     }
   }
   if (call.tool === "Edit" || call.tool === "MultiEdit") {
     if (call.tool === "Edit") {
       const { oldString, newString } = args as { oldString?: unknown; newString?: unknown };
       if (typeof oldString !== "string" || oldString === "") {
-        return "参数错误：Edit 需要非空的 oldString 参数（要被替换的原文本）。";
+        return "参数错误：Edit 需要非空的 old_string 参数（要被替换的原文本）。";
       }
       if (typeof newString !== "string") {
-        return "参数错误：Edit 需要 newString 参数（替换后的文本）。";
+        return "参数错误：Edit 需要 new_string 参数（替换后的文本）。";
       }
     }
     if (call.tool === "MultiEdit") {

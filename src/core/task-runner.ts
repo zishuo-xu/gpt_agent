@@ -47,7 +47,7 @@ let activeRunners = 0;
 export class TaskRunner {
   readonly #cwd: string;
   readonly #bus: AgentEventBus;
-  readonly #client: ModelClient;
+  #client: ModelClient;
   readonly #mode: PermissionMode | (() => PermissionMode);
   readonly #depth: number;
   readonly #maxDepth: number;
@@ -67,6 +67,11 @@ export class TaskRunner {
     this.#approve = options.approve;
     this.#reportUsage = options.reportUsage;
     this.#recordTrace = options.recordTrace;
+  }
+
+  /** 配置变更后替换子代理模型客户端 */
+  setClient(client: ModelClient): void {
+    this.#client = client;
   }
 
   async run(

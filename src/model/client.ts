@@ -355,7 +355,9 @@ function toOpenAiMessage(message: ConversationMessage): Record<string, unknown> 
             type: "function",
             function: {
               name: call.tool,
-              arguments: JSON.stringify(call.args),
+              arguments: JSON.stringify(
+                wireToolArgs(call.tool, asRecord(call.args)),
+              ),
             },
           })),
         }),
@@ -380,7 +382,7 @@ function toAnthropicMessages(
             type: "tool_use",
             id: call.id,
             name: call.tool,
-            input: call.args,
+            input: wireToolArgs(call.tool, asRecord(call.args)),
           })),
         ],
       });
@@ -418,13 +420,18 @@ function createToolCall(
   };
 }
 
+/** 同时接受 wire 格式（file_path）与内部格式（filePath），防止模型模仿历史中的键名 */
+function firstDefined(...values: unknown[]): unknown {
+  return values.find((value) => value !== undefined);
+}
+
 function normalizeToolArgs(
   tool: ToolName,
   args: Record<string, unknown>,
 ): Record<string, unknown> {
   if (tool === "Read") {
     return {
-      filePath: args.file_path,
+      filePath: firstDefined(args.file_path, args.filePath),
       ...(args.offset === undefined ? {} : { offset: args.offset }),
       ...(args.limit === undefined ? {} : { limit: args.limit }),
     };
@@ -434,18 +441,18 @@ function normalizeToolArgs(
       pattern: args.pattern,
       ...(args.path === undefined ? {} : { path: args.path }),
       ...(args.glob === undefined ? {} : { glob: args.glob }),
-      ...(args.max_results === undefined
+      ...(firstDefined(args.max_results, args.maxResults) === undefined
         ? {}
-        : { maxResults: args.max_results }),
+        : { maxResults: firstDefined(args.max_results, args.maxResults) }),
     };
   }
   if (tool === "Glob") {
     return {
       pattern: args.pattern,
       ...(args.path === undefined ? {} : { path: args.path }),
-      ...(args.max_results === undefined
+      ...(firstDefined(args.max_results, args.maxResults) === undefined
         ? {}
-        : { maxResults: args.max_results }),
+        : { maxResults: firstDefined(args.max_results, args.maxResults) }),
     };
   }
   if (tool === "TodoWrite") return { todos: args.todos };
@@ -453,41 +460,127 @@ function normalizeToolArgs(
     return {
       description: args.description,
       prompt: args.prompt,
-      ...(args.writable === undefined
-        ? {}
-        : { writable: args.writable }),
+      ...(args.writable === undefined ? {} : { writable: args.writable }),
     };
   }
   if (tool === "Edit") {
     return {
-      filePath: args.file_path,
-      oldString: args.old_string,
-      newString: args.new_string,
-      ...(args.replace_all === undefined ? {} : { replaceAll: args.replace_all }),
+      filePath: firstDefined(args.file_path, args.filePath),
+      oldString: firstDefined(args.old_string, args.oldString),
+      newString: firstDefined(args.new_string, args.newString),
+      ...(firstDefined(args.replace_all, args.replaceAll) === undefined
+        ? {}
+        : { replaceAll: firstDefined(args.replace_all, args.replaceAll) }),
     };
   }
   if (tool === "MultiEdit") {
     return {
-      filePath: args.file_path,
+      filePath: firstDefined(args.file_path, args.filePath),
       edits: asArray(args.edits).map((edit) => {
         const item = asRecord(edit);
         return {
-          oldString: item.old_string,
-          newString: item.new_string,
-          ...(item.replace_all === undefined
+          oldString: firstDefined(item.old_string, item.oldString),
+          newString: firstDefined(item.new_string, item.newString),
+          ...(firstDefined(item.replace_all, item.replaceAll) === undefined
             ? {}
-            : { replaceAll: item.replace_all }),
+            : { replaceAll: firstDefined(item.replace_all, item.replaceAll) }),
         };
       }),
     };
   }
   if (tool === "Write") {
-    return { filePath: args.file_path, content: args.content };
+    return {
+      filePath: firstDefined(args.file_path, args.filePath),
+      content: args.content,
+    };
   }
   if (tool === "Bash") {
     return {
       command: args.command,
-      ...(args.timeout_ms === undefined ? {} : { timeoutMs: args.timeout_ms }),
+      ...(firstDefined(args.timeout_ms, args.timeoutMs) === undefined
+        ? {}
+        : { timeoutMs: firstDefined(args.timeout_ms, args.timeoutMs) }),
+    };
+  }
+  return args;
+}
+
+/**
+ * normalizeToolArgs 的逆映射：历史回传给模型时必须用 schema 声明的
+ * wire 键名（file_path 等），否则模型会模仿上下文中的 camelCase 键名。
+ */
+function wireToolArgs(
+  tool: ToolName,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  if (tool === "Read") {
+    return {
+      file_path: args.filePath,
+      ...(args.offset === undefined ? {} : { offset: args.offset }),
+      ...(args.limit === undefined ? {} : { limit: args.limit }),
+    };
+  }
+  if (tool === "Grep") {
+    return {
+      pattern: args.pattern,
+      ...(args.path === undefined ? {} : { path: args.path }),
+      ...(args.glob === undefined ? {} : { glob: args.glob }),
+      ...(args.maxResults === undefined
+        ? {}
+        : { max_results: args.maxResults }),
+    };
+  }
+  if (tool === "Glob") {
+    return {
+      pattern: args.pattern,
+      ...(args.path === undefined ? {} : { path: args.path }),
+      ...(args.maxResults === undefined
+        ? {}
+        : { max_results: args.maxResults }),
+    };
+  }
+  if (tool === "TodoWrite") return { todos: args.todos };
+  if (tool === "Task") {
+    return {
+      description: args.description,
+      prompt: args.prompt,
+      ...(args.writable === undefined ? {} : { writable: args.writable }),
+    };
+  }
+  if (tool === "Edit") {
+    return {
+      file_path: args.filePath,
+      old_string: args.oldString,
+      new_string: args.newString,
+      ...(args.replaceAll === undefined
+        ? {}
+        : { replace_all: args.replaceAll }),
+    };
+  }
+  if (tool === "MultiEdit") {
+    return {
+      file_path: args.filePath,
+      edits: asArray(args.edits).map((edit) => {
+        const item = asRecord(edit);
+        return {
+          old_string: item.oldString,
+          new_string: item.newString,
+          ...(item.replaceAll === undefined
+            ? {}
+            : { replace_all: item.replaceAll }),
+        };
+      }),
+    };
+  }
+  if (tool === "Write") {
+    return { file_path: args.filePath, content: args.content };
+  }
+  if (tool === "Bash") {
+    return {
+      command: args.command,
+      ...(args.timeoutMs === undefined
+        ? {}
+        : { timeout_ms: args.timeoutMs }),
     };
   }
   return args;
