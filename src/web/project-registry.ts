@@ -44,8 +44,10 @@ export class ProjectRegistry {
 
   constructor(options: { defaultCwd: string; stateDir?: string; homeDir?: string }) {
     this.#defaultCwd = options.defaultCwd;
-    this.#stateDir = options.stateDir ?? path.join(os.homedir(), ".myagent");
     this.#homeDir = options.homeDir ?? os.homedir();
+    // stateDir 默认与 homeDir 对齐（生产 os.homedir()/.myagent；测试可传 tmp 隔离）
+    this.#stateDir =
+      options.stateDir ?? path.join(this.#homeDir, ".myagent");
   }
 
   get defaultCwd(): string {
@@ -76,6 +78,7 @@ export class ProjectRegistry {
     } catch {
       keys = [];
     }
+    const lobbyCwd = this.lobbyCwd();
     for (const key of keys) {
       try {
         const raw = await readFile(
@@ -88,6 +91,8 @@ export class ProjectRegistry {
           updatedAt?: string;
         };
         if (typeof meta.cwd !== "string" || !meta.cwd) continue;
+        // 大厅是合成项目（key=lobby），其真实临时目录不重复列出
+        if (meta.cwd === lobbyCwd) continue;
         byCwd.set(meta.cwd, {
           key,
           name: meta.name ?? path.basename(meta.cwd),
@@ -119,6 +124,7 @@ export class ProjectRegistry {
     });
     const sessionManager = new WebSessionManager(cwd, configService, {
       lobby: true,
+      stateDir: this.#stateDir,
     });
     const resources: ProjectResources = { configService, sessionManager };
     this.#cache.set(cwd, resources);
@@ -130,7 +136,9 @@ export class ProjectRegistry {
     const cached = this.#cache.get(cwd);
     if (cached) return cached;
     const configService = new ConfigService({ cwd, homeDir: this.#homeDir });
-    const sessionManager = new WebSessionManager(cwd, configService);
+    const sessionManager = new WebSessionManager(cwd, configService, {
+      stateDir: this.#stateDir,
+    });
     await sessionManager.restore();
     const resources: ProjectResources = { configService, sessionManager };
     this.#cache.set(cwd, resources);

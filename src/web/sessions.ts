@@ -33,9 +33,13 @@ export class WebSessionManager extends AgentSessionManager {
   constructor(
     cwd: string,
     configService: ConfigService,
-    options: { lobby?: boolean } = {},
+    options: { lobby?: boolean; stateDir?: string } = {},
   ) {
-    super({ cwd, configService });
+    super({
+      cwd,
+      configService,
+      ...(options.stateDir ? { stateDir: options.stateDir } : {}),
+    });
     this.#lobby = options.lobby === true;
   }
 
