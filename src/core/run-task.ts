@@ -223,6 +223,10 @@ export function compileBounds(
 } {
   if (!bounds?.trim()) return { hardRules: [], semanticBounds: [] };
   const paths = new Set<string>();
+  // 全量保护语义："不改任何文件 / 所有文件 / 整个项目 / 全部" → 禁止一切写操作
+  if (/(任何文件|所有文件|全部文件|整个项目|全部)/.test(bounds)) {
+    paths.add("*");
+  }
   for (const match of bounds.matchAll(
     /(?:不改|不要改|禁止修改|不动|排除)\s*([A-Za-z0-9_.*/-]+\/?)/g,
   )) {

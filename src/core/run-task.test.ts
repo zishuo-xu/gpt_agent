@@ -67,6 +67,24 @@ test("/run 解析引号参数、未来时间与路径硬边界", () => {
   assert.deepEqual(task.semanticBounds, ["不动数据库 schema"]);
 });
 
+test("/run 边界为“不改任何文件”时生成全量写保护", () => {
+  const task = parseRunCommand(
+    '/run 检查代码 --bounds "不改任何文件" --permission trust',
+  );
+  assert.deepEqual(
+    task.hardRules.map((rule) => rule.pattern),
+    [
+      "Edit(**)",
+      "MultiEdit(**)",
+      "Write(**)",
+    ],
+  );
+  const projectWide = parseRunCommand(
+    '/run 检查代码 --bounds "不改整个项目"',
+  );
+  assert.equal(projectWide.hardRules.length, 3);
+});
+
 test("TaskBox 按 30/10/2 分钟阶段收尾并在截止时硬停", () => {
   const deadline = new Date("2026-07-30T13:00:00.000Z");
   const options: RunTaskOptions = {
