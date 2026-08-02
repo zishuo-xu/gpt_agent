@@ -17,6 +17,12 @@ type SessionStatus =
   | "error"
   | "interrupted";
 
+interface ProjectEntry {
+  key: string;
+  name: string;
+  cwd: string;
+}
+
 interface Todo {
   id: string;
   content: string;
@@ -65,6 +71,8 @@ const statusMeta: Record<
 export function SessionApp() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedId, setSelectedId] = useState("");
+  const [projects, setProjects] = useState<ProjectEntry[]>([]);
+  const [currentProject, setCurrentProject] = useState("");
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [message, setMessage] = useState("");
   const [permissionMode, setPermissionMode] =
@@ -109,7 +117,7 @@ export function SessionApp() {
   }, [events, selected]);
 
   async function refreshSessions() {
-    const response = await fetch("/api/sessions");
+    const response = await fetch(projectUrl("/api/sessions"));
     if (!response.ok) return;
     const payload = await response.json();
     const next = (payload.sessions ?? []) as SessionSummary[];
@@ -128,12 +136,20 @@ export function SessionApp() {
   }
 
   async function deleteSession(id: string) {
-    const response = await fetch(`/api/sessions/${id}`, {
-      method: "DELETE",
-    });
+    const response = await fetch(
+      projectUrl(`/api/sessions/${id}`),
+      {
+        method: "DELETE",
+      },
+    );
     if (!response.ok) return;
     if (selectedId === id) setSelectedId("");
     await refreshSessions();
+  }
+
+  function projectUrl(path: string): string {
+    const joiner = path.includes("?") ? "&" : "?";
+    return `${path}${joiner}project=${encodeURIComponent(currentProject)}`;
   }
 
   useEffect(() => {
@@ -143,7 +159,24 @@ export function SessionApp() {
       1500,
     );
     return () => window.clearInterval(timer);
+  }, [currentProject]);
+
+  useEffect(() => {
+    void (async () => {
+      const response = await fetch("/api/projects");
+      if (!response.ok) return;
+      const payload = await response.json();
+      setProjects((payload.projects ?? []) as ProjectEntry[]);
+      setCurrentProject((current) => current || (payload.defaultKey ?? ""));
+    })();
   }, []);
+
+  function switchProject(key: string) {
+    setCurrentProject(key);
+    setSelectedId("");
+    setSessions([]);
+    setEvents([]);
+  }
 
   useEffect(() => {
     const waiting = sessions.filter(
@@ -170,7 +203,7 @@ export function SessionApp() {
     setResolvedPermissions(new Set());
     seenSeqs.current = new Set();
     const source = new EventSource(
-      `/api/sessions/${selectedId}/stream`,
+      projectUrl(`/api/sessions/${selectedId}/stream`),
     );
     source.onmessage = (messageEvent) => {
       const record = JSON.parse(
@@ -227,8 +260,8 @@ export function SessionApp() {
       }
       const response = await fetch(
         selectedId
-          ? `/api/sessions/${selectedId}/input`
-          : "/api/sessions",
+          ? projectUrl(`/api/sessions/${selectedId}/input`)
+          : projectUrl("/api/sessions"),
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -270,7 +303,7 @@ export function SessionApp() {
     feedback?: string,
   ) {
     const response = await fetch(
-      `/api/sessions/${selectedId}/permission`,
+      projectUrl(`/api/sessions/${selectedId}/permission`),
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -297,7 +330,7 @@ export function SessionApp() {
 
   async function interrupt() {
     const response = await fetch(
-      `/api/sessions/${selectedId}/interrupt`,
+      projectUrl(`/api/sessions/${selectedId}/interrupt`),
       { method: "POST" },
     );
     const payload = await response.json();
@@ -554,14 +587,30 @@ export function SessionApp() {
                   所有 Agent 会话的实时状态 · 点击卡片进入详情
                 </p>
               </div>
-              <button
-                className="save-button"
-                onClick={() =>
-                  setShowNewTask((value) => !value)
-                }
-              >
-                ＋ 新会话
-              </button>
+              <div className="sessions-header-actions">
+                {projects.length > 1 && (
+                  <select
+                    className="project-switcher"
+                    value={currentProject}
+                    onChange={(event) => switchProject(event.target.value)}
+                    title="切换项目"
+                  >
+                    {projects.map((project) => (
+                      <option value={project.key} key={project.key}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  className="save-button"
+                  onClick={() =>
+                    setShowNewTask((value) => !value)
+                  }
+                >
+                  ＋ 新会话
+                </button>
+              </div>
             </header>
             {error && (
               <div className="notice error">{error}</div>

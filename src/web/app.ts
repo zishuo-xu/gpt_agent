@@ -16,6 +16,7 @@ import {
   type MemoryDocumentId,
 } from "./memory.js";
 import { parseRunCommand } from "../core/run-task.js";
+import { ProjectRegistry } from "./project-registry.js";
 
 export function createWebApp(
   configService: ConfigService,
@@ -28,9 +29,57 @@ export function createWebApp(
     ...(sessionManager ? { sessions: sessionManager } : {}),
   });
 
+  // 多项目注册表：同一 Web 进程可切换多个项目（按 cwd 缓存各自的管理器/配置）
+  const registry = new ProjectRegistry({
+    defaultCwd: configService.cwd,
+    homeDir: configService.homeDir,
+  });
+
+  /** 解析请求指向的项目资源；未传 project 时用启动目录项目（向后兼容）。 */
+  async function resolveProject(context: {
+    req: { query: (k: string) => string | undefined };
+  }): Promise<{
+    configService: ConfigService;
+    sessionManager: WebSessionManager;
+    memoryService: MemoryService;
+  }> {
+    const key = context.req.query("project");
+    if (!key) {
+      // 未指定项目：默认（启动目录）单例
+      if (!sessionManager) {
+        return {
+          configService,
+          sessionManager: undefined as unknown as WebSessionManager,
+          memoryService,
+        };
+      }
+      return { configService, sessionManager, memoryService };
+    }
+    const { cwd, resources } = await registry.resolve(key);
+    return {
+      configService: resources.configService,
+      sessionManager: resources.sessionManager,
+      memoryService: new MemoryService({
+        cwd,
+        homeDir: configService.homeDir,
+        sessions: resources.sessionManager,
+      }),
+    };
+  }
+
   app.get("/api/health", (context) =>
     context.json({ ok: true, service: "myagent-web" }),
   );
+
+  app.get("/api/projects", async (context) => {
+    const projects = await registry.listProjects();
+    const defaultKey = ProjectRegistry.projectKey(registry.defaultCwd);
+    return context.json({
+      projects,
+      defaultKey,
+      currentKey: context.req.query("project") ?? defaultKey,
+    });
+  });
 
   app.get("/api/config/schema", (context) =>
     context.json({ fields: CONFIG_SCHEMA }),
@@ -38,17 +87,19 @@ export function createWebApp(
 
   app.get("/api/config", async (context) => {
     const scope = parseScope(context.req.query("scope"));
+    const target = await resolveProject(context);
     return context.json({
       scope,
-      config: await configService.readPublic(scope),
+      config: await target.configService.readPublic(scope),
     });
   });
 
   app.put("/api/config", async (context) => {
     try {
       const scope = parseScope(context.req.query("scope"));
+      const target = await resolveProject(context);
       const incoming = await context.req.json();
-      const config = await configService.write(scope, incoming);
+      const config = await target.configService.write(scope, incoming);
       return context.json({ scope, config, saved: true });
     } catch (error) {
       if (error instanceof ConfigValidationError) {
@@ -63,11 +114,12 @@ export function createWebApp(
 
   app.post("/api/config/test", async (context) => {
     const scope = parseScope(context.req.query("scope"));
+    const target = await resolveProject(context);
     const body = (await context.req.json()) as {
       providerId?: string;
       model?: string;
     };
-    const config = await configService.read(scope);
+    const config = await target.configService.read(scope);
     const provider = config.providers.find(
       (candidate) => candidate.id === body.providerId,
     );
@@ -88,16 +140,19 @@ export function createWebApp(
     return context.json(result, result.ok ? 200 : 422);
   });
 
-  app.get("/api/sessions", (context) => {
-    if (!sessionManager) return context.json({ sessions: [] });
-    return context.json({ sessions: sessionManager.list() });
+  app.get("/api/sessions", async (context) => {
+    const target = await resolveProject(context);
+    if (!target.sessionManager) return context.json({ sessions: [] });
+    return context.json({ sessions: target.sessionManager.list() });
   });
 
-  app.get("/api/memory", async (context) =>
-    context.json(await memoryService.list()),
-  );
+  app.get("/api/memory", async (context) => {
+    const target = await resolveProject(context);
+    return context.json(await target.memoryService.list());
+  });
 
   app.put("/api/memory/:id", async (context) => {
+    const target = await resolveProject(context);
     const id = context.req.param("id") as MemoryDocumentId;
     if (
       !["preferences", "conventions", "pitfalls", "decisions"].includes(
@@ -112,11 +167,13 @@ export function createWebApp(
     }
     return context.json({
       saved: true,
-      document: await memoryService.write(id, body.content),
+      document: await target.memoryService.write(id, body.content),
     });
   });
 
   app.post("/api/sessions", async (context) => {
+    const target = await resolveProject(context);
+    const sessionManager = target.sessionManager;
     if (!sessionManager) {
       return context.json({ error: "会话服务未启用" }, 503);
     }
@@ -162,7 +219,8 @@ export function createWebApp(
   });
 
   app.post("/api/sessions/:id/input", async (context) => {
-    const session = sessionManager?.get(context.req.param("id"));
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
     if (!session) return context.json({ error: "会话不存在" }, 404);
     try {
       const body = (await context.req.json()) as {
@@ -231,7 +289,8 @@ export function createWebApp(
   });
 
   app.post("/api/sessions/:id/permission", async (context) => {
-    const session = sessionManager?.get(context.req.param("id"));
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
     if (!session) return context.json({ error: "会话不存在" }, 404);
     const body = (await context.req.json()) as {
       callId?: string;
@@ -254,8 +313,9 @@ export function createWebApp(
       : context.json({ error: "审批已失效或不存在" }, 409);
   });
 
-  app.post("/api/sessions/:id/interrupt", (context) => {
-    const session = sessionManager?.get(context.req.param("id"));
+  app.post("/api/sessions/:id/interrupt", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
     if (!session) return context.json({ error: "会话不存在" }, 404);
     return session.interrupt()
       ? context.json({ interrupted: true })
@@ -263,17 +323,19 @@ export function createWebApp(
   });
 
   app.delete("/api/sessions/:id", async (context) => {
-    if (!sessionManager) {
+    const target = await resolveProject(context);
+    if (!target.sessionManager) {
       return context.json({ error: "会话服务不可用" }, 503);
     }
-    const deleted = await sessionManager.deleteSession(context.req.param("id"));
+    const deleted = await target.sessionManager.deleteSession(context.req.param("id"));
     return deleted
       ? context.json({ deleted: true })
       : context.json({ error: "会话不存在" }, 404);
   });
 
-  app.get("/api/sessions/:id/stream", (context) => {
-    const session = sessionManager?.get(context.req.param("id"));
+  app.get("/api/sessions/:id/stream", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
     if (!session) return context.json({ error: "会话不存在" }, 404);
     const after = Number(context.req.query("after") ?? "0") || 0;
     return streamSSE(context, async (stream) => {

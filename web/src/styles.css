@@ -1032,6 +1032,29 @@ textarea:focus {
   padding-bottom: 20px;
 }
 
+.sessions-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-switcher {
+  background: #14181f;
+  color: #e7ebf1;
+  border: 1px solid #262c38;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  max-width: 220px;
+}
+
+.project-switcher:hover {
+  border-color: #38435a;
+}
+
+
 .title-with-status,
 .header-actions {
   display: flex;
