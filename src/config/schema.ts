@@ -92,6 +92,8 @@ export interface ConfigFieldSchema {
   step?: number;
   options?: Array<{ label: string; value: string }>;
   hot?: boolean;
+  /** 复合字段的渲染器标识，前端按此分派专用组件 */
+  renderer?: "provider" | "role-models" | "permissions" | "context";
 }
 
 export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
@@ -101,6 +103,7 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     title: "模型渠道",
     description: "支持 Anthropic 与任意 OpenAI-compatible 第三方端点。",
     hot: true,
+    renderer: "provider",
   },
   {
     key: "models",
@@ -108,6 +111,7 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     title: "角色模型",
     description: "为主循环、压缩摘要和子代理探索分别选择模型。",
     hot: true,
+    renderer: "role-models",
   },
   {
     key: "permissions",
@@ -115,12 +119,14 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     title: "权限与审批",
     description: "会话默认档位、allow/ask/deny 规则与审批超时。",
     hot: true,
+    renderer: "permissions",
   },
   {
     key: "context",
     type: "context",
     title: "上下文",
     description: "硬压缩触发阈值与压缩后保留的最近对话轮数。",
+    renderer: "context",
   },
   {
     key: "server.host",

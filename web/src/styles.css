@@ -1189,6 +1189,32 @@ textarea:focus {
   gap: 14px;
 }
 
+.dashboard-card-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.session-card-delete {
+  cursor: pointer;
+  color: #6b7688;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.dashboard-card:hover .session-card-delete {
+  opacity: 1;
+}
+
+.session-card-delete:hover {
+  color: #e05d5d;
+}
+
 .dashboard-card h2 {
   margin: 0;
   color: #e7ebf1;

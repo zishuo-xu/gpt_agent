@@ -45,6 +45,51 @@ function response(text: string): ModelResponse {
   };
 }
 
+test("deleteSession 删除会话并清除磁盘文件", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-del-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-del-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-del-home-"),
+  );
+  const configService = new ConfigService({ cwd, homeDir });
+  const manager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    modelFactory: (messages) =>
+      new ConversationAgentModel(
+        new ScriptedClient([response("完成")]),
+        messages,
+      ),
+  });
+  const session = await manager.createSession({ title: "待删除" });
+  await session.sendInput("你好");
+  await manager.flush();
+
+  const projectKey = Buffer.from(cwd).toString("base64url");
+  const sessionsDir = path.join(
+    stateDir,
+    "projects",
+    projectKey,
+    "sessions",
+  );
+  const jsonlPath = path.join(sessionsDir, `${session.id}.jsonl`);
+  // 删除前应存在会话文件
+  await readFile(jsonlPath, "utf8");
+  assert.ok(manager.get(session.id));
+
+  const deleted = await manager.deleteSession(session.id);
+  assert.equal(deleted, true);
+  assert.equal(manager.get(session.id), undefined);
+  // 磁盘文件已删除
+  await assert.rejects(() => readFile(jsonlPath, "utf8"));
+  // 重复删除返回 false
+  assert.equal(await manager.deleteSession(session.id), false);
+});
+
 test("AgentSessionManager 通过 index 与 JSONL 恢复会话并继续上下文", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-manager-cwd-"));
   const stateDir = await mkdtemp(

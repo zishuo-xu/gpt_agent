@@ -64,6 +64,8 @@ interface SchemaField {
   step?: number;
   options?: Array<{ label: string; value: string }>;
   hot?: boolean;
+  /** 复合字段的渲染器标识（来自 Config Schema），前端按此分派专用组件 */
+  renderer?: "provider" | "role-models" | "permissions" | "context";
 }
 
 interface TestResult {
@@ -150,10 +152,7 @@ export function App() {
   );
 
   const generatedFields = useMemo(
-    () =>
-      schema.filter((field) =>
-        ["string", "number", "boolean", "select"].includes(field.type),
-      ),
+    () => schema.filter((field) => isScalarType(field.type)),
     [schema],
   );
 
@@ -1218,6 +1217,31 @@ export function App() {
               </div>
             </section>
 
+            {schema
+              .filter((field) => !isScalarType(field.type) && !field.renderer)
+              .map((field) => (
+                <section className="panel" key={field.key}>
+                  <div className="section-heading">
+                    <div>
+                      <h2>
+                        {field.title}
+                        {field.hot && <em>即时生效</em>}
+                      </h2>
+                      <p>{field.description}</p>
+                    </div>
+                  </div>
+                  <ObjectFieldEditor
+                    value={config[field.key]}
+                    onChange={(value) =>
+                      replaceConfig((current) => ({
+                        ...current,
+                        [field.key]: value,
+                      }))
+                    }
+                  />
+                </section>
+              ))}
+
             {generatedFields.length > 0 && (
               <section className="panel">
                 <div className="section-heading">
@@ -1293,6 +1317,82 @@ export function App() {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+const SCALAR_TYPES = ["string", "number", "boolean", "select"];
+
+function isScalarType(type: string): boolean {
+  return SCALAR_TYPES.includes(type);
+}
+
+/**
+ * 通用对象字段编辑器：schema 驱动的回退渲染器。
+ * 新增复合配置项（未指定专用 renderer）时零前端改动即可显示并编辑其子字段。
+ */
+function ObjectFieldEditor(props: {
+  value: unknown;
+  onChange: (value: Record<string, unknown>) => void;
+}) {
+  const record =
+    props.value && typeof props.value === "object" && !Array.isArray(props.value)
+      ? (props.value as Record<string, unknown>)
+      : {};
+  const keys = Object.keys(record);
+  if (keys.length === 0) {
+    return <p className="schema-field-note">该配置暂无子字段。</p>;
+  }
+  return (
+    <div className="schema-field-grid">
+      {keys.map((key) => {
+        const value = record[key];
+        const update = (next: unknown) =>
+          props.onChange({ ...record, [key]: next });
+        if (typeof value === "boolean") {
+          return (
+            <label className="schema-field" key={key}>
+              <span>{key}</span>
+              <input
+                type="checkbox"
+                checked={value}
+                onChange={(event) => update(event.target.checked)}
+              />
+            </label>
+          );
+        }
+        if (typeof value === "number") {
+          return (
+            <label className="schema-field" key={key}>
+              <span>{key}</span>
+              <input
+                type="number"
+                value={String(value)}
+                onChange={(event) => update(Number(event.target.value))}
+              />
+            </label>
+          );
+        }
+        if (typeof value === "string") {
+          return (
+            <label className="schema-field" key={key}>
+              <span>{key}</span>
+              <input
+                type="text"
+                value={value}
+                onChange={(event) => update(event.target.value)}
+              />
+            </label>
+          );
+        }
+        // 嵌套对象/数组等复杂结构：只读展示
+        return (
+          <label className="schema-field" key={key}>
+            <span>{key}</span>
+            <small>复杂结构，请在配置文件或对应功能区编辑。</small>
+          </label>
+        );
+      })}
     </div>
   );
 }

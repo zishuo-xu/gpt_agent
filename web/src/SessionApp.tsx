@@ -127,6 +127,15 @@ export function SessionApp() {
     setSessions(next);
   }
 
+  async function deleteSession(id: string) {
+    const response = await fetch(`/api/sessions/${id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) return;
+    if (selectedId === id) setSelectedId("");
+    await refreshSessions();
+  }
+
   useEffect(() => {
     void refreshSessions();
     const timer = window.setInterval(
@@ -623,6 +632,7 @@ export function SessionApp() {
                   session={session}
                   key={session.id}
                   onClick={() => setSelectedId(session.id)}
+                  onDelete={() => void deleteSession(session.id)}
                 />
               ))}
             </section>
@@ -690,6 +700,7 @@ export function AppSidebar(props: {
 function SessionCard(props: {
   session: SessionSummary;
   onClick: () => void;
+  onDelete: () => void;
 }) {
   const { session } = props;
   const completed = session.todos.filter(
@@ -707,7 +718,20 @@ function SessionCard(props: {
     >
       <div className="dashboard-card-top">
         <h2>{session.title}</h2>
-        <StatusTag status={session.status} />
+        <div className="dashboard-card-top-actions">
+          <StatusTag status={session.status} />
+          <span
+            role="button"
+            className="session-card-delete"
+            title="删除会话"
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onDelete();
+            }}
+          >
+            ×
+          </span>
+        </div>
       </div>
       <p>
         {session.kind === "run" ? "无人值守任务" : "交互会话"} ·{" "}

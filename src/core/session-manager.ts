@@ -116,6 +116,24 @@ export class AgentSessionManager {
     return this.#sessions.get(id);
   }
 
+  async deleteSession(id: string): Promise<boolean> {
+    const session = this.#sessions.get(id);
+    if (!session) return false;
+    if (session.isProcessing()) {
+      // 运行中的会话先硬中止，避免删除后仍向磁盘追加写入
+      session.interrupt();
+    }
+    this.#sessions.delete(id);
+    this.#queueIndexWrite();
+    await this.flush();
+    for (const suffix of [".jsonl", ".trace.jsonl"]) {
+      await unlink(path.join(this.#sessionsDir, `${id}${suffix}`)).catch(
+        () => undefined,
+      );
+    }
+    return true;
+  }
+
   async restore(): Promise<void> {
     await this.#ensureProjectMetadata();
     let entries: string[];

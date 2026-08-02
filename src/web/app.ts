@@ -262,6 +262,16 @@ export function createWebApp(
       : context.json({ error: "会话当前未运行" }, 409);
   });
 
+  app.delete("/api/sessions/:id", async (context) => {
+    if (!sessionManager) {
+      return context.json({ error: "会话服务不可用" }, 503);
+    }
+    const deleted = await sessionManager.deleteSession(context.req.param("id"));
+    return deleted
+      ? context.json({ deleted: true })
+      : context.json({ error: "会话不存在" }, 404);
+  });
+
   app.get("/api/sessions/:id/stream", (context) => {
     const session = sessionManager?.get(context.req.param("id"));
     if (!session) return context.json({ error: "会话不存在" }, 404);
