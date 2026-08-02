@@ -1226,6 +1226,76 @@ textarea:focus {
   border-color: #38435a;
 }
 
+/* —— 新建会话执行环境选择 —— */
+.new-task-env {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.env-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #262c38;
+  border-radius: 8px;
+  background: #14181f;
+  cursor: pointer;
+}
+
+.env-option input[type="radio"] {
+  accent-color: #3b82f6;
+}
+
+.env-title {
+  color: #e7ebf1;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.env-hint {
+  color: #6b7688;
+  font-size: 12px;
+}
+
+.env-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.env-project-select {
+  background: #1a2030;
+  color: #e7ebf1;
+  border: 1px solid #2a3450;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.env-open-other {
+  background: none;
+  border: 1px solid #2a3450;
+  color: #9fb6e0;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.env-open-other:hover {
+  border-color: #3d4d78;
+  color: #c3d3f0;
+}
+
 
 .title-with-status,
 .header-actions {

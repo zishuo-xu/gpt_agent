@@ -235,3 +235,15 @@ test("打开项目：有效目录成功并返回会话，文件与非目录失�
   });
   assert.equal(notDir.status, 400);
 });
+
+test("项目列表包含大厅项", async () => {
+  const { app } = await fixture();
+  const projectsResponse = await app.request("/api/projects");
+  const projectsPayload = await projectsResponse.json();
+  const lobby = projectsPayload.projects.find(
+    (project: { key: string }) => project.key === "lobby",
+  );
+  assert.ok(lobby, "项目列表应包含大厅项");
+  assert.equal(lobby.name, "大厅（不操作文件）");
+  assert.equal(lobby.lobby, true);
+});

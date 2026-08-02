@@ -13,14 +13,22 @@ import { WebSessionManager } from "./sessions.js";
  *
  * 项目数据源：~/.myagent/projects/<base64url(cwd)>/project.json
  * （由 AgentSessionManager.#ensureProjectMetadata 在会话创建时写入）。
+ *
+ * 特殊项目「大厅」（key = "lobby"）：不绑定任何真实目录，会话只读不写，
+ * 用于"不操作任何文件"的纯问答场景。
  */
 
+/** 大厅项目的合成 key（与 base64url 格式区分，避免与真实 cwd 撞 key）。 */
+export const LOBBY_KEY = "lobby";
+
 export interface ProjectEntry {
-  /** 项目标识（base64url(cwd)），作为 ?project= 参数 */
+  /** 项目标识（base64url(cwd)），作为 ?project= 参数；大厅为 "lobby" */
   key: string;
   name: string;
   cwd: string;
   updatedAt?: string;
+  /** 大厅项目标记 */
+  lobby?: boolean;
 }
 
 export interface ProjectResources {
@@ -95,6 +103,28 @@ export class ProjectRegistry {
     );
   }
 
+  /** 大厅项目的固定 cwd（专用临时目录，不触碰任何用户目录）。 */
+  lobbyCwd(): string {
+    return path.join(os.tmpdir(), "myagent-lobby");
+  }
+
+  /** 大厅项目（只读不写），始终可用。 */
+  getLobby(): ProjectResources {
+    const cwd = this.lobbyCwd();
+    const cached = this.#cache.get(cwd);
+    if (cached) return cached;
+    const configService = new ConfigService({
+      cwd,
+      homeDir: this.#homeDir,
+    });
+    const sessionManager = new WebSessionManager(cwd, configService, {
+      lobby: true,
+    });
+    const resources: ProjectResources = { configService, sessionManager };
+    this.#cache.set(cwd, resources);
+    return resources;
+  }
+
   /** 按 cwd 获取（并缓存）该项目的资源。 */
   async getByCwd(cwd: string): Promise<ProjectResources> {
     const cached = this.#cache.get(cwd);
@@ -113,6 +143,9 @@ export class ProjectRegistry {
     resources: ProjectResources;
   }> {
     const key = projectKey?.trim();
+    if (key === LOBBY_KEY) {
+      return { cwd: this.lobbyCwd(), resources: this.getLobby() };
+    }
     if (!key || key === ProjectRegistry.projectKey(this.#defaultCwd)) {
       return { cwd: this.#defaultCwd, resources: await this.getByCwd(this.#defaultCwd) };
     }

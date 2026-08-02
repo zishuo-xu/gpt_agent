@@ -19,7 +19,10 @@ import {
   type MemoryDocumentId,
 } from "./memory.js";
 import { parseRunCommand } from "../core/run-task.js";
-import { ProjectRegistry } from "./project-registry.js";
+import {
+  LOBBY_KEY,
+  ProjectRegistry,
+} from "./project-registry.js";
 
 export function createWebApp(
   configService: ConfigService,
@@ -77,8 +80,13 @@ export function createWebApp(
   app.get("/api/projects", async (context) => {
     const projects = await registry.listProjects();
     const defaultKey = ProjectRegistry.projectKey(registry.defaultCwd);
+    // 大厅（只读不写）始终作为一个可选执行环境
+    const entries = [
+      { key: LOBBY_KEY, name: "大厅（不操作文件）", cwd: registry.lobbyCwd(), lobby: true },
+      ...projects,
+    ];
     return context.json({
-      projects,
+      projects: entries,
       defaultKey,
       currentKey: context.req.query("project") ?? defaultKey,
     });

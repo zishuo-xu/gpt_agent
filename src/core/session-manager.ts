@@ -33,6 +33,7 @@ import {
 } from "./session.js";
 import type {
   PermissionMode,
+  PermissionRule,
   RecordedEvent,
   ToolCall,
 } from "./types.js";
@@ -206,6 +207,8 @@ export class AgentSessionManager {
     title?: string;
     mode?: PermissionMode;
     initialMessage?: string;
+    /** 追加到默认+配置规则之上的权限规则（如大厅模式禁用文件写入） */
+    extraPermissionRules?: PermissionRule[];
   } = {}): Promise<AgentSession> {
     await this.#ensureProjectMetadata();
     const message = options.initialMessage?.trim();
@@ -226,6 +229,7 @@ export class AgentSessionManager {
       permissionRules: [
         ...DEFAULT_PERMISSION_RULES,
         ...runtimeConfig.permissions.rules,
+        ...(options.extraPermissionRules ?? []),
       ],
       approvalTimeoutMs:
         runtimeConfig.permissions.approvalTimeoutMs,

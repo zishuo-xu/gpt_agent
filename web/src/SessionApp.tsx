@@ -95,6 +95,10 @@ export function SessionApp() {
   const [permissionMode, setPermissionMode] =
     useState<PermissionMode>("normal");
   const [showNewTask, setShowNewTask] = useState(false);
+  /** 新建会话的执行环境：项目 or 大厅（不操作文件） */
+  const [newTaskEnv, setNewTaskEnv] = useState<"project" | "lobby">("project");
+  /** 新建会话所选项目 key（项目环境下） */
+  const [newTaskProject, setNewTaskProject] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [resolvedPermissions, setResolvedPermissions] =
     useState<Set<string>>(new Set());
@@ -164,9 +168,9 @@ export function SessionApp() {
     await refreshSessions();
   }
 
-  function projectUrl(path: string): string {
+  function projectUrl(path: string, key?: string): string {
     const joiner = path.includes("?") ? "&" : "?";
-    return `${path}${joiner}project=${encodeURIComponent(currentProject)}`;
+    return `${path}${joiner}project=${encodeURIComponent(key ?? currentProject)}`;
   }
 
   useEffect(() => {
@@ -193,6 +197,13 @@ export function SessionApp() {
     setSelectedId("");
     setSessions([]);
     setEvents([]);
+  }
+
+  /** 打开新建会话面板：初始化执行环境（当前项目 or 大厅） */
+  function openNewTask() {
+    setNewTaskEnv(currentProject === "lobby" ? "lobby" : "project");
+    setNewTaskProject(currentProject === "lobby" ? "" : currentProject);
+    setShowNewTask(true);
   }
 
   async function openProjectPicker() {
@@ -342,10 +353,16 @@ export function SessionApp() {
         }
         confirmBounds = boundsConfirmed;
       }
+      // 新建会话：按执行环境确定目标项目（大厅 → lobby，项目 → 所选项目）
+      const targetKey = selectedId
+        ? currentProject
+        : newTaskEnv === "lobby"
+          ? "lobby"
+          : newTaskProject || currentProject;
       const response = await fetch(
         selectedId
           ? projectUrl(`/api/sessions/${selectedId}/input`)
-          : projectUrl("/api/sessions"),
+          : projectUrl("/api/sessions", targetKey),
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -365,6 +382,12 @@ export function SessionApp() {
         throw new Error(payload.error ?? "发送失败");
       }
       if (!selectedId) {
+        // 切到目标项目（如果与当前不同），使会话列表归属正确
+        if (targetKey !== currentProject) {
+          setCurrentProject(targetKey);
+          setSessions([]);
+          setEvents([]);
+        }
         setSelectedId(payload.session.id);
         setShowNewTask(false);
       }
@@ -439,7 +462,7 @@ export function SessionApp() {
     setSelectedId("");
     setMessage("");
     setRunBoundsPreview(null);
-    setShowNewTask(true);
+    openNewTask();
   }
 
   return (
@@ -672,27 +695,18 @@ export function SessionApp() {
                 </p>
               </div>
               <div className="sessions-header-actions">
-                <div className="project-switcher-wrap">
-                  <select
-                    className="project-switcher"
-                    value={currentProject}
-                    onChange={(event) => switchProject(event.target.value)}
-                    title="切换项目"
-                  >
-                    {projects.map((project) => (
-                      <option value={project.key} key={project.key}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="project-open-button"
-                    onClick={() => void openProjectPicker()}
-                    title="打开电脑上的项目目录"
-                  >
-                    打开项目
-                  </button>
-                </div>
+                <select
+                  className="project-switcher"
+                  value={currentProject}
+                  onChange={(event) => switchProject(event.target.value)}
+                  title="切换项目"
+                >
+                  {projects.map((project) => (
+                    <option value={project.key} key={project.key}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
                 <button
                   className="save-button"
                   onClick={() =>
@@ -776,9 +790,58 @@ export function SessionApp() {
                   <div>
                     <h2>今天想让 MyAgent 做什么？</h2>
                     <p>
-                      描述目标即可；运行中仍可继续发送消息。
+                      先选择执行环境；项目下可读写文件，大厅只读不修改任何文件。
                     </p>
                   </div>
+                </div>
+                <div className="new-task-env">
+                  <label className="env-option">
+                    <input
+                      type="radio"
+                      name="new-task-env"
+                      checked={newTaskEnv === "project"}
+                      onChange={() => setNewTaskEnv("project")}
+                    />
+                    <span className="env-title">在项目下执行</span>
+                    {newTaskEnv === "project" && (
+                      <span className="env-picker">
+                        <select
+                          className="env-project-select"
+                          value={newTaskProject}
+                          onChange={(event) =>
+                            setNewTaskProject(event.target.value)
+                          }
+                        >
+                          {projects
+                            .filter((project) => project.key !== "lobby")
+                            .map((project) => (
+                              <option value={project.key} key={project.key}>
+                                {project.name}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="env-open-other"
+                          onClick={() => void openProjectPicker()}
+                        >
+                          打开其他项目…
+                        </button>
+                      </span>
+                    )}
+                  </label>
+                  <label className="env-option">
+                    <input
+                      type="radio"
+                      name="new-task-env"
+                      checked={newTaskEnv === "lobby"}
+                      onChange={() => setNewTaskEnv("lobby")}
+                    />
+                    <span className="env-title">在大厅执行</span>
+                    <span className="env-hint">
+                      不操作任何文件；可读取你提供的文件做分析
+                    </span>
+                  </label>
                 </div>
                 <label>
                   权限档
@@ -823,7 +886,7 @@ export function SessionApp() {
               {sessions.length === 0 && (
                 <button
                   className="empty-dashboard"
-                  onClick={() => setShowNewTask(true)}
+                  onClick={() => openNewTask()}
                 >
                   <span>◆</span>
                   <strong>还没有会话</strong>
