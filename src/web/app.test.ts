@@ -23,7 +23,15 @@ test("Web API 暴露 Schema 和脱敏配置", async () => {
   const schema = await schemaResponse.json();
   assert.deepEqual(
     schema.fields.map((field: { key: string }) => field.key),
-    ["providers", "models", "permissions", "context", "server.host", "server.password"],
+    [
+      "providers",
+      "models",
+      "permissions",
+      "context",
+      "server.host",
+      "server.password",
+      "notify.webhook",
+    ],
   );
 
   const configResponse = await app.request("/api/config?scope=global");

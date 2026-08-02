@@ -14,6 +14,7 @@ import type {
   ModelProviderConfig,
   ModelRole,
 } from "../config/schema.js";
+import { WebhookNotifier } from "./notifier.js";
 import { ConversationAgentModel } from "../model/agent-model.js";
 import { ConfiguredModelClient } from "../model/client.js";
 import {
@@ -222,6 +223,17 @@ export class AgentSessionManager {
     });
     this.#register(session);
     this.#queueIndexWrite();
+    // 外部 webhook 推送（配置了 notify.webhook 时）：任务完成/出错/审批超时
+    if (runtimeConfig.notify.webhook) {
+      new WebhookNotifier(
+        (listener) =>
+          session.subscribe((record) => listener(record.event)),
+        {
+          webhookUrl: runtimeConfig.notify.webhook,
+          sessionTitle: session.title,
+        },
+      );
+    }
     if (message) void session.sendInput(message);
     return session;
   }

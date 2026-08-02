@@ -43,12 +43,17 @@ export interface ServerConfig {
   password: string;
 }
 
+export interface NotifyConfig {
+  webhook: string;
+}
+
 export interface MyAgentConfig {
   providers: ModelProviderConfig[];
   models: Record<ModelRole, RoleModelConfig>;
   permissions: PermissionConfig;
   context: ContextConfig;
   server: ServerConfig;
+  notify: NotifyConfig;
   [key: string]: unknown;
 }
 
@@ -64,6 +69,7 @@ export interface PublicMyAgentConfig {
   permissions: PermissionConfig;
   context: ContextConfig;
   server: ServerConfig;
+  notify: NotifyConfig;
   [key: string]: unknown;
 }
 
@@ -129,6 +135,14 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     title: "访问密码",
     description: "监听非 localhost 时必填。用于远程访问与手机审批场景的密码保护。",
   },
+  {
+    key: "notify.webhook",
+    type: "string",
+    title: "通知 Webhook",
+    description:
+      "任务完成 / 出错 / 审批超时推送到外部（企业微信机器人、Bark 或任意接受 JSON POST 的网关）。留空则不推送。",
+    hot: true,
+  },
 ];
 
 export const DEFAULT_CONFIG: MyAgentConfig = {
@@ -160,6 +174,9 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
   server: {
     host: "127.0.0.1",
     password: "",
+  },
+  notify: {
+    webhook: "",
   },
 };
 

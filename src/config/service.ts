@@ -284,6 +284,10 @@ function mergeLayers(
     ...((global.server ?? {}) as Record<string, unknown>),
     ...((project.server ?? {}) as Record<string, unknown>),
   };
+  merged.notify = {
+    ...((global.notify ?? {}) as Record<string, unknown>),
+    ...((project.notify ?? {}) as Record<string, unknown>),
+  };
   return merged;
 }
 
@@ -400,6 +404,12 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
             ? String(rawConfig["server.password"])
             : "",
     },
+    notify: {
+      webhook:
+        typeof config.notify?.webhook === "string"
+          ? config.notify.webhook
+          : "",
+    },
   };
   for (const field of CONFIG_SCHEMA) {
     if (!isScalarSchemaField(field.type)) continue;
@@ -452,6 +462,9 @@ function mergeSecrets(
     context: structuredClone(incoming.context ?? existing.context),
     server: structuredClone(
       incoming.server ?? existing.server,
+    ),
+    notify: structuredClone(
+      incoming.notify ?? existing.notify ?? { webhook: "" },
     ),
   };
   for (const field of CONFIG_SCHEMA) {

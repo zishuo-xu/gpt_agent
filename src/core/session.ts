@@ -608,7 +608,14 @@ export class AgentSession {
     this.#status = "waiting_permission";
     return await new Promise<ApprovalAnswer>((resolve) => {
       const timeout = setTimeout(
-        () => finish({ granted: false }),
+        () => {
+          this.#bus.emit({
+            type: "notify",
+            level: "warn",
+            message: `审批超时（${this.#approvalTimeoutMs / 1000}s 无人响应），已自动拒绝：${call.tool} ${call.target ?? ""}`,
+          });
+          finish({ granted: false });
+        },
         this.#approvalTimeoutMs,
       );
       timeout.unref();
