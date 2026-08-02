@@ -13,6 +13,7 @@ import type { AgentEvent } from "./types.js";
  *
  * 格式自动适配：
  * - 企业微信机器人（qyapi.weixin.qq.com）→ { msgtype: "text", text: { content } }
+ * - 飞书自定义机器人（open.feishu.cn / open.larksuite.com）→ { msg_type: "text", content: { text } }
  * - Bark（day.app）→ { title, body }
  * - 其他网关 → { title, body }（通用 JSON POST）
  */
@@ -101,6 +102,15 @@ function buildPayload(
     return {
       msgtype: "text",
       text: { content: `[MyAgent] ${title}\n${body}` },
+    };
+  }
+  if (
+    url.includes("open.feishu.cn") ||
+    url.includes("open.larksuite.com")
+  ) {
+    return {
+      msg_type: "text",
+      content: { text: `[MyAgent] ${title}\n${body}` },
     };
   }
   return { title, body };

@@ -115,6 +115,24 @@ test("同一会话每小时最多推送 2 条（限频）", async () => {
   fetch.restore();
 });
 
+test("飞书自定义机器人使用 msg_type 格式", async () => {
+  const bus = createBus();
+  const fetch = stubFetch();
+  const notifier = new WebhookNotifier(bus.subscribe, {
+    webhookUrl:
+      "https://open.feishu.cn/open-apis/bot/v2/hook/abc-def",
+    sessionTitle: "会话A",
+  });
+  bus.emit({ type: "done" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(fetch.calls[0].body, {
+    msg_type: "text",
+    content: { text: "[MyAgent] 任务完成\n会话「会话A」已完成。" },
+  });
+  notifier.dispose();
+  fetch.restore();
+});
+
 test("未配置 webhook 时不推送", async () => {
   const bus = createBus();
   const fetch = stubFetch();

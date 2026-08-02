@@ -140,7 +140,7 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     type: "string",
     title: "通知 Webhook",
     description:
-      "任务完成 / 出错 / 审批超时推送到外部（企业微信机器人、Bark 或任意接受 JSON POST 的网关）。留空则不推送。",
+      "任务完成 / 出错 / 审批超时推送到外部（企业微信机器人、飞书机器人、Bark 或任意接受 JSON POST 的网关）。留空则不推送。",
     hot: true,
   },
 ];
