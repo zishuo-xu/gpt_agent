@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -191,4 +191,47 @@ test("已有会话发消息兼容 message 字段（与 task 一致）", async ()
     body: JSON.stringify({ message: "   " }),
   });
   assert.equal(empty.status, 400);
+});
+
+test("fs 浏览列出子目录且忽略隐藏项", async () => {
+  const { app } = await fixture();
+  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-fs-"));
+  const sub = path.join(root, "alpha");
+  await mkdir(sub);
+  await mkdir(path.join(root, ".hidden"));
+  await writeFile(path.join(root, "file.txt"), "x");
+
+  const response = await app.request(
+  `/api/fs/list?path=${encodeURIComponent(root)}`,
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  const names = payload.entries.map((entry: { name: string }) => entry.name);
+  assert.deepEqual(names, ["alpha"]);
+});
+
+test("打开项目：有效目录成功并返回会话，文件与非目录失败", async () => {
+  const { app } = await fixture();
+  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-open-"));
+  const projectDir = path.join(root, "proj");
+  await mkdir(projectDir);
+
+  const ok = await app.request("/api/projects/open", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path: projectDir }),
+  });
+  assert.equal(ok.status, 200);
+  const payload = await ok.json();
+  assert.equal(payload.opened, true);
+  assert.equal(payload.project.cwd, projectDir);
+  assert.equal(payload.project.name, "proj");
+  assert.ok(Array.isArray(payload.sessions));
+
+  const notDir = await app.request("/api/projects/open", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path: path.join(root, "nope") }),
+  });
+  assert.equal(notDir.status, 400);
 });

@@ -23,6 +23,17 @@ interface ProjectEntry {
   cwd: string;
 }
 
+interface FsRoot {
+  name: string;
+  path: string;
+}
+
+interface FsEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+}
+
 interface Todo {
   id: string;
   content: string;
@@ -73,6 +84,12 @@ export function SessionApp() {
   const [selectedId, setSelectedId] = useState("");
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [currentProject, setCurrentProject] = useState("");
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [fsRoots, setFsRoots] = useState<FsRoot[]>([]);
+  const [fsPath, setFsPath] = useState("");
+  const [fsEntries, setFsEntries] = useState<FsEntry[]>([]);
+  const [fsError, setFsError] = useState("");
+  const [fsOpening, setFsOpening] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [message, setMessage] = useState("");
   const [permissionMode, setPermissionMode] =
@@ -176,6 +193,73 @@ export function SessionApp() {
     setSelectedId("");
     setSessions([]);
     setEvents([]);
+  }
+
+  async function openProjectPicker() {
+    setFsError("");
+    setShowProjectPicker(true);
+    try {
+      const rootsResponse = await fetch("/api/fs/roots");
+      const rootsPayload = await rootsResponse.json();
+      const roots = (rootsPayload.roots ?? []) as FsRoot[];
+      setFsRoots(roots);
+      // 从第一个根（家目录）开始浏览
+      const first = roots[0];
+      if (first) {
+        setFsPath(first.path);
+        await loadFsDirectory(first.path);
+      }
+    } catch {
+      setFsError("无法读取目录列表");
+    }
+  }
+
+  async function loadFsDirectory(dir: string) {
+    setFsError("");
+    setFsPath(dir);
+    const response = await fetch(
+      `/api/fs/list?path=${encodeURIComponent(dir)}`,
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      setFsError(payload.error ?? "读取目录失败");
+      setFsEntries([]);
+      return;
+    }
+    setFsEntries((payload.entries ?? []) as FsEntry[]);
+  }
+
+  async function confirmOpenProject(dir: string) {
+    setFsOpening(true);
+    setFsError("");
+    try {
+      const response = await fetch("/api/projects/open", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: dir }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setFsError(payload.error ?? "无法打开项目");
+        return;
+      }
+      const project = payload.project as ProjectEntry;
+      setShowProjectPicker(false);
+      setSelectedId("");
+      setSessions([]);
+      setEvents([]);
+      setCurrentProject(project.key);
+      // 打开后立即拉取该项目的会话列表（值不变时 useEffect 不会触发）
+      await refreshSessions();
+      // 刷新项目列表（把新项目并入切换器）
+      const projectsResponse = await fetch("/api/projects");
+      const projectsPayload = await projectsResponse.json();
+      setProjects((projectsPayload.projects ?? []) as ProjectEntry[]);
+    } catch {
+      setFsError("无法打开项目");
+    } finally {
+      setFsOpening(false);
+    }
   }
 
   useEffect(() => {
@@ -588,7 +672,7 @@ export function SessionApp() {
                 </p>
               </div>
               <div className="sessions-header-actions">
-                {projects.length > 1 && (
+                <div className="project-switcher-wrap">
                   <select
                     className="project-switcher"
                     value={currentProject}
@@ -601,7 +685,14 @@ export function SessionApp() {
                       </option>
                     ))}
                   </select>
-                )}
+                  <button
+                    className="project-open-button"
+                    onClick={() => void openProjectPicker()}
+                    title="打开电脑上的项目目录"
+                  >
+                    打开项目
+                  </button>
+                </div>
                 <button
                   className="save-button"
                   onClick={() =>
@@ -612,6 +703,69 @@ export function SessionApp() {
                 </button>
               </div>
             </header>
+            {showProjectPicker && (
+              <div
+                className="project-picker-overlay"
+                onClick={() => setShowProjectPicker(false)}
+              >
+                <div
+                  className="project-picker"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="project-picker-head">
+                    <h2>打开项目</h2>
+                    <button
+                      className="project-picker-close"
+                      onClick={() => setShowProjectPicker(false)}
+                      title="关闭"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="project-picker-breadcrumbs">
+                    {fsRoots.map((root) => (
+                      <button
+                        key={root.path}
+                        onClick={() => void loadFsDirectory(root.path)}
+                        className={fsPath === root.path ? "active" : ""}
+                      >
+                        {root.name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="project-picker-path">{fsPath}</div>
+                  {fsError && (
+                    <div className="project-picker-error">{fsError}</div>
+                  )}
+                  <div className="project-picker-list">
+                    {fsEntries.map((entry) => (
+                      <button
+                        key={entry.path}
+                        className="project-picker-entry"
+                        onClick={() => void loadFsDirectory(entry.path)}
+                      >
+                        <span>📁</span>
+                        {entry.name}
+                      </button>
+                    ))}
+                    {fsEntries.length === 0 && !fsError && (
+                      <div className="project-picker-empty">
+                        此目录下没有子目录
+                      </div>
+                    )}
+                  </div>
+                  <div className="project-picker-foot">
+                    <button
+                      className="project-picker-open"
+                      disabled={fsOpening || !fsPath}
+                      onClick={() => void confirmOpenProject(fsPath)}
+                    >
+                      {fsOpening ? "打开中…" : "在此目录打开"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             {error && (
               <div className="notice error">{error}</div>
             )}
