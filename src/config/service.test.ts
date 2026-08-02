@@ -238,3 +238,36 @@ test("Schema 新增标量字段无需修改 ConfigService 即可默认展示并�
     CONFIG_SCHEMA.pop();
   }
 });
+
+test("未显式配价模型按内置价格表补默认，显式配置优先", async () => {
+  const service = await fixture();
+  // 默认配置使用内置价格（claude-sonnet / claude-haiku）
+  const global = await service.read("global");
+  assert.equal(global.models.main.pricing?.inputPerMillionCny, 21);
+  assert.equal(global.models.cheap.pricing?.outputPerMillionCny, 35);
+
+  // 显式配置的 pricing 不被覆盖
+  global.models.main = {
+    providerId: "anthropic",
+    model: "claude-sonnet-4-5",
+    pricing: {
+      inputPerMillionCny: 99,
+      outputPerMillionCny: 99,
+      cachedInputPerMillionCny: 9,
+    },
+  };
+  await service.write("global", global);
+  const readBack = await service.read("global");
+  assert.equal(readBack.models.main.pricing?.inputPerMillionCny, 99);
+
+  // 未知模型不补默认价格（先加入渠道列表以通过校验）
+  const provider = readBack.providers.find((p) => p.id === "anthropic");
+  if (provider) provider.models.push("my-custom-model");
+  readBack.models.cheap = {
+    providerId: "anthropic",
+    model: "my-custom-model",
+  };
+  await service.write("global", readBack);
+  const last = await service.read("global");
+  assert.equal(last.models.cheap.pricing, undefined);
+});

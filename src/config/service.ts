@@ -26,6 +26,7 @@ import {
   toPublicConfig,
 } from "./schema.js";
 import type { PermissionRule } from "../core/types.js";
+import { builtinPricingFor } from "./model-pricing.js";
 
 export type ConfigScope = "global" | "project";
 
@@ -347,6 +348,20 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
             }
           : {}),
       };
+    }
+  }
+  // 未显式配置 pricing 的模型，按模型名自动匹配内置默认价格（成本统计开箱即用）
+  for (const role of ["main", "cheap", "explore"] as ModelRole[]) {
+    const target = models[role];
+    if (target && !target.pricing) {
+      const builtin = builtinPricingFor(target.model);
+      if (builtin) target.pricing = builtin;
+    }
+    for (const fallback of target?.fallbacks ?? []) {
+      if (!fallback.pricing) {
+        const builtin = builtinPricingFor(fallback.model);
+        if (builtin) fallback.pricing = builtin;
+      }
     }
   }
   const permissions: PermissionConfig = {
