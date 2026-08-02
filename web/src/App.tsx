@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AppSidebar } from "./SessionApp";
+import { SettingsSidebar } from "./SettingsSidebar";
 
 type Scope = "global" | "project";
 type Protocol = "anthropic" | "openai-compatible";
@@ -539,15 +539,7 @@ export function App() {
 
   return (
     <div className="shell">
-      <AppSidebar
-        active="settings"
-        onDashboard={() => {
-          window.location.hash = "sessions";
-        }}
-        onSession={() => {
-          window.location.hash = "sessions";
-        }}
-      />
+      <SettingsSidebar active="settings" />
 
       <main>
         <header className="page-header">

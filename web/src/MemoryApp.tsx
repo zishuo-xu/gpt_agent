@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AppSidebar } from "./SessionApp";
+import { SettingsSidebar } from "./SettingsSidebar";
 
 type DocumentId =
   | "preferences"
@@ -123,15 +123,7 @@ export function MemoryApp() {
 
   return (
     <div className="shell">
-      <AppSidebar
-        active="memory"
-        onDashboard={() => {
-          window.location.hash = "sessions";
-        }}
-        onSession={() => {
-          window.location.hash = "sessions";
-        }}
-      />
+      <SettingsSidebar active="memory" />
       <main className="memory-main">
         <header className="page-header">
           <div>

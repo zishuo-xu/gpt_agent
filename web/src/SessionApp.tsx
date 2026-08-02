@@ -99,6 +99,8 @@ export function SessionApp() {
   const [newTaskEnv, setNewTaskEnv] = useState<"project" | "lobby">("project");
   /** 新建会话所选项目 key（项目环境下） */
   const [newTaskProject, setNewTaskProject] = useState("");
+  /** 详情区右栏（任务清单/消耗/会话信息）展开/收起 */
+  const [showDetail, setShowDetail] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [resolvedPermissions, setResolvedPermissions] =
     useState<Set<string>>(new Set());
@@ -201,6 +203,7 @@ export function SessionApp() {
 
   /** 打开新建会话面板：初始化执行环境（当前项目 or 大厅） */
   function openNewTask() {
+    setSelectedId("");
     setNewTaskEnv(currentProject === "lobby" ? "lobby" : "project");
     setNewTaskProject(currentProject === "lobby" ? "" : currentProject);
     setShowNewTask(true);
@@ -467,17 +470,14 @@ export function SessionApp() {
 
   return (
     <div className="shell">
-      <AppSidebar
-        active={selectedId ? "session" : "dashboard"}
-        onDashboard={() => {
-          setSelectedId("");
+      <SessionListSidebar
+        sessions={sessions}
+        selectedId={selectedId}
+        onSelect={(id) => {
+          setSelectedId(id);
           setShowNewTask(false);
         }}
-        onSession={() => {
-          if (!selectedId && sessions[0]) {
-            setSelectedId(sessions[0].id);
-          }
-        }}
+        onNew={startNewSession}
       />
 
       <main className="sessions-main">
@@ -499,6 +499,18 @@ export function SessionApp() {
                 </p>
               </div>
               <div className="header-actions">
+                <select
+                  className="project-switcher"
+                  value={currentProject}
+                  onChange={(event) => switchProject(event.target.value)}
+                  title="切换项目"
+                >
+                  {projects.map((project) => (
+                    <option value={project.key} key={project.key}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
                 {busy && (
                   <button
                     className="interrupt-button"
@@ -512,6 +524,20 @@ export function SessionApp() {
                   onClick={startNewSession}
                 >
                   ＋ 新会话
+                </button>
+                <button
+                  className="detail-toggle"
+                  onClick={() => void deleteSession(selected.id)}
+                  title="删除此会话"
+                >
+                  删除
+                </button>
+                <button
+                  className={`detail-toggle ${showDetail ? "active" : ""}`}
+                  onClick={() => setShowDetail((v) => !v)}
+                  title="任务清单 / 消耗 / 会话信息"
+                >
+                  ⤢ 详情
                 </button>
               </div>
             </header>
@@ -598,7 +624,8 @@ export function SessionApp() {
                 )}
               </section>
 
-              <aside className="session-rail">
+              {showDetail && (
+                <aside className="session-rail">
                 <RailCard title="任务清单">
                   {latestTodos.length === 0 ? (
                     <p className="rail-empty">
@@ -682,107 +709,47 @@ export function SessionApp() {
                   </button>
                 </RailCard>
               </aside>
+              )}
             </div>
           </>
         ) : (
           <>
-            <header className="page-header sessions-header">
-              <div>
-                <p className="eyebrow">AGENT / DASHBOARD</p>
-                <h1>监控台</h1>
-                <p>
-                  所有 Agent 会话的实时状态 · 点击卡片进入详情
-                </p>
-              </div>
-              <div className="sessions-header-actions">
-                <select
-                  className="project-switcher"
-                  value={currentProject}
-                  onChange={(event) => switchProject(event.target.value)}
-                  title="切换项目"
-                >
-                  {projects.map((project) => (
-                    <option value={project.key} key={project.key}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="save-button"
-                  onClick={() =>
-                    setShowNewTask((value) => !value)
-                  }
-                >
-                  ＋ 新会话
-                </button>
-              </div>
-            </header>
-            {showProjectPicker && (
-              <div
-                className="project-picker-overlay"
-                onClick={() => setShowProjectPicker(false)}
-              >
-                <div
-                  className="project-picker"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <div className="project-picker-head">
-                    <h2>打开项目</h2>
-                    <button
-                      className="project-picker-close"
-                      onClick={() => setShowProjectPicker(false)}
-                      title="关闭"
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <div className="project-picker-breadcrumbs">
-                    {fsRoots.map((root) => (
-                      <button
-                        key={root.path}
-                        onClick={() => void loadFsDirectory(root.path)}
-                        className={fsPath === root.path ? "active" : ""}
-                      >
-                        {root.name}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="project-picker-path">{fsPath}</div>
-                  {fsError && (
-                    <div className="project-picker-error">{fsError}</div>
-                  )}
-                  <div className="project-picker-list">
-                    {fsEntries.map((entry) => (
-                      <button
-                        key={entry.path}
-                        className="project-picker-entry"
-                        onClick={() => void loadFsDirectory(entry.path)}
-                      >
-                        <span>📁</span>
-                        {entry.name}
-                      </button>
-                    ))}
-                    {fsEntries.length === 0 && !fsError && (
-                      <div className="project-picker-empty">
-                        此目录下没有子目录
-                      </div>
-                    )}
-                  </div>
-                  <div className="project-picker-foot">
-                    <button
-                      className="project-picker-open"
-                      disabled={fsOpening || !fsPath}
-                      onClick={() => void confirmOpenProject(fsPath)}
-                    >
-                      {fsOpening ? "打开中…" : "在此目录打开"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
             {error && (
               <div className="notice error">{error}</div>
             )}
+            <div className="empty-detail">
+              <div className="empty-detail-inner">
+                <span className="empty-detail-mark">◆</span>
+                <h2>选择一个会话，或新建</h2>
+                <p>
+                  左侧是会话列表；也可以在下方直接开始一个新任务。
+                </p>
+                <div className="empty-detail-actions">
+                  <select
+                    className="project-switcher"
+                    value={currentProject}
+                    onChange={(event) =>
+                      switchProject(event.target.value)
+                    }
+                    title="切换项目"
+                  >
+                    {projects.map((project) => (
+                      <option value={project.key} key={project.key}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="save-button"
+                    onClick={startNewSession}
+                  >
+                    ＋ 新会话
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
             {showNewTask && (
               <section className="new-task-panel">
                 <div>
@@ -891,69 +858,47 @@ export function SessionApp() {
                 />
               </section>
             )}
-            <section className="session-grid">
-              {sessions.length === 0 && (
-                <button
-                  className="empty-dashboard"
-                  onClick={() => openNewTask()}
-                >
-                  <span>◆</span>
-                  <strong>还没有会话</strong>
-                  <small>点击开始第一个编码任务</small>
-                </button>
-              )}
-              {sessions.map((session) => (
-                <SessionCard
-                  session={session}
-                  key={session.id}
-                  onClick={() => setSelectedId(session.id)}
-                  onDelete={() => void deleteSession(session.id)}
-                />
-              ))}
-            </section>
-          </>
-        )}
       </main>
     </div>
   );
 }
 
-export function AppSidebar(props: {
-  active: "dashboard" | "session" | "memory" | "settings";
-  onDashboard: () => void;
-  onSession: () => void;
+export function SessionListSidebar(props: {
+  sessions: SessionSummary[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  onNew: () => void;
 }) {
   return (
-    <aside className="sidebar">
+    <aside className="sidebar session-list-sidebar">
       <div className="brand">
         <span className="brand-mark">◆</span>
         <span>MyAgent</span>
       </div>
-      <nav aria-label="主导航">
-        <button
-          className={`nav-item ${
-            props.active === "dashboard" ? "active" : ""
-          }`}
-          onClick={props.onDashboard}
-        >
-          <span>▦</span>监控台
-        </button>
-        <button
-          className={`nav-item ${
-            props.active === "session" ? "active" : ""
-          }`}
-          onClick={props.onSession}
-        >
-          <span>◉</span>会话详情
-        </button>
-        <button
-          className="nav-item"
-          onClick={() => {
-            window.location.hash = "memory";
-          }}
-        >
-          <span>✎</span>记忆面板
-        </button>
+      <button className="sidebar-new" onClick={props.onNew}>
+        ＋ 新会话
+      </button>
+      <div className="sidebar-sessions" aria-label="会话列表">
+        {props.sessions.length === 0 && (
+          <div className="sidebar-empty">还没有会话</div>
+        )}
+        {props.sessions.map((session) => {
+          const active = session.id === props.selectedId;
+          const status = statusMeta[session.status];
+          return (
+            <button
+              key={session.id}
+              className={`sidebar-session ${active ? "active" : ""}`}
+              onClick={() => props.onSelect(session.id)}
+              title={session.title}
+            >
+              <span className={`session-dot tone-${status.tone}`} />
+              <span className="session-line-title">{session.title}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="sidebar-foot">
         <button
           className="nav-item"
           onClick={() => {
@@ -962,86 +907,13 @@ export function AppSidebar(props: {
         >
           <span>⚙</span>设置
         </button>
-      </nav>
-      <div className="local-state">
-        <span className="status-dot" />
-        本机服务
-        <small>{window.location.host}</small>
-      </div>
-    </aside>
-  );
-}
-
-function SessionCard(props: {
-  session: SessionSummary;
-  onClick: () => void;
-  onDelete: () => void;
-}) {
-  const { session } = props;
-  const completed = session.todos.filter(
-    (todo) => todo.status === "completed",
-  ).length;
-  const total = session.todos.length;
-  const progress = total === 0 ? 0 : (completed / total) * 100;
-  const current = session.todos.find(
-    (todo) => todo.status === "in_progress",
-  );
-  return (
-    <button
-      className={`dashboard-card status-${statusMeta[session.status].tone}`}
-      onClick={props.onClick}
-    >
-      <div className="dashboard-card-top">
-        <h2>{session.title}</h2>
-        <div className="dashboard-card-top-actions">
-          <StatusTag status={session.status} />
-          <span
-            role="button"
-            className="session-card-delete"
-            title="删除会话"
-            onClick={(event) => {
-              event.stopPropagation();
-              props.onDelete();
-            }}
-          >
-            ×
-          </span>
+        <div className="local-state">
+          <span className="status-dot" />
+          本机服务
+          <small>{window.location.host}</small>
         </div>
       </div>
-      <p>
-        {session.kind === "run" ? "无人值守任务" : "交互会话"} ·{" "}
-        {session.permissionMode} 档 · #{session.id}
-      </p>
-      {total > 0 && (
-        <>
-          <div className="dashboard-todo-copy">
-            已完成 {completed} / {total}
-            {current ? ` · 进行中：${current.content}` : ""}
-          </div>
-          <div className="progress-track">
-            <i style={{ width: `${progress}%` }} />
-          </div>
-        </>
-      )}
-      <div className="dashboard-meta">
-        <span>
-          {session.status === "running" ? "已运行" : "启动于"}{" "}
-          <b>{formatDuration(session.createdAt)}</b>
-        </span>
-        <span>
-          消耗{" "}
-          <b>
-            {formatTokens(
-              session.totalInputTokens +
-                session.totalOutputTokens,
-            )}
-          </b>
-        </span>
-        <span>
-          工具 <b>{session.toolCallCount}</b>
-        </span>
-      </div>
-    </button>
+    </aside>
   );
 }
 
