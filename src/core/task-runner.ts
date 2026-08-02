@@ -196,6 +196,8 @@ export class TaskRunner {
           }
         : async () => ({ granted: false }),
       modelRole: "explore",
+      // 子代理成本兜底：最多 40 轮，防止过度探索耗尽预算
+      maxTurns: 40,
       ...(this.#recordTrace
         ? { recordTrace: this.#recordTrace }
         : {}),

@@ -215,6 +215,43 @@ test("三段式结论解析：完整、缺失段与无结构回退", () => {
   );
 });
 
+test("子代理达到最大轮数后强制收尾", async () => {
+  class InfiniteClient implements ModelClient {
+    calls = 0;
+    async complete(): Promise<ModelResponse> {
+      this.calls += 1;
+      return {
+        text: `第 ${this.calls} 轮探索`,
+        toolCalls: [
+          {
+            id: `c${this.calls}`,
+            tool: "Read",
+            target: "nonexistent.txt",
+            args: {},
+          },
+        ],
+        usage: { input: 1, output: 1, cached: 0 },
+      };
+    }
+  }
+  const client = new InfiniteClient();
+  const runner = new TaskRunner({
+    cwd: await mkdtemp(path.join(os.tmpdir(), "myagent-task-maxsteps-")),
+    bus: new AgentEventBus(),
+    mode: "normal",
+    client,
+  });
+  const result = await runner.run(
+    { description: "无限探索任务", prompt: "持续探索" },
+    new AbortController().signal,
+  );
+  assert.equal(client.calls, 40, "模型调用应被 40 轮上限截断");
+  assert.match(
+    String(result.output ?? result.summary),
+    /强制收尾|最大轮数/,
+  );
+});
+
 test("超过并发上限的子代理被立即拒绝", async () => {
   class GateClient implements ModelClient {
     readonly #pending: Array<(value: ModelResponse) => void> = [];

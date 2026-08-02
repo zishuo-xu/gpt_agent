@@ -51,6 +51,8 @@ export interface AgentLoopOptions {
   pricing?: ModelPricing;
   getTotalCostCny?: () => number;
   modelRole?: "main" | "cheap" | "explore";
+  /** 最大模型轮数；超过后强制结束循环（子代理成本兜底）。不传则不限。 */
+  maxTurns?: number;
   recordTrace?: (trace: {
     request?: unknown;
     response?: unknown;
@@ -78,6 +80,7 @@ export class AgentLoop {
   readonly #getTotalCostCny: (() => number) | undefined;
   readonly #modelRole: "main" | "cheap" | "explore";
   readonly #recordTrace: AgentLoopOptions["recordTrace"];
+  readonly #maxTurns: number | undefined;
 
   constructor(options: AgentLoopOptions) {
     this.#bus = options.bus;
@@ -92,6 +95,7 @@ export class AgentLoop {
     this.#getTotalCostCny = options.getTotalCostCny;
     this.#modelRole = options.modelRole ?? "main";
     this.#recordTrace = options.recordTrace;
+    this.#maxTurns = options.maxTurns;
   }
 
   interrupt(): void {
@@ -112,7 +116,19 @@ export class AgentLoop {
         streamedText = true;
         this.#bus.emit({ type: "text_delta", text });
       };
+      let turnCount = 0;
       while (!signal.aborted) {
+        if (
+          this.#maxTurns !== undefined &&
+          turnCount >= this.#maxTurns
+        ) {
+          this.#bus.emit({
+            type: "text_delta",
+            text: `\n[已达子代理最大轮数（${this.#maxTurns}），强制收尾]`,
+          });
+          return;
+        }
+        turnCount += 1;
         const turnPolicy = await this.#beforeTurn?.(signal);
         if (turnPolicy?.stop) {
           this.#bus.emit({ type: "interrupted", scope: "loop" });
