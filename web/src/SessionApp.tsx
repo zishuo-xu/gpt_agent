@@ -1012,19 +1012,21 @@ function SessionCard(props: {
         {session.kind === "run" ? "无人值守任务" : "交互会话"} ·{" "}
         {session.permissionMode} 档 · #{session.id}
       </p>
-      <div className="dashboard-todo-copy">
-        {total > 0
-          ? `已完成 ${completed} / ${total}${
-              current ? ` · 进行中：${current.content}` : ""
-            }`
-          : "尚未建立任务清单"}
-      </div>
-      <div className="progress-track">
-        <i style={{ width: `${progress}%` }} />
-      </div>
+      {total > 0 && (
+        <>
+          <div className="dashboard-todo-copy">
+            已完成 {completed} / {total}
+            {current ? ` · 进行中：${current.content}` : ""}
+          </div>
+          <div className="progress-track">
+            <i style={{ width: `${progress}%` }} />
+          </div>
+        </>
+      )}
       <div className="dashboard-meta">
         <span>
-          已运行 <b>{formatDuration(session.createdAt)}</b>
+          {session.status === "running" ? "已运行" : "启动于"}{" "}
+          <b>{formatDuration(session.createdAt)}</b>
         </span>
         <span>
           消耗{" "}
@@ -1423,10 +1425,13 @@ function ItemCard(props: {
           <span>
             {event.call.tool} · {event.call.target}
           </span>
+          {resolved && (
+            <span className="approval-resolved-tag">已处理</span>
+          )}
         </div>
         <p>{event.risk}</p>
         <DiffOrOutput text={String(event.detail || event.call.target)} />
-        {!resolved ? (
+        {!resolved && (
           <>
             <div className="approval-actions">
               <button
@@ -1488,8 +1493,6 @@ function ItemCard(props: {
               </button>
             </div>
           </>
-        ) : (
-          <span className="approval-resolved">审批已处理</span>
         )}
       </section>
     );

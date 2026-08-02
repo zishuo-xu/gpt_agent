@@ -1450,6 +1450,16 @@ textarea:focus {
     transform 150ms ease;
 }
 
+/* 卡片纵向布局，底部信息贴底 */
+.dashboard-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-card .dashboard-meta {
+  margin-top: auto;
+}
+
 /* 左侧 4px 状态色条（一眼扫读） */
 .dashboard-card {
   border-left: 4px solid var(--st-aborted);
@@ -2208,6 +2218,21 @@ textarea:focus {
   margin-top: 8px;
   color: #747d88;
   font-size: 10px;
+}
+
+/* 已处理审批：标题行内小标签，不再单列一条横幅 */
+.approval-resolved-tag {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #1d2430;
+  color: #7d8896;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.web-approval-card.resolved {
+  opacity: 0.6;
 }
 
 /* ========== 会话页：系统行 / 消耗行 / 输入框 ========== */
