@@ -31,6 +31,16 @@
 
   /* 等宽数字 */
   --mono: "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
+
+  /* 品牌色与缓动 */
+  --accent: #668ff3;
+  --accent-2: #8175ff;
+  --accent-soft: rgba(102, 143, 243, 0.14);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* 描边层级 */
+  --line-soft: #232b37;
+  --line: #2b3441;
 }
 
 /* 运行中状态呼吸脉动 */
@@ -54,8 +64,78 @@
   }
 }
 
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes waiting-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 * {
   box-sizing: border-box;
+}
+
+/* ========== 全局质感：选区 / 滚动条 / 焦点 ========== */
+
+::selection {
+  background: rgba(102, 143, 243, 0.32);
+  color: #f4f7ff;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2e3846 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: #2e3846;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #3d4a5c;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(102, 143, 243, 0.55);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: none;
+}
+
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--accent);
 }
 
 body {
@@ -64,7 +144,10 @@ body {
   min-height: 100vh;
   background:
     radial-gradient(circle at 76% -10%, rgba(96, 111, 255, 0.11), transparent 30%),
+    radial-gradient(circle at -8% 108%, rgba(94, 234, 212, 0.04), transparent 32%),
     var(--surface-0);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -337,6 +420,7 @@ main {
   border: 1px solid;
   border-radius: 8px;
   font-size: 13px;
+  animation: rise-in 200ms var(--ease-out);
 }
 
 .notice.ok {
@@ -376,6 +460,7 @@ main {
   padding: 40px;
   color: #8c97a6;
   text-align: center;
+  animation: waiting-pulse 1.8s ease-in-out infinite;
 }
 
 .section-heading {
@@ -433,6 +518,45 @@ select:focus,
 textarea:focus {
   border-color: #657bd8;
   box-shadow: 0 0 0 3px rgba(92, 111, 210, 0.12);
+}
+
+/* 下拉统一自定义箭头，去掉各平台原生样式差异 */
+select {
+  padding-right: 28px;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237c899a' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 6px;
+  cursor: pointer;
+}
+
+/* 可点击控件的统一过渡，消除生硬的瞬变 */
+.nav-item,
+.sidebar-session,
+.provider-nav-item,
+.memory-list button,
+.enable-button,
+.delete-provider-button,
+.model-test-button,
+.model-delete-button,
+.add-model-button,
+.add-provider-button,
+.add-fallback-button,
+.approval-actions button,
+.approval-feedback button,
+.detail-toggle,
+.interrupt-button,
+.replay-button,
+.memory-clear-button,
+.scope-switch button,
+.project-picker-entry,
+.project-picker-breadcrumbs button {
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
 }
 
 /* ========== 设置页：供应商工作区 ========== */
@@ -859,6 +983,11 @@ textarea:focus {
   background: var(--surface-2);
   box-shadow: var(--card-inset);
   overflow: hidden;
+  transition: border-color 150ms ease;
+}
+
+.role-card:hover {
+  border-color: #37465c;
 }
 
 .role-card::after {
@@ -950,7 +1079,8 @@ textarea:focus {
 .fallback-row select {
   min-width: 0;
   height: 31px;
-  padding: 0 5px;
+  padding: 0 18px 0 5px;
+  background-position: right 5px center;
   font-size: 9px;
 }
 
@@ -1060,8 +1190,7 @@ textarea:focus {
 
 .sessions-header {
   flex: 0 0 auto;
-  min-height: 96px;
-  padding-bottom: 20px;
+  padding-bottom: 16px;
 }
 
 .sessions-header-actions {
@@ -1243,11 +1372,11 @@ textarea:focus {
 }
 
 .project-switcher {
-  background: #14181f;
+  background-color: #14181f;
   color: #e7ebf1;
   border: 1px solid #262c38;
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 8px 30px 8px 12px;
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
@@ -1312,7 +1441,11 @@ textarea:focus {
 }
 
 .sidebar-session.active {
-  background: #1d2a45;
+  background: linear-gradient(
+    90deg,
+    rgba(91, 125, 240, 0.18),
+    rgba(91, 125, 240, 0.05)
+  );
   color: #e8eef8;
   box-shadow: inset 2px 0 0 #5b7df0;
 }
@@ -1372,8 +1505,10 @@ textarea:focus {
 }
 
 .empty-detail-mark {
+  display: inline-block;
   font-size: 34px;
   color: #5b7df0;
+  text-shadow: 0 0 26px rgba(91, 125, 240, 0.5);
 }
 
 .empty-detail-inner h2 {
@@ -1485,11 +1620,11 @@ textarea:focus {
 .env-project-select {
   flex: 1;
   min-width: 0;
-  background: #1a2030;
+  background-color: #1a2030;
   color: #e7ebf1;
   border: 1px solid #2a3450;
   border-radius: 6px;
-  padding: 6px 10px;
+  padding: 6px 26px 6px 10px;
   font-size: 12px;
   font-family: inherit;
 }
@@ -1831,10 +1966,10 @@ textarea:focus {
   display: block;
   width: 100%;
   margin-top: 6px;
-  padding: 9px 12px;
+  padding: 9px 32px 9px 12px;
   border: 1px solid #2a3442;
   border-radius: 8px;
-  background: #0f131a;
+  background-color: #0f131a;
   color: #dfe5ee;
   font-size: 13px;
 }
@@ -1843,11 +1978,16 @@ textarea:focus {
 
 .session-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 292px;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   flex: 1 1 auto;
   gap: 16px;
   overflow: hidden;
+}
+
+/* 右栏展开时才分出第二列，收起时聊天区占满 */
+.session-workspace.with-rail {
+  grid-template-columns: minmax(0, 1fr) 292px;
 }
 
 .chat-column {
@@ -1875,6 +2015,7 @@ textarea:focus {
   color: #687485;
   text-align: center;
   font-size: 12px;
+  animation: waiting-pulse 1.8s ease-in-out infinite;
 }
 
 .chat-column .web-composer {
@@ -1896,6 +2037,11 @@ textarea:focus {
   border: 1px solid #2b3441;
   border-radius: 10px;
   background: #141b24;
+  transition: border-color 150ms ease;
+}
+
+.rail-card:hover {
+  border-color: #364258;
 }
 
 .rail-card h2 {
@@ -1911,6 +2057,71 @@ textarea:focus {
   color: #606c7c;
   font-size: 10px;
   line-height: 1.6;
+}
+
+/* ========== 会话页：对话链路 ========== */
+
+/* 跳转定位时留出顶部呼吸空间 */
+.stream-item {
+  scroll-margin-top: 10px;
+}
+
+.chain-list {
+  display: grid;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.chain-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #9aa5b5;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.chain-item:hover {
+  border-color: #2e3846;
+  background: #1a2230;
+  color: #d7dde7;
+}
+
+.chain-index {
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  place-items: center;
+  border-radius: 5px;
+  background: #1d2a45;
+  color: #8fb4ff;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.chain-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chain-item time {
+  color: #5f6b7c;
+  font-family: var(--mono);
+  font-size: 9px;
 }
 
 .rail-todo {
@@ -2024,18 +2235,31 @@ textarea:focus {
 
 /* ========== 会话页：消息流 ========== */
 
+/* 消息流条目进场动效（仅新条目触发，已有 DOM 不会重播） */
+.web-message,
+.web-tool-card,
+.web-approval-card,
+.subtask-card,
+.web-system-line,
+.web-cost-line {
+  animation: rise-in 240ms var(--ease-out);
+}
+
 .web-message {
+  max-width: 86%;
   margin: 0 0 14px;
   padding: 13px 15px;
   border: 1px solid;
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .user-message {
   margin-left: auto;
   border-color: #31517b;
   border-left: 2px solid #5a8de0;
-  background: #1a2d47;
+  border-radius: 12px 12px 4px 12px;
+  background: linear-gradient(160deg, #1d3252, #1a2d47);
+  box-shadow: 0 6px 18px rgba(10, 18, 32, 0.25);
 }
 
 .queued-message {
@@ -2057,6 +2281,7 @@ textarea:focus {
   margin-right: auto;
   border-color: #2d3744;
   border-left: 2px solid #3d4a5c;
+  border-radius: 12px 12px 12px 4px;
   background: #171e28;
 }
 
@@ -2146,6 +2371,15 @@ textarea:focus {
   cursor: pointer;
   font-size: 11px;
   list-style: none;
+  transition: background 140ms ease;
+}
+
+.web-tool-card summary:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.subtask-card summary:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .web-tool-card summary::-webkit-details-marker,
@@ -2426,6 +2660,16 @@ textarea:focus {
   background: #151c26;
   box-shadow: 0 -14px 30px rgba(8, 12, 18, 0.16);
   overflow: hidden;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.web-composer:focus-within {
+  border-color: #5369b7;
+  box-shadow:
+    0 0 0 3px rgba(92, 111, 210, 0.14),
+    0 -14px 30px rgba(8, 12, 18, 0.16);
 }
 
 .web-composer textarea {
@@ -2742,12 +2986,23 @@ textarea:focus {
 }
 
 @media (max-width: 1180px) {
-  .session-workspace {
+  .session-workspace.with-rail {
     grid-template-columns: minmax(0, 1fr) 248px;
   }
 
   .sessions-main {
     padding-right: 28px;
     padding-left: 28px;
+  }
+}
+
+/* 尊重系统的减弱动态效果设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

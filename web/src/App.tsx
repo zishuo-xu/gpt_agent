@@ -127,7 +127,10 @@ export function App() {
           setNotice({ tone: "error", text: error.message });
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        // 切换 scope 中止旧请求时，不清掉新请求的 loading 状态
+        if (!controller.signal.aborted) setLoading(false);
+      });
     return () => controller.abort();
   }, [scope]);
 

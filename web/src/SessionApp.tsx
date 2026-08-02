@@ -114,6 +114,8 @@ export function SessionApp() {
   const chatStreamRef = useRef<HTMLDivElement>(null);
   const previousStatuses = useRef<Record<string, SessionStatus>>({});
   const seenSeqs = useRef<Set<number>>(new Set());
+  /** 刚完成会话的标题提醒（用户查看后清除） */
+  const justCompleted = useRef<{ id: string; title: string } | null>(null);
 
   const selected = useMemo(
     () => sessions.find((session) => session.id === selectedId),
@@ -130,32 +132,37 @@ export function SessionApp() {
     () => buildDisplayItems(visibleEvents),
     [visibleEvents],
   );
+  // 对话链路：每轮用户提问的目录，点击可定位到对应消息
+  const userTurns = useMemo(() => {
+    let turn = 0;
+    return displayItems.flatMap((item) =>
+      item.kind === "message" && item.author === "user"
+        ? [
+            {
+              seq: item.seq,
+              ts: item.ts,
+              text: item.text,
+              turn: (turn += 1),
+            },
+          ]
+        : [],
+    );
+  }, [displayItems]);
+  // 回放模式下清单跟随回放游标，而非会话最新状态
   const latestTodos = useMemo(() => {
-    const update = [...events]
+    const update = [...visibleEvents]
       .reverse()
       .find((record) => record.event.type === "todo_update");
     return (update?.event.todos as Todo[] | undefined) ??
       selected?.todos ??
       [];
-  }, [events, selected]);
+  }, [visibleEvents, selected]);
 
   async function refreshSessions() {
     const response = await fetch(projectUrl("/api/sessions"));
     if (!response.ok) return;
     const payload = await response.json();
-    const next = (payload.sessions ?? []) as SessionSummary[];
-    for (const session of next) {
-      const previous = previousStatuses.current[session.id];
-      if (
-        previous &&
-        previous !== session.status &&
-        session.status === "done"
-      ) {
-        document.title = `任务完成 · ${session.title} · MyAgent`;
-      }
-      previousStatuses.current[session.id] = session.status;
-    }
-    setSessions(next);
+    setSessions((payload.sessions ?? []) as SessionSummary[]);
   }
 
   async function deleteSession(id: string) {
@@ -276,18 +283,36 @@ export function SessionApp() {
     }
   }
 
+  // 标题统一在此设置：等待审批 > 刚完成提醒 > 当前会话 > 默认
   useEffect(() => {
     const waiting = sessions.filter(
       (session) => session.status === "waiting_permission",
     ).length;
+    for (const session of sessions) {
+      const previous = previousStatuses.current[session.id];
+      if (
+        previous &&
+        previous !== session.status &&
+        session.status === "done" &&
+        session.id !== selectedId
+      ) {
+        justCompleted.current = { id: session.id, title: session.title };
+      }
+      previousStatuses.current[session.id] = session.status;
+    }
+    if (justCompleted.current?.id === selectedId) {
+      justCompleted.current = null;
+    }
     if (waiting > 0) {
       document.title = `(${waiting}) 等待审批 · MyAgent`;
+    } else if (justCompleted.current) {
+      document.title = `任务完成 · ${justCompleted.current.title} · MyAgent`;
     } else if (selected) {
       document.title = `${selected.title} · MyAgent`;
     } else {
       document.title = "监控台 · MyAgent";
     }
-  }, [sessions, selected]);
+  }, [sessions, selected, selectedId]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -324,6 +349,14 @@ export function SessionApp() {
     const stream = chatStreamRef.current;
     if (stream) stream.scrollTop = stream.scrollHeight;
   }, [selectedId, events.length, replay]);
+
+  /** 对话链路跳转：平滑滚动到对应 seq 的消息 */
+  function scrollToSeq(seq: number) {
+    const node = chatStreamRef.current?.querySelector(
+      `[data-seq="${seq}"]`,
+    );
+    node?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   function updateMessage(value: string) {
     setMessage(value);
@@ -527,7 +560,15 @@ export function SessionApp() {
                 </button>
                 <button
                   className="detail-toggle"
-                  onClick={() => void deleteSession(selected.id)}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `确认删除会话「${selected.title}」？该操作不可恢复。`,
+                      )
+                    ) {
+                      void deleteSession(selected.id);
+                    }
+                  }}
                   title="删除此会话"
                 >
                   删除
@@ -537,7 +578,7 @@ export function SessionApp() {
                   onClick={() => setShowDetail((v) => !v)}
                   title="任务清单 / 消耗 / 会话信息"
                 >
-                  ⤢ 详情
+                  ⤢ {showDetail ? "收起详情" : "详情"}
                 </button>
               </div>
             </header>
@@ -546,7 +587,7 @@ export function SessionApp() {
               <div className="notice error">{error}</div>
             )}
 
-            <div className="session-workspace">
+            <div className="session-workspace with-rail">
               <section className="chat-column">
                 {replay && (
                   <div className="replay-bar">
@@ -581,25 +622,30 @@ export function SessionApp() {
                     </div>
                   )}
                   {displayItems.map((item) => (
-                    <ItemCard
+                    <div
+                      className="stream-item"
+                      data-seq={item.seq}
                       key={item.seq}
-                      item={item}
-                      locallyResolved={resolvedPermissions}
-                      feedback={
-                        item.kind === "approval"
-                          ? (permissionFeedback[
-                              String(item.event.call.id)
-                            ] ?? "")
-                          : ""
-                      }
-                      onFeedback={(callId, value) =>
-                        setPermissionFeedback((current) => ({
-                          ...current,
-                          [callId]: value,
-                        }))
-                      }
-                      onPermission={answerPermission}
-                    />
+                    >
+                      <ItemCard
+                        item={item}
+                        locallyResolved={resolvedPermissions}
+                        feedback={
+                          item.kind === "approval"
+                            ? (permissionFeedback[
+                                String(item.event.call.id)
+                              ] ?? "")
+                            : ""
+                        }
+                        onFeedback={(callId, value) =>
+                          setPermissionFeedback((current) => ({
+                            ...current,
+                            [callId]: value,
+                          }))
+                        }
+                        onPermission={answerPermission}
+                      />
+                    </div>
                   ))}
                 </div>
                 {!replay && (
@@ -624,8 +670,35 @@ export function SessionApp() {
                 )}
               </section>
 
-              {showDetail && (
-                <aside className="session-rail">
+              <aside className="session-rail">
+                <RailCard title="对话链路">
+                  {userTurns.length === 0 ? (
+                    <p className="rail-empty">
+                      发送消息后，这里会列出每轮提问，点击可跳转。
+                    </p>
+                  ) : (
+                    <div className="chain-list">
+                      {userTurns.map((turn) => (
+                        <button
+                          className="chain-item"
+                          key={turn.seq}
+                          onClick={() => scrollToSeq(turn.seq)}
+                          title={turn.text}
+                        >
+                          <span className="chain-index">
+                            {turn.turn}
+                          </span>
+                          <span className="chain-text">
+                            {turn.text}
+                          </span>
+                          <time>{formatTime(turn.ts)}</time>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </RailCard>
+                {showDetail && (
+                  <>
                 <RailCard title="任务清单">
                   {latestTodos.length === 0 ? (
                     <p className="rail-empty">
@@ -708,8 +781,9 @@ export function SessionApp() {
                     ▶ 回放模式
                   </button>
                 </RailCard>
+                  </>
+                )}
               </aside>
-              )}
             </div>
           </>
         ) : (
@@ -1530,17 +1604,6 @@ function formatTime(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function formatDuration(createdAt: string): string {
-  const elapsed = Math.max(
-    0,
-    Date.now() - Date.parse(createdAt),
-  );
-  const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m`;
 }
 
 function statusLabel(status: string): string {
