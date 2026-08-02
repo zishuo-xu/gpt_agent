@@ -196,10 +196,42 @@ main {
   padding-bottom: 24px;
 }
 
+/* 头部左侧内容可收缩，让长标题能截断省略 */
+.page-header > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .page-header h1 {
   margin: 0;
   font-size: 30px;
   letter-spacing: -0.04em;
+  line-height: 1.2;
+}
+
+/* 长标题单行截断省略，避免断行成"前" + "…" */
+.title-with-status h1 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.title-with-status {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 标题与头部按钮：避免按钮被挤压换行、长标题挤占 */
+.page-header .header-actions {
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+.page-header .header-actions button {
+  white-space: nowrap;
 }
 
 .page-header p,
@@ -1226,55 +1258,77 @@ textarea:focus {
   border-color: #38435a;
 }
 
-/* —— 新建会话执行环境选择 —— */
+/* —— 新建会话执行环境选择（左右两列卡片） —— */
 .new-task-env {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
   margin-bottom: 14px;
 }
 
-.env-option {
+.env-card {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px 16px 14px;
   border: 1px solid #262c38;
-  border-radius: 8px;
+  border-radius: 12px;
   background: #14181f;
   cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  min-height: 118px;
 }
 
-.env-option input[type="radio"] {
-  accent-color: #3b82f6;
+.env-card:hover {
+  border-color: #38435a;
 }
 
-.env-title {
+.env-card-active {
+  border-color: #3b82f6;
+  background: #16203a;
+}
+
+.env-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.env-card-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.env-card-title {
   color: #e7ebf1;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  white-space: nowrap;
 }
 
-.env-hint {
-  color: #6b7688;
+.env-card-desc {
+  color: #8a94a6;
   font-size: 12px;
+  line-height: 1.5;
 }
 
-.env-picker {
+.env-card-extra {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
-  justify-content: flex-end;
+  width: 100%;
+  margin-top: 2px;
 }
 
 .env-project-select {
+  flex: 1;
+  min-width: 0;
   background: #1a2030;
   color: #e7ebf1;
   border: 1px solid #2a3450;
   border-radius: 6px;
-  padding: 5px 8px;
+  padding: 6px 10px;
   font-size: 12px;
   font-family: inherit;
 }
@@ -1284,11 +1338,12 @@ textarea:focus {
   border: 1px solid #2a3450;
   color: #9fb6e0;
   border-radius: 6px;
-  padding: 5px 10px;
+  padding: 6px 10px;
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .env-open-other:hover {
@@ -1553,9 +1608,6 @@ textarea:focus {
 /* ========== 会话页：新建任务面板 ========== */
 
 .new-task-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 210px;
-  gap: 16px 24px;
   margin-bottom: 18px;
   padding: 20px;
   border: 1px solid #303a48;
@@ -1567,6 +1619,7 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 14px;
+  margin-bottom: 16px;
 }
 
 .new-session-mark {
@@ -1574,6 +1627,7 @@ textarea:focus {
   width: 42px;
   height: 42px;
   margin: 0;
+  flex-shrink: 0;
   place-items: center;
   border-radius: 11px;
   background: linear-gradient(135deg, #6d9bff, #7c72f2);
@@ -1593,8 +1647,25 @@ textarea:focus {
 }
 
 .new-task-panel .web-composer {
-  grid-column: 1 / -1;
-  margin: 0;
+  margin: 14px 0 0;
+}
+
+/* 权限档下拉占整行 */
+.new-task-panel > label {
+  display: block;
+  margin-top: 4px;
+}
+
+.new-task-panel > label select {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 9px 12px;
+  border: 1px solid #2a3442;
+  border-radius: 8px;
+  background: #0f131a;
+  color: #dfe5ee;
+  font-size: 13px;
 }
 
 /* ========== 会话页：聊天工作区 ========== */

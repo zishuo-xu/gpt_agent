@@ -795,16 +795,22 @@ export function SessionApp() {
                   </div>
                 </div>
                 <div className="new-task-env">
-                  <label className="env-option">
+                  <label
+                    className={`env-card ${newTaskEnv === "project" ? "env-card-active" : ""}`}
+                  >
                     <input
                       type="radio"
                       name="new-task-env"
                       checked={newTaskEnv === "project"}
                       onChange={() => setNewTaskEnv("project")}
                     />
-                    <span className="env-title">在项目下执行</span>
+                    <span className="env-card-icon">📁</span>
+                    <span className="env-card-title">在项目下执行</span>
+                    <span className="env-card-desc">
+                      可读写文件、执行命令，适合修改代码
+                    </span>
                     {newTaskEnv === "project" && (
-                      <span className="env-picker">
+                      <span className="env-card-extra">
                         <select
                           className="env-project-select"
                           value={newTaskProject}
@@ -830,16 +836,19 @@ export function SessionApp() {
                       </span>
                     )}
                   </label>
-                  <label className="env-option">
+                  <label
+                    className={`env-card ${newTaskEnv === "lobby" ? "env-card-active" : ""}`}
+                  >
                     <input
                       type="radio"
                       name="new-task-env"
                       checked={newTaskEnv === "lobby"}
                       onChange={() => setNewTaskEnv("lobby")}
                     />
-                    <span className="env-title">在大厅执行</span>
-                    <span className="env-hint">
-                      不操作任何文件；可读取你提供的文件做分析
+                    <span className="env-card-icon">💬</span>
+                    <span className="env-card-title">在大厅执行</span>
+                    <span className="env-card-desc">
+                      不修改任何文件，可读取你提供的文件做分析
                     </span>
                   </label>
                 </div>
