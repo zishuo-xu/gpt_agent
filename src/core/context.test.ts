@@ -189,6 +189,32 @@ test("出现探索工具后生成并注入仓库签名地图", async () => {
   assert.match(prepared.system, /fn helper\(value\)/);
 });
 
+
+test("静态段会话内固定：运行中修改记忆文件不改变 system 前缀", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-context-static-"));
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-context-home-"),
+  );
+  await mkdir(path.join(cwd, ".myagent", "memory"), { recursive: true });
+  await writeFile(path.join(cwd, "AGENTS.md"), "版本一：使用 pnpm。", "utf8");
+  const context = new ContextManager({ cwd, homeDir });
+
+  const first = await context.prepare("base", [
+    { role: "user", content: "问题 1" },
+  ]);
+  assert.match(first.system, /版本一/);
+
+  // 模拟会话中 agent 写入记忆：当前会话 system 不刷新（参照 Pi：启动时加载）
+  await writeFile(path.join(cwd, "AGENTS.md"), "版本二：改用 npm。", "utf8");
+  const second = await context.prepare("base", [
+    { role: "user", content: "问题 1" },
+    { role: "assistant", content: "回答", toolCalls: [] },
+    { role: "user", content: "问题 2" },
+  ]);
+
+  assert.equal(first.system, second.system, "system 前缀必须保持字节级稳定");
+});
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -31,6 +31,10 @@ export class ContextManager {
   #repoMap: RepoMap | null = null;
   /** 跨项目记忆索引：会话内惰性生成一次，保证 system 前缀稳定（利于 prompt cache） */
   #crossProjectIndex: string | null = null;
+  /** 记忆类静态段（AGENTS.md + 记忆文件 + 跨项目索引）：会话内只构建一次，
+      参照 Pi 的 AGENTS.md 启动时加载——agent 运行中写记忆不刷新当前会话 system，
+      保证前缀字节级稳定，最大化 prompt cache 命中 */
+  #staticSections: string[] | null = null;
 
   constructor(options: ContextManagerOptions = {}) {
     this.#cwd = options.cwd;
@@ -62,51 +66,21 @@ export class ContextManager {
       }
     }
     const sections = [baseSystemPrompt];
-    if (this.#cwd) {
-      await this.#appendFileSection(
-        sections,
-        "项目指令（AGENTS.md）",
-        path.join(this.#cwd, "AGENTS.md"),
-      );
-      await this.#appendFileSection(
-        sections,
-        "全局记忆",
-        path.join(this.#homeDir, ".myagent", "MEMORY.md"),
-      );
-      for (const [title, fileName] of [
-        ["项目约定", "conventions.md"],
-        ["项目踩坑", "pitfalls.md"],
-        ["项目决策", "decisions.md"],
-      ] as const) {
-        await this.#appendFileSection(
-          sections,
-          title,
-          path.join(this.#cwd, ".myagent", "memory", fileName),
-        );
-      }
-      // 跨项目索引是低频稳定内容：会话内只生成一次，避免每轮重扫破坏 system 前缀缓存
-      const crossProjectIndex =
-        this.#crossProjectIndex ??
-        (await this.#buildCrossProjectMemoryIndex());
-      this.#crossProjectIndex = crossProjectIndex;
-      if (crossProjectIndex) {
+    if (this.#cwd && this.#staticSections === null) {
+      this.#staticSections = await this.#buildStaticSections();
+    }
+    if (this.#staticSections) {
+      sections.push(...this.#staticSections);
+    }
+    if (this.#repoMap) {
+      const map = await this.#repoMap.get();
+      if (map) {
         sections.push(
           [
-            "其他项目记忆索引（仅标题；判断相关时用 Read 调取所列完整路径）：",
-            crossProjectIndex,
+            "仓库签名地图（仅签名，用 Read 查看实现；用 Glob/Grep 探索更多）：",
+            map,
           ].join("\n"),
         );
-      }
-      if (this.#repoMap) {
-        const map = await this.#repoMap.get();
-        if (map) {
-          sections.push(
-            [
-              "仓库签名地图（仅签名，用 Read 查看实现；用 Glob/Grep 探索更多）：",
-              map,
-            ].join("\n"),
-          );
-        }
       }
     }
     // todos 随 TodoWrite 高频变化，绝不能进 system——否则 system 中一字节变化
@@ -138,6 +112,46 @@ export class ContextManager {
       system: sections.join("\n\n"),
       messages: preparedMessages,
     };
+  }
+
+  /** 构建记忆类静态段：AGENTS.md + 全局记忆 + 项目记忆 + 跨项目索引。
+      仅在会话首次 prepare 时执行一次，之后复用，保证 system 前缀稳定。 */
+  async #buildStaticSections(): Promise<string[]> {
+    const sections: string[] = [];
+    await this.#appendFileSection(
+      sections,
+      "项目指令（AGENTS.md）",
+      path.join(this.#cwd!, "AGENTS.md"),
+    );
+    await this.#appendFileSection(
+      sections,
+      "全局记忆",
+      path.join(this.#homeDir, ".myagent", "MEMORY.md"),
+    );
+    for (const [title, fileName] of [
+      ["项目约定", "conventions.md"],
+      ["项目踩坑", "pitfalls.md"],
+      ["项目决策", "decisions.md"],
+    ] as const) {
+      await this.#appendFileSection(
+        sections,
+        title,
+        path.join(this.#cwd!, ".myagent", "memory", fileName),
+      );
+    }
+    const crossProjectIndex =
+      this.#crossProjectIndex ??
+      (await this.#buildCrossProjectMemoryIndex());
+    this.#crossProjectIndex = crossProjectIndex;
+    if (crossProjectIndex) {
+      sections.push(
+        [
+          "其他项目记忆索引（仅标题；判断相关时用 Read 调取所列完整路径）：",
+          crossProjectIndex,
+        ].join("\n"),
+      );
+    }
+    return sections;
   }
 
   async #buildCrossProjectMemoryIndex(): Promise<string> {
