@@ -152,10 +152,12 @@ async function runCli(): Promise<void> {
           "/compact                           立即压缩当前会话上下文",
           "/tree                              查看会话分支树",
           "/branch <seq> [label]              从指定事件 seq 分裂新分支",
+          "/goto <branchId>                    回溯切换到已有分支",
           "/timeline                          列出最近事件（查看分支点 seq）",
           "/init                              只读扫描并生成 AGENTS.md 草稿",
           "/config [global|project]           查看生效配置摘要或指定作用域配置",
           "/config set <key> <value> [global|project] 修改配置项",
+          "/model                             查看角色模型；/model main <provider>/<model> 切换（热生效）",
           "/allow [once|session|project|global] 回答并选择记忆范围",
           "/deny [留言]                       拒绝，可附纠正意见",
           "/exit                              退出",
@@ -325,6 +327,21 @@ async function runCli(): Promise<void> {
       readline.prompt();
       return;
     }
+    if (line.startsWith("/goto ")) {
+      const branchId = line.slice("/goto ".length).trim();
+      try {
+        session.switchBranch(branchId);
+        output.write(
+          `已切换到分支 #${branchId}，后续输入将写入该分支。\n`,
+        );
+      } catch (error) {
+        output.write(
+          `${error instanceof Error ? error.message : "切换分支失败"}\n`,
+        );
+      }
+      readline.prompt();
+      return;
+    }
     if (line === "/timeline") {
       for (const record of session.events().slice(-30)) {
         output.write(
@@ -346,6 +363,54 @@ async function runCli(): Promise<void> {
     }
     if (line === "/config" || line.startsWith("/config ")) {
       await handleConfigCommand(line);
+      readline.prompt();
+      return;
+    }
+    if (line === "/model" || line.startsWith("/model ")) {
+      const rest =
+        line === "/model" ? "" : line.slice("/model ".length).trim();
+      if (!rest) {
+        const config = await configService.readEffective();
+        const roles = (["main", "cheap", "explore"] as ModelRole[])
+          .map(
+            (role) =>
+              `${role}=${config.models[role].providerId}/${config.models[role].model}`,
+          )
+          .join(" · ");
+        output.write(`角色模型：${roles}\n`);
+        output.write(
+          "用法：/model main <providerId>/<model> 切换模型（写入项目配置，热生效）\n",
+        );
+      } else {
+        const match = rest.match(/^(main|cheap|explore)\s+(\S+)\/(.+)$/);
+        if (!match) {
+          output.write("用法：/model main <providerId>/<model>\n");
+        } else {
+          try {
+            const role = match[1] as ModelRole;
+            const providerId = match[2]!;
+            const model = match[3]!;
+            const config = await configService.read("project");
+            const provider = config.providers.find(
+              (candidate) => candidate.id === providerId,
+            );
+            if (!provider) {
+              output.write(`供应商 ${providerId} 未配置（/config 查看）。\n`);
+            } else {
+              config.models[role].providerId = providerId;
+              config.models[role].model = model;
+              await configService.write("project", config);
+              output.write(
+                `已切换 ${role} → ${providerId}/${model}（配置热生效）\n`,
+              );
+            }
+          } catch (error) {
+            output.write(
+              `${error instanceof Error ? error.message : "切换模型失败"}\n`,
+            );
+          }
+        }
+      }
       readline.prompt();
       return;
     }

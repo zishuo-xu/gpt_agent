@@ -2119,6 +2119,78 @@ select {
   line-height: 1.6;
 }
 
+/* ========== 会话页：分支树 ========== */
+
+.branch-tree {
+  display: grid;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.branch-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #8b96a6;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.branch-node:hover:not(:disabled) {
+  background: #1d2733;
+  color: #dbe4ee;
+}
+
+.branch-node:disabled {
+  cursor: default;
+}
+
+.branch-node.current {
+  background: #1a2b3d;
+  color: #7cc0ff;
+}
+
+.branch-dot {
+  font-size: 10px;
+  flex: none;
+}
+
+.branch-node:not(.current) .branch-dot {
+  color: #4b5868;
+}
+
+.branch-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  flex: none;
+}
+
+.branch-label {
+  color: #6f7b8d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-node.current .branch-label {
+  color: #5d8ec0;
+}
+
+.branch-fork {
+  margin-left: auto;
+  color: #4b5868;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  flex: none;
+}
+
 /* ========== 会话页：对话链路 ========== */
 
 /* 跳转定位时留出顶部呼吸空间 */

@@ -385,6 +385,133 @@ test("AgentSession.forkBranch：运行中拒绝分支", async () => {
   await sending;
 });
 
+test("branchesFromEvents：同一分支分裂+回溯只建一个节点", () => {
+  const branches = branchesFromEvents([
+    event(
+      1,
+      { type: "branch_switch", branchId: "b1", parent: "main", forkSeq: 1 },
+      "b1",
+    ),
+    event(2, { type: "user", text: "分支任务" }, "b1"),
+    // 回溯到 main（复用 branch_switch，不建新节点）
+    event(
+      3,
+      { type: "branch_switch", branchId: "main", parent: "b1", forkSeq: 1 },
+      "main",
+    ),
+    event(4, { type: "user", text: "主线继续" }, "main"),
+    // 再切回 b1
+    event(
+      5,
+      { type: "branch_switch", branchId: "b1", parent: "main", forkSeq: 1 },
+      "b1",
+    ),
+  ]);
+  assert.equal(branches.length, 2);
+  assert.equal(branches[1]?.id, "b1");
+});
+
+test("conversationFrom：回溯到 main 后视角为主干全部事件（含回溯点后的新事件）", () => {
+  const records = [
+    event(1, { type: "user", text: "开场" }),
+    event(2, { type: "text_delta", text: "回答" }),
+    event(
+      3,
+      { type: "branch_switch", branchId: "b1", parent: "main", forkSeq: 2 },
+      "b1",
+    ),
+    event(4, { type: "user", text: "分支探索" }, "b1"),
+    event(5, { type: "text_delta", text: "分支回答" }, "b1"),
+    event(
+      6,
+      { type: "branch_switch", branchId: "main", parent: "b1", forkSeq: 2 },
+      "main",
+    ),
+    event(7, { type: "user", text: "主线继续" }, "main"),
+    event(8, { type: "text_delta", text: "主线回答" }, "main"),
+  ];
+  const branches = branchesFromEvents(records);
+  const messages = conversationFrom(records, branches, "main");
+  assert.deepEqual(messages, [
+    { role: "user", content: "开场" },
+    { role: "assistant", content: "回答", toolCalls: [] },
+    { role: "user", content: "主线继续" },
+    { role: "assistant", content: "主线回答", toolCalls: [] },
+  ]);
+  // b1 视角不受回溯影响：只含 fork 前 + b1 分支事件
+  const b1Messages = conversationFrom(records, branches, "b1");
+  assert.deepEqual(b1Messages, [
+    { role: "user", content: "开场" },
+    { role: "assistant", content: "回答", toolCalls: [] },
+    { role: "user", content: "分支探索" },
+    { role: "assistant", content: "分支回答", toolCalls: [] },
+  ]);
+});
+
+test("AgentSession.switchBranch：回溯切换、模型历史重建、后续事件归属目标分支", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-goto-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-goto-state-"),
+  );
+  const client = new ScriptedClient([
+    response("回答一"),
+    response("回答二"),
+    response("回答三"),
+    response("回答四"),
+  ]);
+  const session = new AgentSession({
+    id: "goto-session",
+    title: "回溯测试",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(client, []),
+    stateDir,
+  });
+
+  await session.sendInput("主线任务");
+  const branchId = session.forkBranch(1, "试验");
+  await session.sendInput("分支任务");
+  const beforeSwitch = session.events().length;
+
+  // 无效分支被拒绝
+  assert.throws(() => session.switchBranch("no-such"), /不存在/);
+  // 切回 main：不建新节点
+  session.switchBranch("main");
+  assert.equal(session.branches().length, 2);
+  assert.equal(session.currentBranchId(), "main");
+  // 回溯事件归属 main
+  const switchRecord = session.events().at(-1);
+  assert.equal(switchRecord?.event.type, "branch_switch");
+  assert.equal(switchRecord?.branchId, "main");
+
+  await session.sendInput("主线继续");
+  const mainUser = [...session.events()]
+    .reverse()
+    .find((record) => record.event.type === "user");
+  assert.equal(mainUser?.branchId, "main");
+
+  // 再切回分支 b1
+  session.switchBranch(branchId);
+  await session.sendInput("分支继续");
+  const branchUser = [...session.events()]
+    .reverse()
+    .find((record) => record.event.type === "user");
+  assert.equal(branchUser?.branchId, branchId);
+  // 分支树仍只有两个节点
+  assert.equal(session.branches().length, 2);
+
+  // 模型历史：切回 b1 后 = fork 点前 + b1 分支事件（回溯/主线事件不进入）
+  const lastRequest = client.requests.at(-1);
+  assert.deepEqual(
+    lastRequest?.messages.map((message) => message.content),
+    ["主线任务", "分支任务", "回答二", "分支继续"],
+  );
+
+  // 事件总数：beforeSwitch 之后 = 2 次回溯 switch + 2 轮 × 4 事件 = 10
+  assert.equal(session.events().length, beforeSwitch + 10);
+  await session.flush();
+});
+
 test("恢复后分支状态与当前分支保持：continue 走新分支", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-fork-cwd3-"));
   const stateDir = await mkdtemp(

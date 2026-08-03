@@ -30,6 +30,10 @@ export function branchesFromEvents(
   for (const record of records) {
     const event = record.event;
     if (event.type !== "branch_switch") continue;
+    // 同一分支可能被多次回溯切换（branch_switch 复用）；仅首次（分裂）建节点
+    if (branches.some((branch) => branch.id === event.branchId)) {
+      continue;
+    }
     branches.push({
       id: event.branchId,
       parent: event.parent,

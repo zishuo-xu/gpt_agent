@@ -375,6 +375,31 @@ export class AgentSession {
     return branchId;
   }
 
+  /** 回溯切换到已存在的分支（不建新节点）；后续消息写入目标分支 */
+  switchBranch(branchId: string): void {
+    if (this.#processing || this.#taskBox) {
+      throw new Error("会话运行中，请在当前轮结束后切换");
+    }
+    const target = this.#branches.find(
+      (branch) => branch.id === branchId,
+    );
+    if (!target) {
+      throw new Error(`分支 #${branchId} 不存在（/tree 查看）`);
+    }
+    if (target.id === this.#currentBranchId) return;
+    // 复用 branch_switch 事件：目标分支已存在时 branchesFromEvents 只切换不建节点
+    this.#bus.emit({
+      type: "branch_switch",
+      branchId: target.id,
+      parent: this.#currentBranchId,
+      forkSeq: target.forkSeq ?? 0,
+      ...(target.label ? { label: target.label } : {}),
+    });
+    this.#model.resetConversation(
+      conversationFrom(this.#events, this.#branches, branchId),
+    );
+  }
+
   subscribe(listener: (event: AgentSessionEvent) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);

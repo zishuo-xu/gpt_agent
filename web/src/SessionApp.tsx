@@ -67,6 +67,14 @@ interface RunBoundsPreview {
   semanticBounds: string[];
 }
 
+interface SessionBranch {
+  id: string;
+  parent: string | null;
+  forkSeq: number | null;
+  label?: string;
+  createdAt: string;
+}
+
 const statusMeta: Record<
   SessionStatus,
   { label: string; tone: string }
@@ -91,6 +99,8 @@ export function SessionApp() {
   const [fsError, setFsError] = useState("");
   const [fsOpening, setFsOpening] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
+  const [branches, setBranches] = useState<SessionBranch[]>([]);
+  const [currentBranchId, setCurrentBranchId] = useState("main");
   const [message, setMessage] = useState("");
   const [permissionMode, setPermissionMode] =
     useState<PermissionMode>("normal");
@@ -175,6 +185,41 @@ export function SessionApp() {
     if (!response.ok) return;
     if (selectedId === id) setSelectedId("");
     await refreshSessions();
+  }
+
+  async function refreshBranches() {
+    if (!selectedId) {
+      setBranches([]);
+      setCurrentBranchId("main");
+      return;
+    }
+    const response = await fetch(
+      projectUrl(`/api/sessions/${selectedId}/branches`),
+    );
+    if (!response.ok) return;
+    const payload = await response.json();
+    setBranches((payload.branches ?? []) as SessionBranch[]);
+    setCurrentBranchId(payload.currentBranchId ?? "main");
+  }
+
+  /** 回溯切换分支：事件流会推送 branch_switch，树随 SSE 自动刷新 */
+  async function switchBranch(branchId: string) {
+    if (busy || !selectedId || branchId === currentBranchId) return;
+    const response = await fetch(
+      projectUrl(`/api/sessions/${selectedId}/switch-branch`),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branchId }),
+      },
+    );
+    if (response.ok) {
+      const payload = await response.json();
+      setCurrentBranchId(payload.currentBranchId ?? branchId);
+    } else {
+      const payload = await response.json().catch(() => null);
+      setError(payload?.error ?? "切换分支失败");
+    }
   }
 
   function projectUrl(path: string, key?: string): string {
@@ -332,6 +377,7 @@ export function SessionApp() {
     setReplayCursor(0);
     setResolvedPermissions(new Set());
     seenSeqs.current = new Set();
+    void refreshBranches();
     const source = new EventSource(
       projectUrl(`/api/sessions/${selectedId}/stream`),
     );
@@ -342,6 +388,10 @@ export function SessionApp() {
       if (seenSeqs.current.has(record.seq)) return;
       seenSeqs.current.add(record.seq);
       setEvents((current) => [...current, record]);
+      // 分支切换事件实时刷新分支树（含跨端切换：CLI /branch 或 /goto）
+      if (record.event.type === "branch_switch") {
+        void refreshBranches();
+      }
     };
     source.onerror = () => {
       if (source.readyState === EventSource.CLOSED) {
@@ -678,6 +728,22 @@ export function SessionApp() {
               </section>
 
               <aside className="session-rail">
+                <RailCard title="分支树">
+                  {branches.length === 0 ? (
+                    <p className="rail-empty">
+                      fork 后可在此回溯切换分支。
+                    </p>
+                  ) : (
+                    <BranchTree
+                      branches={branches}
+                      currentBranchId={currentBranchId}
+                      busy={busy}
+                      onSwitch={(branchId) =>
+                        void switchBranch(branchId)
+                      }
+                    />
+                  )}
+                </RailCard>
                 <RailCard title="对话链路">
                   {userTurns.length === 0 ? (
                     <p className="rail-empty">
@@ -1605,6 +1671,66 @@ function RailCard(props: {
       <h2>{props.title}</h2>
       {props.children}
     </section>
+  );
+}
+
+function BranchTree(props: {
+  branches: SessionBranch[];
+  currentBranchId: string;
+  busy: boolean;
+  onSwitch: (branchId: string) => void;
+}) {
+  const rows: Array<{ branch: SessionBranch; depth: number }> =
+    [];
+  const byParent = new Map<string | null, SessionBranch[]>();
+  for (const branch of props.branches) {
+    const siblings = byParent.get(branch.parent) ?? [];
+    siblings.push(branch);
+    byParent.set(branch.parent, siblings);
+  }
+  const walk = (parentId: string | null, depth: number) => {
+    const siblings = (byParent.get(parentId) ?? []).sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt),
+    );
+    for (const branch of siblings) {
+      rows.push({ branch, depth });
+      walk(branch.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return (
+    <div className="branch-tree">
+      {rows.map(({ branch, depth }) => {
+        const isCurrent = branch.id === props.currentBranchId;
+        const forkInfo =
+          branch.forkSeq !== null ? `@#${branch.forkSeq}` : "";
+        return (
+          <button
+            key={branch.id}
+            className={`branch-node ${isCurrent ? "current" : ""}`}
+            style={{ paddingLeft: 10 + depth * 16 }}
+            disabled={props.busy || isCurrent}
+            onClick={() => props.onSwitch(branch.id)}
+            title={
+              isCurrent
+                ? "当前分支"
+                : props.busy
+                  ? "任务运行中，本轮结束后可切换"
+                  : "点击切换到此分支"
+            }
+          >
+            <span className="branch-dot">{isCurrent ? "◉" : "○"}</span>
+            <span className="branch-id">#{branch.id}</span>
+            {branch.label && (
+              <span className="branch-label">{branch.label}</span>
+            )}
+            {forkInfo && (
+              <span className="branch-fork">{forkInfo}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

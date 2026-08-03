@@ -400,6 +400,39 @@ export function createWebApp(
       : context.json({ error: "会话当前未运行" }, 409);
   });
 
+  app.get("/api/sessions/:id/branches", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
+    if (!session) return context.json({ error: "会话不存在" }, 404);
+    return context.json({
+      branches: session.branches(),
+      currentBranchId: session.currentBranchId(),
+    });
+  });
+
+  app.post("/api/sessions/:id/switch-branch", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
+    if (!session) return context.json({ error: "会话不存在" }, 404);
+    try {
+      const body = (await context.req.json()) as { branchId?: string };
+      const branchId = body.branchId?.trim();
+      if (!branchId) {
+        return context.json({ error: "缺少 branchId" }, 400);
+      }
+      session.switchBranch(branchId);
+      return context.json({
+        switched: true,
+        currentBranchId: session.currentBranchId(),
+      });
+    } catch (error) {
+      return context.json(
+        { error: error instanceof Error ? error.message : "切换分支失败" },
+        409,
+      );
+    }
+  });
+
   app.delete("/api/sessions/:id", async (context) => {
     const target = await resolveProject(context);
     if (!target.sessionManager) {

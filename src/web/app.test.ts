@@ -285,3 +285,93 @@ test("项目列表包含大厅项", async () => {
   assert.equal(lobby.name, "大厅（不操作文件）");
   assert.equal(lobby.lobby, true);
 });
+
+test("分支 API 列出分支树并支持切换", async () => {
+  const { service } = await fixture();
+  let currentBranchId = "main";
+  const fakeSession = {
+    id: "sess-branch",
+    branches: () => [
+      {
+        id: "main",
+        parent: null,
+        forkSeq: null,
+        label: null,
+        createdAt: "2026-08-03T00:00:00.000Z",
+      },
+      {
+        id: "feat",
+        parent: "main",
+        forkSeq: 2,
+        label: "实验",
+        createdAt: "2026-08-03T00:01:00.000Z",
+      },
+    ],
+    currentBranchId: () => currentBranchId,
+    switchBranch: (branchId: string) => {
+      if (branchId !== "main" && branchId !== "feat") {
+        throw new Error(`分支 #${branchId} 不存在`);
+      }
+      currentBranchId = branchId;
+    },
+  } as never;
+  const fakeManager = {
+    get: (id: string) =>
+      id === "sess-branch" ? fakeSession : undefined,
+  } as unknown as WebSessionManager;
+  const app = createWebApp(service, fakeManager);
+
+  // 分支列表 + 当前分支
+  const listResponse = await app.request(
+    "/api/sessions/sess-branch/branches",
+  );
+  assert.equal(listResponse.status, 200);
+  const list = await listResponse.json();
+  assert.equal(list.currentBranchId, "main");
+  assert.deepEqual(
+    list.branches.map((branch: { id: string }) => branch.id),
+    ["main", "feat"],
+  );
+
+  // 切换到已有分支
+  const ok = await app.request(
+    "/api/sessions/sess-branch/switch-branch",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ branchId: "feat" }),
+    },
+  );
+  assert.equal(ok.status, 200);
+  const switched = await ok.json();
+  assert.equal(switched.switched, true);
+  assert.equal(switched.currentBranchId, "feat");
+
+  // 无效分支 → 409
+  const bad = await app.request(
+    "/api/sessions/sess-branch/switch-branch",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ branchId: "nope" }),
+    },
+  );
+  assert.equal(bad.status, 409);
+
+  // 缺少 branchId → 400
+  const empty = await app.request(
+    "/api/sessions/sess-branch/switch-branch",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  assert.equal(empty.status, 400);
+
+  // 会话不存在 → 404
+  const missing = await app.request(
+    "/api/sessions/unknown/branches",
+  );
+  assert.equal(missing.status, 404);
+});
