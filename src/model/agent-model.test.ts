@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ConversationAgentModel } from "./agent-model.js";
+import { buildSystemPrompt, ConversationAgentModel } from "./agent-model.js";
+import { EXPLORE_TOOL_NAMES } from "./tool-definitions.js";
 import type {
   CompletionRequest,
   ConversationMessage,
@@ -199,4 +200,66 @@ test("硬压缩使用 cheap 模型摘要并保留最近对话", async () => {
     ).length,
     2,
   );
+});
+
+test("buildSystemPrompt 默认输出与历史全量指南逐字一致", () => {
+  const prompt = buildSystemPrompt(undefined);
+  assert.ok(
+    prompt.includes(
+      "Use Grep and Glob to locate relevant code before broad reading. " +
+        "For tasks with roughly three or more steps, call TodoWrite first " +
+        "and keep exactly one item in_progress until the work is complete.",
+    ),
+    "Grep+Todo 指南应保持原合并段落",
+  );
+  assert.ok(prompt.includes("Use Task for broad repository exploration"));
+  assert.ok(prompt.includes("The Bash tool runs in the project root"));
+  assert.ok(prompt.includes("persist one concise dated entry under .myagent/memory/"));
+});
+
+test("只读子代理工具集：请求只带探索工具，system 裁剪 Task/Bash 指南", async () => {
+  const client = new CapturingClient([response("结论：…")]);
+  const model = new ConversationAgentModel(
+    client,
+    "探索这个仓库",
+    undefined,
+    { toolNames: EXPLORE_TOOL_NAMES },
+  );
+  await model.next(new AbortController().signal);
+  const request = client.requests[0]!;
+  assert.deepEqual(
+    request.tools?.map((tool) => tool.name),
+    ["Read", "Grep", "Glob", "TodoWrite"],
+    "只读子代理不应注入写工具与 Task",
+  );
+  assert.ok(!request.system.includes("Use Task for broad"), "无 Task 指南");
+  assert.ok(!request.system.includes("The Bash tool runs"), "无 Bash 指南");
+  assert.ok(request.system.includes("Use Grep and Glob"), "保留导航指南");
+});
+
+test("压缩请求不携带工具 schema", async () => {
+  const history: ConversationMessage[] = [];
+  for (let index = 1; index <= 5; index += 1) {
+    history.push({ role: "user", content: `用户问题 ${index}` });
+    history.push({
+      role: "assistant",
+      content: `助手回答 ${index} ${"x".repeat(200)}`,
+      toolCalls: [],
+    });
+  }
+  const cheap = new CapturingClient([
+    response("Task goal: 修复问题", 40, 12),
+  ]);
+  const model = new ConversationAgentModel(
+    new CapturingClient([response("继续")]),
+    history,
+  );
+  model.configureCompaction({
+    client: cheap,
+    thresholdTokens: 1,
+    keepRecentTurns: 2,
+    onCompacted: () => undefined,
+  });
+  await model.next(new AbortController().signal);
+  assert.deepEqual(cheap.requests[0]?.tools, [], "压缩请求不应携带工具");
 });

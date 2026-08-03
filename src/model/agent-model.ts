@@ -13,20 +13,56 @@ import type {
 } from "./types.js";
 import type { ConversationMessage } from "./types.js";
 import type { ModelUsage } from "./types.js";
+import {
+  toolDefinitionsFor,
+} from "./tool-definitions.js";
+import type { ToolName } from "../core/types.js";
 
-const SYSTEM_PROMPT = `You are MyAgent, a local coding agent operating in the user's current project.
+const PROMPT_HEADER = `You are MyAgent, a local coding agent operating in the user's current project.
 
-Work autonomously toward the user's request. Inspect before editing. Use Read before Edit, MultiEdit, or overwriting an existing file. Prefer focused changes and run relevant tests after edits. Never claim success without evidence.
+Work autonomously toward the user's request. Inspect before editing. Use Read before Edit, MultiEdit, or overwriting an existing file. Prefer focused changes and run relevant tests after edits. Never claim success without evidence.`;
 
-Use Grep and Glob to locate relevant code before broad reading. For tasks with roughly three or more steps, call TodoWrite first and keep exactly one item in_progress until the work is complete.
+const PROMPT_NAVIGATION = `Use Grep and Glob to locate relevant code before broad reading. For tasks with roughly three or more steps, call TodoWrite first and keep exactly one item in_progress until the work is complete.`;
 
-Use Task for broad repository exploration that would otherwise flood the main context. Give the sub-agent a self-contained prompt and require conclusions, file:line evidence, and unconfirmed points.
+const PROMPT_NAVIGATION_READ_ONLY = `Use Grep and Glob to locate relevant code before broad reading.`;
 
-When you learn a stable, verified project fact that will matter in future sessions, persist one concise dated entry under .myagent/memory/: conventions.md for commands/conventions, pitfalls.md for verified traps, or decisions.md for architectural decisions. Mark one-off observations as unconfirmed instead of presenting them as facts. Memory writes are visible in the event stream and should not contain secrets.
+const PROMPT_TODO_ONLY = `For tasks with roughly three or more steps, call TodoWrite first and keep exactly one item in_progress until the work is complete.`;
 
-Respect tool errors and permission denials. If a tool is denied, choose a safer alternative or explain the blocker. Keep the final response concise and include changed files and verification results.
+const PROMPT_TASK = `Use Task for broad repository exploration that would otherwise flood the main context. Give the sub-agent a self-contained prompt and require conclusions, file:line evidence, and unconfirmed points.`;
 
-The Bash tool runs in the project root. Avoid destructive commands, network writes, force pushes, and broad cleanup. Never use git reset, git clean, or git checkout -- to restore the workspace; if rollback is necessary, revert only your own still-current atomic edits and otherwise preserve the scene and report it.`;
+const PROMPT_MEMORY = `When you learn a stable, verified project fact that will matter in future sessions, persist one concise dated entry under .myagent/memory/: conventions.md for commands/conventions, pitfalls.md for verified traps, or decisions.md for architectural decisions. Mark one-off observations as unconfirmed instead of presenting them as facts. Memory writes are visible in the event stream and should not contain secrets.`;
+
+const PROMPT_RESPECT = `Respect tool errors and permission denials. If a tool is denied, choose a safer alternative or explain the blocker. Keep the final response concise and include changed files and verification results.`;
+
+const PROMPT_BASH = `The Bash tool runs in the project root. Avoid destructive commands, network writes, force pushes, and broad cleanup. Never use git reset, git clean, or git checkout -- to restore the workspace; if rollback is necessary, revert only your own still-current atomic edits and otherwise preserve the scene and report it.`;
+
+/** 按实际注入的工具集动态生成 system prompt（参照 Pi 的动态 guidelines）：
+    只写当前可用工具的指南，工具指南不再背负不存在的工具。
+    未指定（全量）时输出与历史版本逐字一致，保持缓存前缀兼容。 */
+export function buildSystemPrompt(
+  toolNames: readonly ToolName[] | undefined,
+): string {
+  const tools = toolNames;
+  const hasGrepGlob =
+    tools === undefined || tools.includes("Grep") || tools.includes("Glob");
+  const hasTodo = tools === undefined || tools.includes("TodoWrite");
+  const paragraphs = [PROMPT_HEADER];
+  if (hasGrepGlob && hasTodo) {
+    paragraphs.push(PROMPT_NAVIGATION);
+  } else if (hasGrepGlob) {
+    paragraphs.push(PROMPT_NAVIGATION_READ_ONLY);
+  } else if (hasTodo) {
+    paragraphs.push(PROMPT_TODO_ONLY);
+  }
+  if (tools === undefined || tools.includes("Task")) {
+    paragraphs.push(PROMPT_TASK);
+  }
+  paragraphs.push(PROMPT_MEMORY, PROMPT_RESPECT);
+  if (tools === undefined || tools.includes("Bash")) {
+    paragraphs.push(PROMPT_BASH);
+  }
+  return paragraphs.join("\n\n");
+}
 
 export class ConversationAgentModel implements AgentModel {
   #client: ModelClient;
@@ -52,6 +88,7 @@ export class ConversationAgentModel implements AgentModel {
     client: ModelClient,
     initialConversation: string | ConversationMessage[],
     context = new ContextManager(),
+    options: { toolNames?: readonly ToolName[] | undefined } = {},
   ) {
     this.#client = client;
     this.#messages =
@@ -59,7 +96,10 @@ export class ConversationAgentModel implements AgentModel {
         ? [{ role: "user", content: initialConversation }]
         : structuredClone(initialConversation);
     this.#context = context;
+    this.#toolNames = options.toolNames;
   }
+
+  readonly #toolNames: readonly ToolName[] | undefined;
 
   addUserMessage(content: string): void {
     this.#messages.push({ role: "user", content });
@@ -115,6 +155,8 @@ export class ConversationAgentModel implements AgentModel {
           content: serializeConversation(older),
         },
       ],
+      // 压缩不需要工具调用，不携带工具 schema（省 token）
+      tools: [],
       signal,
     };
     let response: ModelResponse;
@@ -175,12 +217,14 @@ export class ConversationAgentModel implements AgentModel {
   async next(signal: AbortSignal): Promise<ModelTurn> {
     await this.compact(signal);
     const prepared = await this.#context.prepare(
-      SYSTEM_PROMPT,
+      buildSystemPrompt(this.#toolNames),
       this.#messages,
     );
     const request: CompletionRequest = {
       system: prepared.system,
       messages: prepared.messages,
+      // 动态工具集：只注入本模型角色启用的工具（main 全量 / explore 只读集）
+      tools: toolDefinitionsFor(this.#toolNames),
       signal,
     };
     let response: ModelResponse;

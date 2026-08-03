@@ -368,6 +368,8 @@ export class AgentSessionManager {
         system:
           "你是一个标题生成器。根据用户的请求，生成一个简短的中文会话标题（10个字以内）。只返回标题文本，不要任何解释、标点或引号。",
         messages: [{ role: "user", content: userText }],
+        // 标题生成不需要工具调用，不携带工具 schema（省 token）
+        tools: [],
         signal: controller.signal,
       });
       const title = clipTitle(response.text);

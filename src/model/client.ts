@@ -65,6 +65,7 @@ export class ConfiguredModelClient implements ModelClient {
   }
 
   async #completeOpenAi(request: CompletionRequest): Promise<ModelResponse> {
+    const tools = request.tools ?? CODING_TOOL_DEFINITIONS;
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "chat/completions"),
       {
@@ -80,7 +81,7 @@ export class ConfiguredModelClient implements ModelClient {
             { role: "system", content: request.system },
             ...request.messages.map(toOpenAiMessage),
           ],
-          tools: CODING_TOOL_DEFINITIONS.map((tool) => ({
+          tools: tools.map((tool) => ({
             type: "function",
             function: {
               name: tool.name,
@@ -120,6 +121,7 @@ export class ConfiguredModelClient implements ModelClient {
   }
 
   async #completeAnthropic(request: CompletionRequest): Promise<ModelResponse> {
+    const tools = request.tools ?? CODING_TOOL_DEFINITIONS;
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "messages"),
       {
@@ -135,11 +137,11 @@ export class ConfiguredModelClient implements ModelClient {
           system: [{ type: "text", text: request.system, cache_control: { type: "ephemeral" } }],
           max_tokens: 4096,
           messages: toAnthropicMessages(request.messages),
-          tools: CODING_TOOL_DEFINITIONS.map((tool, index) => ({
+          tools: tools.map((tool, index) => ({
             name: tool.name,
             description: tool.description,
             input_schema: tool.inputSchema,
-            ...(index === CODING_TOOL_DEFINITIONS.length - 1
+            ...(index === tools.length - 1
               ? { cache_control: { type: "ephemeral" } }
               : {}),
           })),
@@ -177,6 +179,7 @@ export class ConfiguredModelClient implements ModelClient {
   }
 
   async *#streamOpenAi(request: CompletionRequest): AsyncIterable<StreamChunk> {
+    const tools = request.tools ?? CODING_TOOL_DEFINITIONS;
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "chat/completions"),
       {
@@ -194,7 +197,7 @@ export class ConfiguredModelClient implements ModelClient {
             { role: "system", content: request.system },
             ...request.messages.map(toOpenAiMessage),
           ],
-          tools: CODING_TOOL_DEFINITIONS.map((tool) => ({
+          tools: tools.map((tool) => ({
             type: "function",
             function: {
               name: tool.name,
@@ -252,6 +255,7 @@ export class ConfiguredModelClient implements ModelClient {
   }
 
   async *#streamAnthropic(request: CompletionRequest): AsyncIterable<StreamChunk> {
+    const tools = request.tools ?? CODING_TOOL_DEFINITIONS;
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "messages"),
       {
@@ -268,11 +272,11 @@ export class ConfiguredModelClient implements ModelClient {
           max_tokens: 4096,
           stream: true,
           messages: toAnthropicMessages(request.messages),
-          tools: CODING_TOOL_DEFINITIONS.map((tool, index) => ({
+          tools: tools.map((tool, index) => ({
             name: tool.name,
             description: tool.description,
             input_schema: tool.inputSchema,
-            ...(index === CODING_TOOL_DEFINITIONS.length - 1
+            ...(index === tools.length - 1
               ? { cache_control: { type: "ephemeral" } }
               : {}),
           })),

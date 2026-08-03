@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ConversationAgentModel } from "../model/agent-model.js";
 import type { ModelClient } from "../model/types.js";
+import { EXPLORE_TOOL_NAMES } from "../model/tool-definitions.js";
 import {
   ToolExecutor,
   type TaskArgs,
@@ -180,6 +181,9 @@ export class TaskRunner {
     const model = new ConversationAgentModel(
       this.#client,
       [],
+      undefined,
+      // 只读子代理仅注入探索工具（writable 时回退全量工具集）
+      { toolNames: args.writable ? undefined : EXPLORE_TOOL_NAMES },
     );
     model.addUserMessage(
       `${args.prompt}\n\nReturn exactly three sections: Conclusion; Key evidence (file:line); Unconfirmed.`,

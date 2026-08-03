@@ -1,7 +1,31 @@
+import type { ToolName } from "../core/types.js";
+
 export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+}
+
+/** 子代理（explore 角色）默认只读工具集：探索定位为主，不注入任何写工具 */
+export const EXPLORE_TOOL_NAMES: readonly ToolName[] = [
+  "Read",
+  "Grep",
+  "Glob",
+  "TodoWrite",
+];
+
+/** 按名称解析工具定义；未指定时返回全量（main 角色）。
+    调用方必须保证同一模型会话内工具集固定，否则会破坏 prompt cache 前缀。 */
+export function toolDefinitionsFor(
+  names: readonly ToolName[] | undefined,
+): ToolDefinition[] {
+  if (!names) return CODING_TOOL_DEFINITIONS;
+  const byName = new Map(
+    CODING_TOOL_DEFINITIONS.map((tool) => [tool.name, tool]),
+  );
+  return names
+    .map((name) => byName.get(name))
+    .filter((tool): tool is ToolDefinition => tool !== undefined);
 }
 
 export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [

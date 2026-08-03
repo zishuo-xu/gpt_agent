@@ -1,5 +1,6 @@
 import type { ToolCall } from "../core/types.js";
 import type { ModelPricing } from "../core/types.js";
+import type { ToolDefinition } from "./tool-definitions.js";
 
 export type ConversationMessage =
   | { role: "user"; content: string }
@@ -38,6 +39,9 @@ export interface CompletionRequest {
   system: string;
   messages: ConversationMessage[];
   signal: AbortSignal;
+  /** 本次请求注入的工具集；缺省时由客户端决定（全量编码工具）。
+      同一模型会话内必须固定，否则破坏 prompt cache 前缀。 */
+  tools?: ToolDefinition[];
 }
 
 export type StreamChunk =

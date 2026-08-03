@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelProviderConfig } from "../config/schema.js";
 import { ConfiguredModelClient } from "./client.js";
+import {
+  EXPLORE_TOOL_NAMES,
+  toolDefinitionsFor,
+} from "./tool-definitions.js";
 
 function provider(
   protocol: ModelProviderConfig["protocol"],
@@ -229,6 +233,67 @@ test("模型误用 camelCase 键名时仍能解析，历史回传保持 wire 格
     requestBody.messages[2].tool_calls[0].function.arguments,
   );
   assert.deepEqual(echoed, { file_path: "src/a.ts", limit: 30 });
+});
+
+test("请求级 tools 子集：只注入指定工具（OpenAI）", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    provider("openai-compatible"),
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "ok", tool_calls: [] } }],
+          usage: {
+            prompt_tokens: 1,
+            completion_tokens: 1,
+            prompt_tokens_details: { cached_tokens: 0 },
+          },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+
+  await client.complete({
+    system: "system",
+    messages: [{ role: "user", content: "探索" }],
+    signal: new AbortController().signal,
+    tools: toolDefinitionsFor(EXPLORE_TOOL_NAMES),
+  });
+  assert.deepEqual(
+    requestBody.tools.map(
+      (item: { function: { name: string } }) => item.function.name,
+    ),
+    ["Read", "Grep", "Glob", "TodoWrite"],
+  );
+});
+
+test("请求级 tools 空数组：Anthropic 请求不带任何工具定义", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    provider("anthropic"),
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "ok" }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+
+  await client.complete({
+    system: "system",
+    messages: [{ role: "user", content: "压缩" }],
+    signal: new AbortController().signal,
+    tools: [],
+  });
+  assert.deepEqual(requestBody.tools, []);
 });
 
 function sseBody(events: string[]): ReadableStream<Uint8Array> {
