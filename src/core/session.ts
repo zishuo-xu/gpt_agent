@@ -631,7 +631,6 @@ export class AgentSession {
         },
         this.#approvalTimeoutMs,
       );
-      timeout.unref();
       const onAbort = () => finish({ granted: false });
       signal.addEventListener("abort", onAbort, { once: true });
 

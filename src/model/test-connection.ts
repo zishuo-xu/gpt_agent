@@ -24,7 +24,6 @@ export async function testModelConnection(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
-  timeout.unref();
 
   try {
     const request = buildRequest(provider, model, controller.signal);

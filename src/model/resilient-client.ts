@@ -182,7 +182,6 @@ async function abortableSleep(
       resolve();
     };
     const timer = setTimeout(finish, delayMs);
-    timer.unref();
     const onAbort = () => {
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
