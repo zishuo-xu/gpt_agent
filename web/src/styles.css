@@ -1968,12 +1968,13 @@ select {
 
 .new-task-panel .web-composer {
   margin: 14px 0 0;
+  box-shadow: none;
 }
 
-/* 权限档下拉占整行 */
+/* 权限档下拉占整行，与下方 Composer 留出间距 */
 .new-task-panel > label {
   display: block;
-  margin-top: 4px;
+  margin-top: 14px;
 }
 
 .new-task-panel > label select {
