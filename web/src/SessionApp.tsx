@@ -216,6 +216,16 @@ export function SessionApp() {
     setShowNewTask(true);
   }
 
+  // 面板展开后滚动到可视区域并聚焦输入框，避免“点了没反应”的错觉
+  const newTaskPanelRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!showNewTask) return;
+    const panel = newTaskPanelRef.current;
+    if (!panel) return;
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    panel.querySelector("textarea")?.focus();
+  }, [showNewTask]);
+
   async function openProjectPicker() {
     setFsError("");
     setShowProjectPicker(true);
@@ -825,7 +835,7 @@ export function SessionApp() {
           </>
         )}
             {showNewTask && (
-              <section className="new-task-panel">
+              <section className="new-task-panel" ref={newTaskPanelRef}>
                 <div>
                   <span className="new-session-mark">◆</span>
                   <div>
