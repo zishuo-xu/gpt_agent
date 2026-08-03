@@ -95,8 +95,13 @@ export function App() {
   const [testingKey, setTestingKey] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [notice, setNotice] = useState<{
-    tone: "ok" | "error";
+    tone: "ok" | "warn" | "error";
     text: string;
+  } | null>(null);
+  const [projectKeyOverrides, setProjectKeyOverrides] = useState<{
+    cwd: string;
+    configPath: string;
+    providers: Array<{ id: string; name: string }>;
   } | null>(null);
 
   useEffect(() => {
@@ -104,6 +109,10 @@ export function App() {
     void fetch("/api/config/schema")
       .then((response) => response.json())
       .then((payload) => setSchema(payload.fields ?? []));
+    void fetch("/api/config/key-overrides")
+      .then((response) => response.json())
+      .then((payload) => setProjectKeyOverrides(payload.project ?? null))
+      .catch(() => setProjectKeyOverrides(null));
   }, []);
 
   useEffect(() => {
@@ -475,10 +484,11 @@ export function App() {
     setSaving(true);
     if (!options.quiet) setNotice(null);
     try {
+      const incoming = config;
       const response = await fetch(`/api/config?scope=${scope}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(config),
+        body: JSON.stringify(incoming),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -487,7 +497,25 @@ export function App() {
       setConfig(payload.config);
       setDirty(false);
       if (!options.quiet) {
-        setNotice({ tone: "ok", text: "配置已保存。" });
+        const overridden = projectKeyOverrides?.providers.filter(
+          (override) =>
+            incoming.providers.some(
+              (provider) =>
+                provider.id === override.id &&
+                provider.apiKey.trim() !== "",
+            ),
+        );
+        if (scope === "global" && overridden && overridden.length > 0) {
+          setNotice({
+            tone: "warn",
+            text:
+              `已保存，但当前项目（${projectKeyOverrides!.cwd}）的 local.jsonc 中 ` +
+              `${overridden.map((item) => item.name || item.id).join("、")} ` +
+              "已配置非空 API Key，会覆盖此全局 Key。如需全局 Key 生效，请清空项目 Key。",
+          });
+        } else {
+          setNotice({ tone: "ok", text: "配置已保存。" });
+        }
       }
       return true;
     } catch (error) {
@@ -729,6 +757,16 @@ export function App() {
                             {revealedKey ? "隐藏" : "显示"}
                           </button>
                         </div>
+                        {scope === "global" &&
+                          projectKeyOverrides?.providers.some(
+                            (override) => override.id === selectedProvider.id,
+                          ) && (
+                            <p className="key-override-hint">
+                              ⚠ 当前项目（{projectKeyOverrides.cwd}）的
+                              local.jsonc 中该渠道已配置非空 API Key，会覆盖此全局 Key；
+                              如需全局 Key 生效，请清空项目 Key。
+                            </p>
+                          )}
                       </label>
                       <label>
                         供应商 ID

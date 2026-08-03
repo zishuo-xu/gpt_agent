@@ -35,6 +35,17 @@ export interface ConfigServiceOptions {
   homeDir?: string;
 }
 
+export interface ProjectKeyOverride {
+  id: string;
+  name: string;
+}
+
+export interface ProjectKeyOverrides {
+  cwd: string;
+  configPath: string;
+  providers: ProjectKeyOverride[];
+}
+
 export class ConfigValidationError extends Error {
   readonly issues: string[];
 
@@ -121,6 +132,37 @@ export class ConfigService {
       this.#readRaw("project"),
     ]);
     return normalizeConfig(mergeLayers(globalRaw, projectRaw));
+  }
+
+  /**
+   * 检测当前项目的 local.jsonc 中哪些供应商配置了非空 API Key。
+   * 合并规则（mergeLayers）：项目层同 id 供应商的非空 Key 覆盖全局层，
+   * 这是"设置页保存全局 Key 但会话仍报余额不足"的常见根因。
+   * 返回 null 表示项目没有配置文件（无覆盖可能）。
+   */
+  async findProjectKeyOverrides(): Promise<ProjectKeyOverrides | null> {
+    const raw = await this.#readRaw("project");
+    if (!raw) return null;
+    const providers = Array.isArray(raw.providers) ? raw.providers : [];
+    const overrides: ProjectKeyOverride[] = [];
+    for (const candidate of providers) {
+      if (!candidate || typeof candidate !== "object") continue;
+      const provider = candidate as Record<string, unknown>;
+      if (
+        typeof provider.apiKey === "string" &&
+        provider.apiKey.trim() !== ""
+      ) {
+        overrides.push({
+          id: String(provider.id ?? ""),
+          name: String(provider.name ?? provider.id ?? ""),
+        });
+      }
+    }
+    return {
+      cwd: this.#cwd,
+      configPath: this.pathFor("project"),
+      providers: overrides,
+    };
   }
 
   async addPermissionRule(

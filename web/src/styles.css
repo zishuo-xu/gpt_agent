@@ -430,11 +430,25 @@ main {
   color: #72dc99;
 }
 
+.notice.warn {
+  border-color: #6e5b2f;
+  border-left: 3px solid var(--st-pending);
+  background: #2d2413;
+  color: #f0c86e;
+}
+
 .notice.error {
   border-color: #6e3737;
   border-left: 3px solid var(--st-error);
   background: #321919;
   color: #ff9c9c;
+}
+
+.key-override-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #f0c86e;
 }
 
 .content {

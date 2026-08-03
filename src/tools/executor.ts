@@ -8,7 +8,7 @@ import type {
 import { TodoStore } from "../core/todos.js";
 import { AtomicFileTools } from "./atomic-file.js";
 import { runBash } from "./bash.js";
-import { truncateToolText } from "./truncate.js";
+import { TOOL_OUTPUT_LIMITS, truncateToolText } from "./truncate.js";
 
 interface ReadArgs {
   filePath: string;
@@ -117,6 +117,7 @@ export class ToolExecutor {
             ? selected
             : `${selected}\n[... 其余内容已省略，使用 Read offset=${nextOffset} 继续 ...]`;
         const bounded = truncateToolText(paged, {
+          ...TOOL_OUTPUT_LIMITS.read,
           continuationHint: `use Read offset=${Math.max(
             offset + 1,
             offset + Math.floor(limit * 0.6),
@@ -170,6 +171,7 @@ export class ToolExecutor {
         return {
           summary: `Grep “${args.pattern}”找到 ${matches.length} 条结果`,
           output: truncateToolText(grepOutput, {
+            ...TOOL_OUTPUT_LIMITS.grep,
             continuationHint: "narrow path/glob and call Grep again",
           }).text,
           traceOutput: grepOutput,
@@ -196,6 +198,7 @@ export class ToolExecutor {
         return {
           summary: `Glob “${args.pattern}”找到 ${matches.length} 个文件`,
           output: truncateToolText(globOutput, {
+            ...TOOL_OUTPUT_LIMITS.glob,
             continuationHint: "narrow pattern/path and call Glob again",
           }).text,
           traceOutput: globOutput,

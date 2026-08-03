@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import type { ToolExecutionResult } from "../core/types.js";
-import { truncateToolText } from "./truncate.js";
+import { TOOL_OUTPUT_LIMITS, truncateToolText } from "./truncate.js";
 
 export interface BashOptions {
   cwd: string;
@@ -104,9 +104,11 @@ export async function runBash(
       if (timeout) clearTimeout(timeout);
       options.signal?.removeEventListener("abort", terminateAndReject);
       const boundedStdout = truncateToolText(stdout, {
+        ...TOOL_OUTPUT_LIMITS.bash,
         continuationHint: "rerun a narrower command to recover omitted output",
       });
       const boundedStderr = truncateToolText(stderr, {
+        ...TOOL_OUTPUT_LIMITS.bash,
         continuationHint: "rerun a narrower command to recover omitted output",
       });
       resolve({

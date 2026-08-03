@@ -165,6 +165,13 @@ export function createWebApp(
     });
   });
 
+  app.get("/api/config/key-overrides", async (context) => {
+    const target = await resolveProject(context);
+    return context.json({
+      project: await target.configService.findProjectKeyOverrides(),
+    });
+  });
+
   app.put("/api/config", async (context) => {
     try {
       const scope = parseScope(context.req.query("scope"));

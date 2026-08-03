@@ -4,6 +4,25 @@ export interface TruncateOptions {
   continuationHint?: string;
 }
 
+export interface ToolOutputLimits {
+  maxLines: number;
+  maxChars: number;
+}
+
+/**
+ * 按工具类型差异化输出上限（参照 Pi 的"控制单轮注入量"）：
+ * - bash：构建日志等噪音大，上限最小，只留关键头尾；
+ * - read：代码阅读需要完整度，上限最大；
+ * - grep：只保留匹配行本身，行上限适中；
+ * - glob：路径行都很短，行数上限大但字符上限小。
+ */
+export const TOOL_OUTPUT_LIMITS = {
+  bash: { maxLines: 150, maxChars: 12_000 },
+  read: { maxLines: 256, maxChars: 30_000 },
+  grep: { maxLines: 200, maxChars: 20_000 },
+  glob: { maxLines: 300, maxChars: 8_000 },
+} as const satisfies Record<string, ToolOutputLimits>;
+
 export interface TruncatedText {
   text: string;
   truncated: boolean;

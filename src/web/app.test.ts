@@ -71,6 +71,44 @@ test("Web API 保存 OpenAI-compatible 第三方渠道", async () => {
   assert.equal(payload.config.providers[1].apiKey, "");
 });
 
+test("Web API 返回项目级 API Key 覆盖提示", async () => {
+  const { app, service } = await fixture();
+
+  // 无项目配置时返回 null（无覆盖可能）
+  const emptyResponse = await app.request("/api/config/key-overrides");
+  assert.equal(emptyResponse.status, 200);
+  assert.equal((await emptyResponse.json()).project, null);
+
+  // 写入项目级配置（含非空 Key）
+  await mkdir(path.join(service.cwd, ".myagent"), { recursive: true });
+  await writeFile(
+    path.join(service.cwd, ".myagent", "local.jsonc"),
+    JSON.stringify({
+      providers: [
+        {
+          id: "deepseek",
+          name: "DeepSeek",
+          enabled: true,
+          protocol: "openai-compatible",
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKey: "project-secret",
+          models: ["deepseek-chat"],
+        },
+      ],
+    }),
+  );
+
+  const response = await app.request("/api/config/key-overrides");
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.project.cwd, service.cwd);
+  assert.equal(payload.project.providers.length, 1);
+  assert.deepEqual(payload.project.providers[0], {
+    id: "deepseek",
+    name: "DeepSeek",
+  });
+});
+
 test("Web API 对无效配置返回可读问题列表", async () => {
   const { app, service } = await fixture();
   const config = await service.readPublic("global");
