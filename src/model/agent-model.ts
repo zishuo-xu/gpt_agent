@@ -28,7 +28,7 @@ const PROMPT_NAVIGATION_READ_ONLY = `Use Grep and Glob to locate relevant code b
 
 const PROMPT_TODO_ONLY = `For tasks with roughly three or more steps, call TodoWrite first and keep exactly one item in_progress until the work is complete.`;
 
-const PROMPT_TASK = `Use Task for broad repository exploration that would otherwise flood the main context. Give the sub-agent a self-contained prompt and require conclusions, file:line evidence, and unconfirmed points.`;
+const PROMPT_TASK = `Use Task for broad repository exploration that would otherwise flood the main context. For comprehensive searches (multiple keywords, multiple directories, or many files), delegate to a sub-agent FIRST instead of running a long chain of Grep/Read in the main context. Give the sub-agent a self-contained prompt and require conclusions, file:line evidence, and unconfirmed points.`;
 
 const PROMPT_MEMORY = `When you learn a stable, verified project fact that will matter in future sessions, persist one concise dated entry under .myagent/memory/: conventions.md for commands/conventions, pitfalls.md for verified traps, or decisions.md for architectural decisions. Mark one-off observations as unconfirmed instead of presenting them as facts. Memory writes are visible in the event stream and should not contain secrets.`;
 
