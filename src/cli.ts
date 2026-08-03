@@ -25,6 +25,7 @@ import type {
   ApprovalAnswer,
   PermissionMode,
   PermissionRule,
+  SessionBranch,
 } from "./core/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -149,6 +150,9 @@ async function runCli(): Promise<void> {
           "/sessions                          查看全部会话",
           "/switch <id>                       切换/恢复会话",
           "/compact                           立即压缩当前会话上下文",
+          "/tree                              查看会话分支树",
+          "/branch <seq> [label]              从指定事件 seq 分裂新分支",
+          "/timeline                          列出最近事件（查看分支点 seq）",
           "/init                              只读扫描并生成 AGENTS.md 草稿",
           "/config [global|project]           查看生效配置摘要或指定作用域配置",
           "/config set <key> <value> [global|project] 修改配置项",
@@ -256,6 +260,75 @@ async function runCli(): Promise<void> {
       } catch (error) {
         output.write(
           `${error instanceof Error ? error.message : "上下文压缩失败"}\n`,
+        );
+      }
+      readline.prompt();
+      return;
+    }
+    if (line === "/tree") {
+      const branches = session.branches();
+      const current = session.currentBranchId();
+      const byParent = new Map<string | null, SessionBranch[]>();
+      for (const branch of branches) {
+        const siblings = byParent.get(branch.parent) ?? [];
+        siblings.push(branch);
+        byParent.set(branch.parent, siblings);
+      }
+      const renderBranch = (
+        parentId: string | null,
+        prefix: string,
+      ): void => {
+        const siblings = (byParent.get(parentId) ?? []).sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt),
+        );
+        siblings.forEach((branch, index) => {
+          const isLast = index === siblings.length - 1;
+          const isCurrent = branch.id === current;
+          const label = branch.label ? ` ${branch.label}` : "";
+          const forkInfo =
+            branch.forkSeq !== null ? ` · fork@#${branch.forkSeq}` : "";
+          output.write(
+            `${prefix}${isLast ? "└─ " : "├─ "}#${branch.id}` +
+              `${isCurrent ? " ⚡" : ""}${label}${forkInfo}\n`,
+          );
+          renderBranch(
+            branch.id,
+            `${prefix}${isLast ? "   " : "│  "}`,
+          );
+        });
+      };
+      output.write("分支树（⚡=当前分支）：\n");
+      renderBranch(null, "");
+      readline.prompt();
+      return;
+    }
+    if (line.startsWith("/branch ")) {
+      const rest = line.slice("/branch ".length).trim();
+      const match = rest.match(/^(\d+)(?:\s+(\S.*))?$/);
+      if (!match) {
+        output.write("用法：/branch <seq> [label] —— 从指定事件 seq 分裂新分支\n");
+      } else {
+        try {
+          const forkSeq = Number(match[1]);
+          const label = match[2];
+          const branchId = session.forkBranch(forkSeq, label);
+          output.write(
+            `已从事件 #${forkSeq} 分裂出分支 #${branchId}` +
+              "，后续输入将写入新分支（/tree 查看）。\n",
+          );
+        } catch (error) {
+          output.write(
+            `${error instanceof Error ? error.message : "分支失败"}\n`,
+          );
+        }
+      }
+      readline.prompt();
+      return;
+    }
+    if (line === "/timeline") {
+      for (const record of session.events().slice(-30)) {
+        output.write(
+          `#${record.seq} ${record.ts.slice(11, 19)} ${summarizeEvent(record.event)}\n`,
         );
       }
       readline.prompt();
@@ -463,6 +536,12 @@ async function runCli(): Promise<void> {
         "\n任务已中止；文件编辑保持原子性，Bash 已发生的副作用无法自动撤销。\n",
       );
     }
+    if (event.type === "branch_switch") {
+      output.write(
+        `\n⇄ 已切换到分支 #${event.branchId}` +
+          `${event.label ? `（${event.label}）` : ""}\n`,
+      );
+    }
   }
 
   function subscribeToSession(target: AgentSession): () => void {
@@ -527,6 +606,30 @@ function setConfigValue(
     target[leaf] = normalized === "true";
   } else {
     target[leaf] = rawValue;
+  }
+}
+
+/** 事件时间线摘要：为 /timeline 提供单行描述（选择 fork 点用） */
+function summarizeEvent(event: AgentEvent): string {
+  switch (event.type) {
+    case "user":
+      return `用户：${event.text.slice(0, 40)}`;
+    case "text_delta":
+      return `助手：${event.text.slice(0, 40)}`;
+    case "tool_call":
+      return `工具：${event.call.tool}(${event.call.target})`;
+    case "tool_result":
+      return `结果：${event.summary.slice(0, 40)}`;
+    case "permission_denied":
+      return `拒绝：${event.reason.slice(0, 40)}`;
+    case "branch_switch":
+      return `分支切换：→ #${event.branchId}`;
+    case "context_compacted":
+      return `上下文压缩：${event.summary.slice(0, 40)}`;
+    case "run_started":
+      return `无人值守任务：${event.description.slice(0, 40)}`;
+    default:
+      return event.type;
   }
 }
 

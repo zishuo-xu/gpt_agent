@@ -138,12 +138,31 @@ export type AgentEvent =
   | { type: "need_user"; question: string }
   | { type: "error"; message: string }
   | { type: "notify"; level: "info" | "warn" | "error"; message: string }
-  | { type: "interrupted"; scope: "model" | "tool" | "loop" };
+  | { type: "interrupted"; scope: "model" | "tool" | "loop" }
+  | {
+      type: "branch_switch";
+      branchId: string;
+      parent: string | null;
+      /** 分裂点：父分支中最后一个被新分支继承的 seq */
+      forkSeq: number;
+      label?: string;
+    };
+
+export interface SessionBranch {
+  id: string;
+  parent: string | null;
+  /** 分裂点：根分支为 null */
+  forkSeq: number | null;
+  label?: string;
+  createdAt: string;
+}
 
 export interface RecordedEvent {
   seq: number;
   ts: string;
   sessionId: string;
+  /** 事件所属分支；缺省 "main"（旧会话文件兼容） */
+  branchId?: string;
   event: AgentEvent;
 }
 

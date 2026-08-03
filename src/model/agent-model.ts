@@ -66,7 +66,7 @@ export function buildSystemPrompt(
 
 export class ConversationAgentModel implements AgentModel {
   #client: ModelClient;
-  readonly #messages: ConversationMessage[];
+  #messages: ConversationMessage[];
   readonly #context: ContextManager;
   onTextDelta: ((text: string) => void) | undefined;
   #compactionCount = 0;
@@ -103,6 +103,11 @@ export class ConversationAgentModel implements AgentModel {
 
   addUserMessage(content: string): void {
     this.#messages.push({ role: "user", content });
+  }
+
+  /** 会话分支（fork）时重建模型消息历史为分支链视角 */
+  resetConversation(messages: ConversationMessage[]): void {
+    this.#messages = structuredClone(messages);
   }
 
   /** 配置变更后替换主模型客户端（会话历史保持不变） */

@@ -23,6 +23,12 @@ import {
   type RunTaskOptions,
 } from "./run-task.js";
 import { TaskRunner } from "./task-runner.js";
+import {
+  branchesFromEvents,
+  conversationFrom,
+  currentBranchIdFrom,
+  ROOT_BRANCH,
+} from "./branch.js";
 import type {
   AgentEvent,
   ApprovalAnswer,
@@ -30,6 +36,7 @@ import type {
   PermissionMode,
   PermissionRule,
   RecordedEvent,
+  SessionBranch,
   TodoItem,
   ToolCall,
 } from "./types.js";
@@ -45,6 +52,8 @@ export type AgentSessionStatus =
 export interface AgentSessionEvent {
   seq: number;
   ts: string;
+  /** 事件所属分支；缺省 "main"（旧会话文件兼容） */
+  branchId?: string;
   event: AgentEvent;
 }
 
@@ -111,6 +120,9 @@ export class AgentSession {
   #taskBox: TaskBox | undefined;
   #taskStopReason: "deadline" | "budget" | undefined;
   #taskHardStopped = false;
+  /** 会话分支树（branch_switch 事件即真相，恢复时重建） */
+  #branches: SessionBranch[];
+  #currentBranchId: string;
 
   constructor(options: {
     id: string;
@@ -208,7 +220,11 @@ export class AgentSession {
     );
     this.#approvalTimeoutMs = options.approvalTimeoutMs ?? 300_000;
     this.#rememberPermission = options.rememberPermission;
-    this.#store.attach(this.#bus);
+    this.#branches = branchesFromEvents(options.restoredEvents ?? []);
+    this.#currentBranchId = currentBranchIdFrom(
+      options.restoredEvents ?? [],
+    );
+    this.#store.attach(this.#bus, () => this.#currentBranchId);
     this.#bus.subscribe((event) => this.#record(event));
     if (options.compactModelClient) {
       this.#model.configureCompaction({
@@ -274,6 +290,7 @@ export class AgentSession {
         this.#events.push({
           seq: record.seq,
           ts: record.ts,
+          ...(record.branchId ? { branchId: record.branchId } : {}),
           event: record.event,
         });
         this.#applyEventState(record.event);
@@ -314,6 +331,48 @@ export class AgentSession {
 
   events(after = 0): AgentSessionEvent[] {
     return this.#events.filter((event) => event.seq > after);
+  }
+
+  /** 分支树（根分支 main 恒存在） */
+  branches(): SessionBranch[] {
+    return structuredClone(this.#branches);
+  }
+
+  /** 当前分支 id */
+  currentBranchId(): string {
+    return this.#currentBranchId;
+  }
+
+  /** 从指定 seq 处分裂新分支并切换；后续消息走新分支。
+      模型消息历史重建为分支链视角（fork 点之前不变，之后只含新分支）。 */
+  forkBranch(forkSeq: number, label?: string): string {
+    if (this.#processing || this.#taskBox) {
+      throw new Error("会话运行中，请在当前轮结束后分支");
+    }
+    const maxSeq = this.#events.at(-1)?.seq ?? 0;
+    if (!Number.isInteger(forkSeq) || forkSeq < 1 || forkSeq > maxSeq) {
+      throw new Error(`分支点 seq 无效：需要 1-${maxSeq} 之间的整数`);
+    }
+    const branchId = randomUUID().slice(0, 6);
+    this.#branches.push({
+      id: branchId,
+      parent: this.#currentBranchId,
+      forkSeq,
+      ...(label?.trim() ? { label: label.trim() } : {}),
+      createdAt: new Date().toISOString(),
+    });
+    // branch_switch 事件落在新分支上（#applyEventState 同步切换 currentBranchId）
+    this.#bus.emit({
+      type: "branch_switch",
+      branchId,
+      parent: this.#currentBranchId,
+      forkSeq,
+      ...(label?.trim() ? { label: label.trim() } : {}),
+    });
+    this.#model.resetConversation(
+      conversationFrom(this.#events, this.#branches, branchId),
+    );
+    return branchId;
   }
 
   subscribe(listener: (event: AgentSessionEvent) => void): () => void {
@@ -684,6 +743,11 @@ export class AgentSession {
     const record: AgentSessionEvent = {
       seq: this.#events.length + 1,
       ts: new Date().toISOString(),
+      // branch_switch 事件属于新分支（此时 currentBranchId 尚未切换）
+      branchId:
+        event.type === "branch_switch"
+          ? event.branchId
+          : this.#currentBranchId,
       event,
     };
     this.#events.push(record);
@@ -712,6 +776,9 @@ export class AgentSession {
     if (event.type === "need_user") this.#status = "done";
     if (event.type === "error") this.#status = "error";
     if (event.type === "interrupted") this.#status = "interrupted";
+    if (event.type === "branch_switch") {
+      this.#currentBranchId = event.branchId;
+    }
   }
 
   async #checkTaskBox(): Promise<{

@@ -31,11 +31,15 @@ import {
   AgentSession,
   type AgentSessionSummary,
 } from "./session.js";
+import {
+  branchesFromEvents,
+  conversationFrom,
+  currentBranchIdFrom,
+} from "./branch.js";
 import type {
   PermissionMode,
   PermissionRule,
   RecordedEvent,
-  ToolCall,
 } from "./types.js";
 
 interface SessionIndexEntry {
@@ -180,6 +184,8 @@ export class AgentSessionManager {
         await this.#createRoleClient("cheap");
       const exploreModelClient =
         await this.#createRoleClient("explore");
+      const branches = branchesFromEvents(records);
+      const branchId = currentBranchIdFrom(records);
       const session = new AgentSession({
         id,
         title: metadata?.title ?? titleFrom(firstUser.event.text),
@@ -188,7 +194,10 @@ export class AgentSessionManager {
           metadata?.permissionMode ??
           lastPermissionMode(records) ??
           runtimeConfig.permissions.mode,
-        model: await this.#createModel(conversationFrom(records)),
+        // 恢复当前分支链视角的消息历史（分支点之前不变，之后只含当前分支）
+        model: await this.#createModel(
+          conversationFrom(records, branches, branchId),
+        ),
         stateDir: this.#stateDir,
         restoredEvents: records,
         permissionRules: [
@@ -493,83 +502,6 @@ async function readRecordedEvents(filePath: string): Promise<RecordedEvent[]> {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line) as RecordedEvent);
-}
-
-function conversationFrom(records: RecordedEvent[]): ConversationMessage[] {
-  const lastCompaction = [...records]
-    .reverse()
-    .find((record) => record.event.type === "context_compacted");
-  if (
-    lastCompaction?.event.type === "context_compacted"
-  ) {
-    const compactEvent = lastCompaction.event;
-    return [
-      {
-        role: "user",
-        content: `[会话压缩摘要]\n${compactEvent.summary}`,
-      },
-      ...conversationFromRaw(
-        records.filter(
-          (record) =>
-            record.seq >= compactEvent.keepFromSeq &&
-            record.event.type !== "context_compacted",
-        ),
-      ),
-    ];
-  }
-  return conversationFromRaw(records);
-}
-
-function conversationFromRaw(
-  records: RecordedEvent[],
-): ConversationMessage[] {
-  const messages: ConversationMessage[] = [];
-  const calls = new Map<string, ToolCall>();
-  for (const { event } of records) {
-    if (event.type === "user") {
-      messages.push({
-        role: "user",
-        content: event.modelText ?? event.text,
-      });
-    } else if (event.type === "text_delta") {
-      messages.push({
-        role: "assistant",
-        content: event.text,
-        toolCalls: [],
-      });
-    } else if (event.type === "tool_call") {
-      calls.set(event.call.id, event.call);
-      messages.push({
-        role: "assistant",
-        content: "",
-        toolCalls: [event.call],
-      });
-    } else if (event.type === "tool_result") {
-      const call = calls.get(event.callId);
-      if (!call) continue;
-      messages.push({
-        role: "tool",
-        toolCallId: event.callId,
-        toolName: call.tool,
-        target: call.target,
-        content:
-          event.output === undefined
-            ? event.summary
-            : `${event.summary}\n${stringify(event.output)}`,
-        isError: event.isError ?? Boolean(event.aborted),
-      });
-    } else if (event.type === "permission_denied") {
-      messages.push({
-        role: "tool",
-        toolCallId: event.call.id,
-        toolName: event.call.tool,
-        target: event.call.target,
-        content: `Permission denied: ${event.reason}`,
-        isError: true,
-      });
-    }
-  }
-  return messages;
 }
 
 function lastPermissionMode(

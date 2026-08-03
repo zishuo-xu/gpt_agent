@@ -1245,6 +1245,14 @@ function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
       case "cost_update":
         items.push({ kind: "cost", seq, event });
         break;
+      case "branch_switch":
+        system(
+          seq,
+          `⇄ 新分支 #${event.branchId}` +
+            (event.label ? `（${event.label}）` : "") +
+            ` · 自事件 #${event.forkSeq} 分裂`,
+        );
+        break;
       case "context_compacted":
         system(seq, `上下文已压缩 · 保留 ${(event.ratio * 100).toFixed(1)}%`);
         break;

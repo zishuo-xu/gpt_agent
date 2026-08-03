@@ -3,6 +3,7 @@ import { mkdir, appendFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentEvent, RecordedEvent } from "./types.js";
 import type { ToolCall } from "./types.js";
+import { ROOT_BRANCH } from "./branch.js";
 
 export class AgentEventBus {
   readonly #emitter = new EventEmitter();
@@ -29,7 +30,10 @@ export class SessionStore {
     this.#sessionId = sessionId;
   }
 
-  attach(bus: AgentEventBus): () => void {
+  attach(
+    bus: AgentEventBus,
+    getBranchId?: () => string,
+  ): () => void {
     return bus.subscribe((event) => {
       this.#writeTail = this.#writeTail.then(async () => {
         await this.#initializeSequence();
@@ -37,6 +41,7 @@ export class SessionStore {
           seq: ++this.#seq,
           ts: new Date().toISOString(),
           sessionId: this.#sessionId,
+          branchId: getBranchId?.() ?? ROOT_BRANCH,
           event,
         };
         await mkdir(path.dirname(this.#filePath), { recursive: true });
