@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { MyAgentConfig } from "../config/schema.js";
 import type { ConversationAgentModel } from "../model/agent-model.js";
+import { modelErrorGuidanceText } from "../model/error-guidance.js";
 import { ModelRetriesExhaustedError } from "../model/resilient-client.js";
 import type { ModelClient } from "../model/types.js";
 import { ToolExecutor } from "../tools/executor.js";
@@ -403,6 +404,7 @@ export class AgentSession {
           getTotalCostCny: () => this.#totalCostCny,
           beforeTurn: async () => this.#checkTaskBox(),
           modelRole: "main",
+          modelCompactCount: () => this.#model.compactionCount,
           recordTrace: (trace) => this.#traceStore.record(trace),
         });
         this.#activeLoop = loop;
@@ -410,10 +412,17 @@ export class AgentSession {
           await loop.run();
         } catch (error) {
           if (error instanceof ModelRetriesExhaustedError) {
+            // 重试与 fallback 全部耗尽：可操作化指引（分类 + 原文 + 建议），
+            // 并发出 error 级 notify，无人值守时 webhook 能推送出去（失败要响）
+            const guidance = modelErrorGuidanceText(error);
+            this.#bus.emit({
+              type: "notify",
+              level: "error",
+              message: `模型调用持续失败：${guidance}`,
+            });
             this.#bus.emit({
               type: "need_user",
-              question:
-                `${error.message}。请检查网络、额度或切换模型后输入“继续”。`,
+              question: `${guidance}输入“继续”重试。`,
             });
           } else {
             this.#status = "error";

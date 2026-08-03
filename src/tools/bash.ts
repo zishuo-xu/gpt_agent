@@ -9,6 +9,14 @@ export interface BashOptions {
   background?: boolean;
 }
 
+/**
+ * 主进程退出后等待输出流排空的兜底时长（毫秒）。
+ * 参照 Pi 的 exec.ts：后台孙进程（如 `sleep 100 &`）若继承 stdout/stderr 句柄，
+ * 管道永远不关闭，依赖 close 事件会让命令“永不结束”。
+ * 因此以 exit 为准、给输出排空一个上限，超时则接受可能不完整的输出。
+ */
+const OUTPUT_DRAIN_TIMEOUT_MS = 2_000;
+
 function abortError(): Error {
   return new DOMException("The operation was aborted", "AbortError");
 }
@@ -53,6 +61,7 @@ export async function runBash(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let drainTimer: NodeJS.Timeout | undefined;
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
@@ -77,6 +86,7 @@ export async function runBash(
       if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
+      if (drainTimer) clearTimeout(drainTimer);
       options.signal?.removeEventListener("abort", terminateAndReject);
       killChildTree("SIGTERM");
       const forceTimer = setTimeout(() => killChildTree("SIGKILL"), 500);
@@ -90,18 +100,15 @@ export async function runBash(
     timeout?.unref();
     options.signal?.addEventListener("abort", terminateAndReject, { once: true });
 
-    child.once("error", (error) => {
+    const finish = (
+      code: number | null,
+      signal: NodeJS.Signals | null | undefined,
+      outputIncomplete: boolean,
+    ): void => {
       if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
-      options.signal?.removeEventListener("abort", terminateAndReject);
-      reject(error);
-    });
-
-    child.once("close", (code, signal) => {
-      if (settled) return;
-      settled = true;
-      if (timeout) clearTimeout(timeout);
+      if (drainTimer) clearTimeout(drainTimer);
       options.signal?.removeEventListener("abort", terminateAndReject);
       const boundedStdout = truncateToolText(stdout, {
         ...TOOL_OUTPUT_LIMITS.bash,
@@ -111,12 +118,12 @@ export async function runBash(
         ...TOOL_OUTPUT_LIMITS.bash,
         continuationHint: "rerun a narrower command to recover omitted output",
       });
+      const truncated =
+        boundedStdout.truncated || boundedStderr.truncated;
       resolve({
         summary: `命令退出：${code ?? signal ?? "unknown"}${
-          boundedStdout.truncated || boundedStderr.truncated
-            ? "（输出已截断）"
-            : ""
-        }`,
+          outputIncomplete ? "（输出可能不完整：仍有子进程在后台运行）" : ""
+        }${truncated ? "（输出已截断）" : ""}`,
         output: {
           stdout: boundedStdout.text,
           stderr: boundedStderr.text,
@@ -127,6 +134,47 @@ export async function runBash(
         aborted: false,
         isError: typeof code === "number" && code !== 0,
       });
+    };
+
+    // 以主进程退出为准（不依赖 close：孙进程持有 pipe 句柄时 close 永不触发）；
+    // 退出后等待输出流排空，最多 OUTPUT_DRAIN_TIMEOUT_MS，超时接受不完整输出。
+    const onExit = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ): void => {
+      const streams = [child.stdout, child.stderr].filter(
+        (stream): stream is NonNullable<typeof child.stdout> =>
+          stream !== null && stream !== undefined,
+      );
+      if (streams.length === 0 || streams.every((stream) => stream.readableEnded)) {
+        finish(code, signal, false);
+        return;
+      }
+      let remaining = streams.length;
+      const onEnd = (): void => {
+        remaining -= 1;
+        if (remaining === 0) {
+          if (drainTimer) clearTimeout(drainTimer);
+          finish(code, signal, false);
+        }
+      };
+      for (const stream of streams) {
+        stream.once("end", onEnd);
+      }
+      drainTimer = setTimeout(() => {
+        finish(code, signal, true);
+      }, OUTPUT_DRAIN_TIMEOUT_MS);
+      drainTimer.unref();
+    };
+    child.once("exit", onExit);
+
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      if (drainTimer) clearTimeout(drainTimer);
+      options.signal?.removeEventListener("abort", terminateAndReject);
+      reject(error);
     });
   });
 }

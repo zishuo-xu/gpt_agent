@@ -1473,10 +1473,23 @@ function ItemCard(props: {
     const cached = Number(event.cached ?? 0);
     const input = Number(event.input ?? 0);
     const cacheRate = input > 0 ? Math.round((cached / input) * 100) : 0;
+    // 缓存浪费度量（参照 Pi 的 cache-stats）：区分合法失效（压缩）与异常失效
+    const missed = Number(event.missedTokens ?? 0);
+    const missedLabel =
+      missed <= 0
+        ? ""
+        : event.missedReason === "compaction"
+          ? " · 缓存已重置（压缩）"
+          : event.missedReason === "model_switch"
+            ? ` · 缓存失效 ${formatTokens(missed)}（模型切换）`
+            : event.missedReason === "idle"
+              ? ` · 缓存过期 ${formatTokens(missed)}（空闲超时）`
+              : ` · 缓存未命中浪费 ${formatTokens(missed)}`;
     return (
       <div className="web-cost-line">
         本轮 {formatTokens(event.input)} in / {formatTokens(event.output)}{" "}
         out · 缓存命中 {cacheRate}% · 累计 {formatTokens(event.totalTokens)}
+        {missedLabel}
         {event.totalCostCny
           ? `（≈¥${Number(event.totalCostCny).toFixed(4)}）`
           : ""}

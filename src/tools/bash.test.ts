@@ -92,6 +92,36 @@ test("Bash 非零退出标记为错误并保留 stderr", async () => {
   );
 });
 
+test("后台孙进程继承管道句柄时仍快速返回（不挂住）", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-drain-"));
+  const pidFile = path.join(directory, "grandchild.pid");
+  // sh 退出后孙进程仍持有 stdout/stderr 管道句柄（参照 Pi 的 exec.ts 场景）
+  const command = `${process.execPath} -e "require('fs').writeFileSync('${pidFile}', String(process.pid)); setInterval(() => {}, 1000)" & echo done`;
+  const startedAt = Date.now();
+  const result = await runBash(command, {
+    cwd: directory,
+    timeoutMs: 60_000,
+  });
+  const elapsed = Date.now() - startedAt;
+  assert.ok(
+    elapsed < 10_000,
+    `应快速返回（实际 ${elapsed}ms），不得等待孙进程退出`,
+  );
+  assert.match(result.summary, /命令退出：0/);
+  assert.match(result.summary, /输出可能不完整/);
+  assert.match(String((result.output as { stdout: string }).stdout), /done/);
+
+  // 清理后台孙进程，避免测试残留孤儿进程
+  const pid = await readChildPid(pidFile);
+  if (pid) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // 进程已自行退出
+    }
+  }
+});
+
 test("background 命令立即返回且进程在后台运行", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-bg-"));
   const pidFile = path.join(directory, "bg.pid");

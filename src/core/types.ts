@@ -129,6 +129,10 @@ export type AgentEvent =
       totalTokens: number;
       costCny?: number;
       totalCostCny?: number;
+      /** 本应命中缓存却未命中的 token 数（参照 Pi 的 cache-stats：missedCost 度量） */
+      missedTokens?: number;
+      /** 缓存失效原因：压缩（合法）/ 模型切换（异常）/ 空闲超时（TTL） */
+      missedReason?: "compaction" | "model_switch" | "idle";
     }
   | { type: "done" }
   | { type: "need_user"; question: string }

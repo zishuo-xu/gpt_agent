@@ -33,6 +33,7 @@ export class ConversationAgentModel implements AgentModel {
   readonly #messages: ConversationMessage[];
   readonly #context: ContextManager;
   onTextDelta: ((text: string) => void) | undefined;
+  #compactionCount = 0;
   #compaction:
     | {
         client: ModelClient;
@@ -41,6 +42,11 @@ export class ConversationAgentModel implements AgentModel {
         onCompacted: (result: CompactionResult) => void;
       }
     | undefined;
+
+  /** 会话内压缩发生次数：缓存浪费度量据此区分“合法失效（压缩）” */
+  get compactionCount(): number {
+    return this.#compactionCount;
+  }
 
   constructor(
     client: ModelClient,
@@ -120,6 +126,7 @@ export class ConversationAgentModel implements AgentModel {
     }
     const summary = response.text.trim();
     if (!summary) throw new Error("压缩模型未返回摘要");
+    this.#compactionCount += 1;
     this.#messages.splice(
       0,
       this.#messages.length,

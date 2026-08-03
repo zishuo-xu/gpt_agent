@@ -53,6 +53,8 @@ export interface AgentLoopOptions {
   modelRole?: "main" | "cheap" | "explore";
   /** 最大模型轮数；超过后强制结束循环（子代理成本兜底）。不传则不限。 */
   maxTurns?: number;
+  /** 会话内压缩发生次数（缓存浪费度量区分合法失效用）；由 ConversationAgentModel 提供 */
+  modelCompactCount?: () => number;
   recordTrace?: (trace: {
     request?: unknown;
     response?: unknown;
@@ -81,6 +83,11 @@ export class AgentLoop {
   readonly #modelRole: "main" | "cheap" | "explore";
   readonly #recordTrace: AgentLoopOptions["recordTrace"];
   readonly #maxTurns: number | undefined;
+  readonly #modelCompactCount: AgentLoopOptions["modelCompactCount"];
+  /** 缓存浪费度量状态：上一轮 input、上一轮时间、已见压缩数 */
+  #prevInputTokens = 0;
+  #prevTurnAtMs = 0;
+  #seenCompactions = 0;
 
   constructor(options: AgentLoopOptions) {
     this.#bus = options.bus;
@@ -96,6 +103,7 @@ export class AgentLoop {
     this.#modelRole = options.modelRole ?? "main";
     this.#recordTrace = options.recordTrace;
     this.#maxTurns = options.maxTurns;
+    this.#modelCompactCount = options.modelCompactCount;
   }
 
   interrupt(): void {
@@ -185,6 +193,21 @@ export class AgentLoop {
         }
         streamedText = false;
         if (turn.usage) {
+          const now = Date.now();
+          // 缓存浪费度量（参照 Pi 的 cache-stats）：上轮已有、本轮本应命中
+          // 却未命中的 token 数；<1024 视为 breakpoint 粒度噪音忽略
+          const missed = computeMissedTokens(
+            turn.usage,
+            this.#prevInputTokens,
+            this.#prevTurnAtMs,
+            now,
+            this.#modelCompactCount?.() ?? 0,
+            this.#seenCompactions,
+            (turn.fallbacks?.length ?? 0) > 0,
+          );
+          this.#seenCompactions = this.#modelCompactCount?.() ?? 0;
+          this.#prevInputTokens = turn.usage.input;
+          this.#prevTurnAtMs = now;
           const costCny = usageCostCny(
             turn.usage,
             turn.usagePricing ?? this.#pricing,
@@ -199,6 +222,14 @@ export class AgentLoop {
             output: turn.usage.output,
             cached: turn.usage.cached,
             totalTokens: this.#totalTokens,
+            ...(missed.missedTokens > 0
+              ? {
+                  missedTokens: missed.missedTokens,
+                  ...(missed.missedReason
+                    ? { missedReason: missed.missedReason }
+                    : {}),
+                }
+              : {}),
             ...(costCny === undefined
               ? {}
               : {
@@ -349,6 +380,44 @@ export class AgentLoop {
       this.#abortController = undefined;
     }
   }
+}
+
+/**
+ * 缓存浪费度量（参照 Pi 的 cache-stats）：上轮 prompt 在本轮应已命中缓存，
+ * 若 cacheRead 低于上轮总量说明前缀被破坏（浪费重新计费的 token）。
+ *
+ * 原因分类（优先级）：
+ * - compaction：压缩后缓存必然失效 → 合法，仅标记原因不视为异常
+ * - model_switch：模型/供应商切换 → 异常，计入浪费
+ * - idle：超过供应商缓存 TTL（Anthropic 5 分钟）→ 提示
+ * - 其余：未知破坏源
+ *
+ * <1024 tokens 的 miss 视为 breakpoint 粒度噪音忽略。
+ */
+export function computeMissedTokens(
+  usage: { input: number; output: number; cached: number },
+  prevInputTokens: number,
+  prevTurnAtMs: number,
+  nowMs: number,
+  compactionCount: number,
+  seenCompactions: number,
+  switchedModel: boolean,
+): { missedTokens: number; missedReason?: "compaction" | "model_switch" | "idle" } {
+  if (prevInputTokens <= 0) return { missedTokens: 0 };
+  const expectedCached = Math.min(prevInputTokens, usage.input);
+  const missedTokens = Math.max(0, expectedCached - usage.cached);
+  if (missedTokens < 1024) return { missedTokens: 0 };
+  if (compactionCount > seenCompactions) {
+    return { missedTokens, missedReason: "compaction" };
+  }
+  if (switchedModel) {
+    return { missedTokens, missedReason: "model_switch" };
+  }
+  // Anthropic 缓存 TTL 5 分钟；空闲超时后未命中属预期，但值得提示
+  if (prevTurnAtMs > 0 && nowMs - prevTurnAtMs > 5 * 60_000) {
+    return { missedTokens, missedReason: "idle" };
+  }
+  return { missedTokens };
 }
 
 function usageCostCny(
