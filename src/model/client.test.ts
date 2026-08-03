@@ -231,6 +231,197 @@ test("模型误用 camelCase 键名时仍能解析，历史回传保持 wire 格
   assert.deepEqual(echoed, { file_path: "src/a.ts", limit: 30 });
 });
 
+function sseBody(events: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const event of events) {
+        controller.enqueue(encoder.encode(`data: ${event}\n\n`));
+      }
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+}
+
+test("OpenAI 流式响应逐段推送 text_delta 并累积分片工具调用", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    provider("openai-compatible"),
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(sseBody([
+        // 第一片：内容 + 工具调用开始（id/name/首段 arguments）
+        JSON.stringify({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                content: "我先",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call-1",
+                    type: "function",
+                    function: {
+                      name: "Read",
+                      arguments: '{"file',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        // 第二片：内容继续 + 工具调用参数续片
+        JSON.stringify({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                content: "读取文件。",
+                tool_calls: [
+                  { index: 0, function: { arguments: '_path": "src/app.ts"}' } },
+                ],
+              },
+            },
+          ],
+        }),
+        // 第三片：usage
+        JSON.stringify({
+          choices: [],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 30,
+            prompt_tokens_details: { cached_tokens: 20 },
+          },
+        }),
+      ]))
+    },
+  );
+
+  const chunks: string[] = [];
+  let done: { text: string; toolCalls: any[]; usage: any } | undefined;
+  for await (const chunk of client.stream({
+    system: "system",
+    messages: [{ role: "user", content: "读文件" }],
+    signal: new AbortController().signal,
+  })) {
+    if (chunk.type === "text_delta") {
+      chunks.push(chunk.text);
+    } else {
+      done = chunk.response;
+    }
+  }
+
+  assert.equal(requestBody.stream, true);
+  assert.deepEqual(chunks, ["我先", "读取文件。"]);
+  assert.equal(done?.text, "我先读取文件。");
+  assert.deepEqual(done?.toolCalls, [
+    {
+      id: "call-1",
+      tool: "Read",
+      target: "src/app.ts",
+      args: { filePath: "src/app.ts" },
+    },
+  ]);
+  assert.deepEqual(done?.usage, { input: 100, output: 30, cached: 20 });
+});
+
+test("Anthropic 流式响应解析 content_block 事件并累积 input_json_delta", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    provider("anthropic"),
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(sseBody([
+        JSON.stringify({
+          type: "message_start",
+          message: { usage: { input_tokens: 50, cache_read_input_tokens: 10 } },
+        }),
+        JSON.stringify({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "text", text: "" },
+        }),
+        JSON.stringify({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "正在" },
+        }),
+        JSON.stringify({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "修改。" },
+        }),
+        JSON.stringify({ type: "content_block_stop", index: 0 }),
+        JSON.stringify({
+          type: "content_block_start",
+          index: 1,
+          content_block: {
+            type: "tool_use",
+            id: "tool-1",
+            name: "Edit",
+            input: {},
+          },
+        }),
+        JSON.stringify({
+          type: "content_block_delta",
+          index: 1,
+          delta: {
+            type: "input_json_delta",
+            partial_json: '{"file_path": "src/app.ts", "old_str',
+          },
+        }),
+        JSON.stringify({
+          type: "content_block_delta",
+          index: 1,
+          delta: {
+            type: "input_json_delta",
+            partial_json: 'ing": "a", "new_string": "b"}',
+          },
+        }),
+        JSON.stringify({ type: "content_block_stop", index: 1 }),
+        JSON.stringify({
+          type: "message_delta",
+          delta: { stop_reason: "tool_use" },
+          usage: { output_tokens: 25 },
+        }),
+        JSON.stringify({ type: "message_stop" }),
+      ]))
+    },
+  );
+
+  const chunks: string[] = [];
+  let done: { text: string; toolCalls: any[]; usage: any } | undefined;
+  for await (const chunk of client.stream({
+    system: "system",
+    messages: [{ role: "user", content: "改文件" }],
+    signal: new AbortController().signal,
+  })) {
+    if (chunk.type === "text_delta") {
+      chunks.push(chunk.text);
+    } else {
+      done = chunk.response;
+    }
+  }
+
+  assert.equal(requestBody.stream, true);
+  assert.deepEqual(chunks, ["正在", "修改。"]);
+  assert.equal(done?.text, "正在修改。");
+  assert.deepEqual(done?.toolCalls, [
+    {
+      id: "tool-1",
+      tool: "Edit",
+      target: "src/app.ts",
+      args: { filePath: "src/app.ts", oldString: "a", newString: "b" },
+    },
+  ]);
+  assert.deepEqual(done?.usage, { input: 50, output: 25, cached: 10 });
+});
+
 test("禁用供应商、缺少 Key 和未知模型会在请求前失败", () => {
   const disabled = provider("anthropic");
   disabled.enabled = false;

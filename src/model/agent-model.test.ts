@@ -6,6 +6,7 @@ import type {
   ConversationMessage,
   ModelClient,
   ModelResponse,
+  StreamChunk,
 } from "./types.js";
 
 class CapturingClient implements ModelClient {
@@ -31,6 +32,24 @@ class CapturingClient implements ModelClient {
   }
 }
 
+class StreamingClient implements ModelClient {
+  readonly #chunks: StreamChunk[];
+
+  constructor(chunks: StreamChunk[]) {
+    this.#chunks = [...chunks];
+  }
+
+  async *stream(_request: CompletionRequest): AsyncIterable<StreamChunk> {
+    for (const chunk of this.#chunks) {
+      yield chunk;
+    }
+  }
+
+  async complete(): Promise<ModelResponse> {
+    throw new Error("流式客户端不应被调用 complete");
+  }
+}
+
 function response(
   text: string,
   input = 10,
@@ -42,6 +61,43 @@ function response(
     usage: { input, output, cached: 1 },
   };
 }
+
+test("配置 onTextDelta 后走流式路径并逐段回调", async () => {
+  const streamClient = new StreamingClient([
+    { type: "text_delta", text: "你好" },
+    { type: "text_delta", text: "，世界" },
+    {
+      type: "done",
+      response: {
+        text: "你好，世界",
+        toolCalls: [],
+        usage: { input: 5, output: 2, cached: 0 },
+      },
+    },
+  ]);
+  const model = new ConversationAgentModel(streamClient, "问题");
+  const deltas: string[] = [];
+  model.onTextDelta = (text) => deltas.push(text);
+
+  const turn = await model.next(new AbortController().signal);
+
+  assert.deepEqual(deltas, ["你好", "，世界"], "每段增量都应回调");
+  assert.equal(turn.text, "你好，世界");
+  assert.equal(turn.done, true);
+});
+
+test("流式响应缺少 done 时抛错", async () => {
+  const streamClient = new StreamingClient([
+    { type: "text_delta", text: "只来了第一段" },
+  ]);
+  const model = new ConversationAgentModel(streamClient, "问题");
+  model.onTextDelta = () => undefined;
+
+  await assert.rejects(
+    model.next(new AbortController().signal),
+    /流式响应未正常结束/,
+  );
+});
 
 test("setClient 替换主客户端后新请求走新客户端", async () => {
   const first = new CapturingClient([response("第一轮回答")]);
