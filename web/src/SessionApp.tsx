@@ -216,14 +216,11 @@ export function SessionApp() {
     setShowNewTask(true);
   }
 
-  // 面板展开后滚动到可视区域并聚焦输入框，避免“点了没反应”的错觉
+  // 面板展开后聚焦输入框（模态居中，无需滚动）
   const newTaskPanelRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (!showNewTask) return;
-    const panel = newTaskPanelRef.current;
-    if (!panel) return;
-    panel.scrollIntoView({ behavior: "smooth", block: "start" });
-    panel.querySelector("textarea")?.focus();
+    newTaskPanelRef.current?.querySelector("textarea")?.focus();
   }, [showNewTask]);
 
   async function openProjectPicker() {
@@ -835,7 +832,23 @@ export function SessionApp() {
           </>
         )}
             {showNewTask && (
+              <div
+                className="new-task-overlay"
+                onClick={(event) => {
+                  if (event.target === event.currentTarget) {
+                    setShowNewTask(false);
+                  }
+                }}
+              >
               <section className="new-task-panel" ref={newTaskPanelRef}>
+                <button
+                  type="button"
+                  className="new-task-close"
+                  aria-label="关闭"
+                  onClick={() => setShowNewTask(false)}
+                >
+                  ×
+                </button>
                 <div>
                   <span className="new-session-mark">◆</span>
                   <div>
@@ -941,6 +954,7 @@ export function SessionApp() {
                   onSubmit={submitMessage}
                 />
               </section>
+              </div>
             )}
       </main>
     </div>
