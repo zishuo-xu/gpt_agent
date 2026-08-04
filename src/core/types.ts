@@ -133,6 +133,8 @@ export type AgentEvent =
       missedTokens?: number;
       /** 缓存失效原因：压缩（合法）/ 模型切换（异常）/ 空闲超时（TTL） */
       missedReason?: "compaction" | "model_switch" | "idle";
+      /** 因 miss 多付的费用（元）；压缩属合法重置不计入，仅在异常失效时给出 */
+      missedCostCny?: number;
     }
   | { type: "done" }
   | { type: "need_user"; question: string }

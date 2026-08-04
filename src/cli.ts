@@ -208,11 +208,27 @@ async function runCli(): Promise<void> {
     }
     if (line === "/cost") {
       const summary = session.summary();
+      const cacheRate =
+        summary.totalInputTokens > 0
+          ? Math.round(
+              (summary.totalCachedTokens / summary.totalInputTokens) * 100,
+            )
+          : 0;
       output.write(
         `累计 ${summary.totalInputTokens} input / ` +
           `${summary.totalOutputTokens} output / ` +
-          `${summary.totalCachedTokens} cached tokens。\n`,
+          `${summary.totalCachedTokens} cached tokens（命中率 ${cacheRate}%）。\n`,
+      );
+      if (summary.totalMissedTokens > 0) {
+        output.write(
+          `累计缓存浪费 ${summary.totalMissedTokens} tokens` +
+            `${
+              summary.totalMissedCostCny > 0
+                ? `（多花 ¥${summary.totalMissedCostCny.toFixed(4)}）`
+                : ""
+            }；压缩导致的重置不计入。\n`,
         );
+      }
       if (summary.totalCostCny > 0) {
         output.write(
           `按已配置模型单价估算：¥${summary.totalCostCny.toFixed(4)}。\n`,
@@ -543,10 +559,27 @@ async function runCli(): Promise<void> {
       output.write(`  ${event.summary}\n`);
     }
     if (event.type === "cost_update") {
+      const missedLabel =
+        !event.missedTokens || event.missedTokens <= 0
+          ? ""
+          : event.missedReason === "compaction"
+            ? " · 缓存已重置（压缩）"
+            : event.missedReason === "model_switch"
+              ? ` · 缓存失效 ${event.missedTokens}（模型切换）`
+              : event.missedReason === "idle"
+                ? ` · 缓存过期 ${event.missedTokens}（空闲超时）`
+                : ` · 缓存未命中浪费 ${event.missedTokens}`;
+      const missedCostLabel =
+        event.missedCostCny && event.missedCostCny > 0
+          ? `（多花 ¥${event.missedCostCny.toFixed(4)}）`
+          : "";
       output.write(
         `  本轮 ${event.input} in / ${event.output} out` +
           `${event.cached ? ` / ${event.cached} cached` : ""}` +
-          ` · 会话累计 ${event.totalTokens}\n`,
+          ` · 会话累计 ${event.totalTokens}` +
+          missedLabel +
+          missedCostLabel +
+          "\n",
       );
     }
     if (event.type === "context_compacted") {

@@ -68,6 +68,10 @@ export interface AgentSessionSummary {
   totalOutputTokens: number;
   totalCachedTokens: number;
   totalCostCny: number;
+  /** 累计缓存浪费 token（仅异常失效；压缩不计） */
+  totalMissedTokens: number;
+  /** 累计缓存浪费费用（元） */
+  totalMissedCostCny: number;
   todos: TodoItem[];
   toolCallCount: number;
   kind: "interactive" | "run";
@@ -116,6 +120,9 @@ export class AgentSession {
   #totalOutputTokens = 0;
   #totalCachedTokens = 0;
   #totalCostCny = 0;
+  /** 累计缓存浪费（仅计异常失效；压缩属合法重置不计入，参照 Pi cache-stats） */
+  #totalMissedTokens = 0;
+  #totalMissedCostCny = 0;
   #todos: TodoItem[] = [];
   #taskBox: TaskBox | undefined;
   #taskStopReason: "deadline" | "budget" | undefined;
@@ -317,6 +324,8 @@ export class AgentSession {
       totalOutputTokens: this.#totalOutputTokens,
       totalCachedTokens: this.#totalCachedTokens,
       totalCostCny: this.#totalCostCny,
+      totalMissedTokens: this.#totalMissedTokens,
+      totalMissedCostCny: this.#totalMissedCostCny,
       todos: structuredClone(this.#todos),
       toolCallCount: this.#events.filter(
         (record) => record.event.type === "tool_call",
@@ -796,6 +805,10 @@ export class AgentSession {
       this.#totalOutputTokens += event.output;
       this.#totalCachedTokens += event.cached ?? 0;
       this.#totalCostCny += event.costCny ?? 0;
+      if (event.missedTokens && event.missedReason !== "compaction") {
+        this.#totalMissedTokens += event.missedTokens;
+        this.#totalMissedCostCny += event.missedCostCny ?? 0;
+      }
     }
     if (event.type === "done") this.#status = "done";
     if (event.type === "need_user") this.#status = "done";

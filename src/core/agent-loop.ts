@@ -208,6 +208,13 @@ export class AgentLoop {
           this.#seenCompactions = this.#modelCompactCount?.() ?? 0;
           this.#prevInputTokens = turn.usage.input;
           this.#prevTurnAtMs = now;
+          // 浪费费用（Pi missedCost）：miss 部分本可按缓存价计费却按全价重计；
+          // 压缩属合法重置不计入
+          const missedCostCny = missedCost(
+            missed.missedTokens,
+            missed.missedReason,
+            turn.usagePricing ?? this.#pricing,
+          );
           const costCny = usageCostCny(
             turn.usage,
             turn.usagePricing ?? this.#pricing,
@@ -228,6 +235,9 @@ export class AgentLoop {
                   ...(missed.missedReason
                     ? { missedReason: missed.missedReason }
                     : {}),
+                  ...(missedCostCny === undefined || missedCostCny <= 0
+                    ? {}
+                    : { missedCostCny }),
                 }
               : {}),
             ...(costCny === undefined
@@ -430,6 +440,25 @@ function usageCostCny(
       pricing.inputPerMillionCny +
       usage.output * pricing.outputPerMillionCny +
       usage.cached * pricing.cachedInputPerMillionCny) /
+    1_000_000
+  );
+}
+
+/** miss 浪费费用：missedTokens 本可按缓存价计费，实际按全价输入计费。
+    压缩是合法的缓存重置（Pi 语义：重置计数不计浪费），返回 undefined。 */
+export function missedCost(
+  missedTokens: number,
+  missedReason: "compaction" | "model_switch" | "idle" | undefined,
+  pricing?: ModelPricing,
+): number | undefined {
+  if (missedTokens <= 0 || missedReason === "compaction") return undefined;
+  if (!pricing) return undefined;
+  return (
+    (missedTokens *
+      Math.max(
+        0,
+        pricing.inputPerMillionCny - pricing.cachedInputPerMillionCny,
+      )) /
     1_000_000
   );
 }

@@ -29,6 +29,9 @@ export class ContextManager {
   readonly #stateDir: string;
   #todos: TodoItem[] = [];
   #repoMap: RepoMap | null = null;
+  /** RepoMap 首次获取后固化的快照：RepoMap 内部有 TTL 缓存，文件改动后会重建，
+      若每轮重新 get() 会改变 system 内容破坏前缀缓存；会话内只注入首次快照 */
+  #repoMapSnapshot: string | null = null;
   /** 跨项目记忆索引：会话内惰性生成一次，保证 system 前缀稳定（利于 prompt cache） */
   #crossProjectIndex: string | null = null;
   /** 记忆类静态段（AGENTS.md + 记忆文件 + 跨项目索引）：会话内只构建一次，
@@ -72,16 +75,19 @@ export class ContextManager {
     if (this.#staticSections) {
       sections.push(...this.#staticSections);
     }
-    if (this.#repoMap) {
+    if (this.#repoMap && this.#repoMapSnapshot === null) {
       const map = await this.#repoMap.get();
       if (map) {
-        sections.push(
-          [
-            "仓库签名地图（仅签名，用 Read 查看实现；用 Glob/Grep 探索更多）：",
-            map,
-          ].join("\n"),
-        );
+        this.#repoMapSnapshot = map;
       }
+    }
+    if (this.#repoMapSnapshot) {
+      sections.push(
+        [
+          "仓库签名地图（仅签名，用 Read 查看实现；用 Glob/Grep 探索更多）：",
+          this.#repoMapSnapshot,
+        ].join("\n"),
+      );
     }
     // todos 随 TodoWrite 高频变化，绝不能进 system——否则 system 中一字节变化
     // 会让其后整个 messages 历史的缓存失效。因此注入为独立消息，且插在
