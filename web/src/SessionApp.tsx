@@ -56,7 +56,7 @@ interface SessionSummary {
   kind: "interactive" | "run";
 }
 
-interface SessionEvent {
+export interface SessionEvent {
   seq: number;
   ts: string;
   event: Record<string, any> & { type: string };
@@ -1193,7 +1193,7 @@ function RunBoundsConfirmation(props: {
   );
 }
 
-type DisplayItem =
+export type DisplayItem =
   | {
       kind: "message";
       seq: number;
@@ -1229,7 +1229,7 @@ type DisplayItem =
  * 事件流 → 显示条目：单次遍历完成 delta 合并、call/result 配对、
  * 审批 resolved 判定，渲染层不再做 O(n) 回看。
  */
-function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
+export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
   const toolResults = new Map<string, Record<string, any>>();
   const startedQueues = new Set<string>();
   const taskEnds = new Map<string, Record<string, any>>();

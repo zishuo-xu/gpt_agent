@@ -1,0 +1,297 @@
+import { before, describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { buildDisplayItems } from "./SessionApp";
+import type { SessionEvent } from "./SessionApp";
+
+/**
+ * web/src 行为层测试：
+ * - buildDisplayItems（会话回放的核心事件流转换）纯函数直测；
+ * - SessionListSidebar（会话列表）用 happy-dom 轻量 DOM 渲染交互。
+ * 渲染相关依赖在注册 DOM 全局后再动态加载，避免 react-dom 抢先初始化。
+ */
+
+const ts = "2026-08-01T10:00:00.000Z";
+
+function ev(seq: number, event: Record<string, unknown> & { type: string }): SessionEvent {
+  return { seq, ts, event } as SessionEvent;
+}
+
+describe("buildDisplayItems（会话回放事件流转换）", () => {
+  it("用户消息渲染为 user message，带 queueId 的 user 事件不单独展示", () => {
+    const items = buildDisplayItems([
+      ev(1, { type: "user", text: "你好" }),
+      ev(2, { type: "user", text: "排队消息", queueId: "q1" }),
+    ]);
+    assert.equal(items.length, 1);
+    assert.deepEqual(items[0], {
+      kind: "message",
+      seq: 1,
+      ts,
+      author: "user",
+      text: "你好",
+    });
+  });
+
+  it("连续的 text_delta 合并为一条 assistant 消息", () => {
+    const items = buildDisplayItems([
+      ev(1, { type: "text_delta", text: "Hel" }),
+      ev(2, { type: "text_delta", text: "lo " }),
+      ev(3, { type: "text_delta", text: "世界" }),
+      ev(4, { type: "user", text: "下一轮" }),
+    ]);
+    assert.equal(items.length, 2);
+    const message = items[0]!;
+    assert.equal(message.kind, "message");
+    if (message.kind === "message") {
+      assert.equal(message.author, "assistant");
+      assert.equal(message.text, "Hello 世界");
+      assert.equal(message.seq, 1);
+    }
+  });
+
+  it("tool_call 与后续 tool_result 按 callId 配对", () => {
+    const result = { type: "tool_result", callId: "c1", summary: "done" };
+    const items = buildDisplayItems([
+      ev(1, { type: "tool_call", call: { id: "c1", tool: "Read", target: "a.ts" } }),
+      ev(2, result),
+    ]);
+    assert.equal(items.length, 1);
+    const tool = items[0]!;
+    assert.equal(tool.kind, "tool");
+    if (tool.kind === "tool") {
+      assert.equal(tool.call.id, "c1");
+      assert.deepEqual(tool.result, result);
+    }
+  });
+
+  it("尚无 tool_result 的 tool_call 保持运行中状态（result 为 undefined）", () => {
+    const items = buildDisplayItems([
+      ev(1, { type: "tool_call", call: { id: "c1", tool: "Bash", target: "ls" } }),
+    ]);
+    const tool = items[0]!;
+    assert.equal(tool.kind, "tool");
+    if (tool.kind === "tool") {
+      assert.equal(tool.result, undefined);
+    }
+  });
+
+  it("ask_permission 在对应结果事件出现后标记为已解决，permission_denied 也计入配对", () => {
+    const items = buildDisplayItems([
+      ev(1, {
+        type: "ask_permission",
+        call: { id: "c1", tool: "Bash", target: "rm x" },
+        risk: "删除文件",
+      }),
+      ev(2, {
+        type: "ask_permission",
+        call: { id: "c2", tool: "Bash", target: "mv y" },
+        risk: "移动文件",
+      }),
+      ev(3, { type: "tool_result", callId: "c1", summary: "ok" }),
+      ev(4, {
+        type: "permission_denied",
+        call: { id: "c2", tool: "Bash", target: "mv y" },
+      }),
+    ]);
+    const approvals = items.filter((item) => item.kind === "approval");
+    assert.equal(approvals.length, 2);
+    if (approvals[0]?.kind === "approval") {
+      assert.equal(approvals[0].resolvedByEvent, true);
+    }
+    if (approvals[1]?.kind === "approval") {
+      assert.equal(approvals[1].resolvedByEvent, true);
+    }
+  });
+
+  it("user_queued 消息根据同 queueId 的 user 事件判定是否已开始处理", () => {
+    const items = buildDisplayItems([
+      ev(1, { type: "user_queued", text: "先排队", queueId: "q1" }),
+      ev(2, { type: "user_queued", text: "还在排队", queueId: "q2" }),
+      ev(3, { type: "user", text: "已开始", queueId: "q1" }),
+    ]);
+    assert.equal(items.length, 2);
+    const [started, waiting] = items;
+    assert.equal(started?.kind, "message");
+    if (started?.kind === "message") {
+      assert.equal(started.queued, true);
+      assert.equal(started.started, true);
+    }
+    if (waiting?.kind === "message") {
+      assert.equal(waiting.queued, true);
+      assert.equal(waiting.started, false);
+    }
+  });
+
+  it("task_start 与 task_end 按 taskId 配对为 subtask", () => {
+    const end = { type: "task_end", taskId: "t1", status: "done" };
+    const items = buildDisplayItems([
+      ev(1, { type: "task_start", taskId: "t1", title: "子任务" }),
+      ev(2, end),
+    ]);
+    assert.equal(items.length, 1);
+    const subtask = items[0]!;
+    assert.equal(subtask.kind, "subtask");
+    if (subtask.kind === "subtask") {
+      assert.deepEqual(subtask.end, end);
+    }
+  });
+
+  it("系统事件转换为 system 条目（done / error / branch_switch / context_compacted / model_fallback）", () => {
+    const items = buildDisplayItems([
+      ev(1, { type: "done" }),
+      ev(2, { type: "error", message: "超时" }),
+      ev(3, { type: "branch_switch", branchId: 2, forkSeq: 5 }),
+      ev(4, { type: "context_compacted", ratio: 0.35 }),
+      ev(5, { type: "model_fallback", role: "main", from: "a", to: "b" }),
+    ]);
+    assert.deepEqual(
+      items.map((item) => item.kind),
+      ["system", "system", "system", "system", "system"],
+    );
+    if (items[0]?.kind === "system") assert.equal(items[0].tone, "done");
+    if (items[1]?.kind === "system") {
+      assert.match(items[1].text, /超时/);
+      assert.equal(items[1].tone, "error");
+    }
+    if (items[2]?.kind === "system") assert.match(items[2].text, /#2/);
+    if (items[3]?.kind === "system") assert.match(items[3].text, /35\.0%/);
+    if (items[4]?.kind === "system") {
+      assert.match(items[4].text, /a → b/);
+      assert.equal(items[4].tone, "warning");
+    }
+  });
+
+  it("回放裁剪：events.slice(0, cursor) 前缀流产生对应前缀的显示条目", () => {
+    const events: SessionEvent[] = [
+      ev(1, { type: "user", text: "开始" }),
+      ev(2, { type: "text_delta", text: "回答" }),
+      ev(3, { type: "tool_call", call: { id: "c1", tool: "Read", target: "x" } }),
+      ev(4, { type: "tool_result", callId: "c1", summary: "ok" }),
+    ];
+    const full = buildDisplayItems(events);
+    assert.equal(full.length, 3);
+
+    // 回放游标停在 tool_result 之前：工具卡应处于运行中
+    const mid = buildDisplayItems(events.slice(0, 3));
+    assert.equal(mid.length, 3);
+    const tool = mid[2]!;
+    assert.equal(tool.kind, "tool");
+    if (tool.kind === "tool") assert.equal(tool.result, undefined);
+
+    // 回放游标为 1：只剩首条用户消息
+    const head = buildDisplayItems(events.slice(0, 1));
+    assert.equal(head.length, 1);
+    assert.equal(head[0]?.kind, "message");
+  });
+
+  it("空事件流返回空列表", () => {
+    assert.deepEqual(buildDisplayItems([]), []);
+  });
+});
+
+describe("SessionListSidebar（会话列表交互）", () => {
+  before(() => {
+    GlobalRegistrator.register();
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  async function setup(props: {
+    sessions: Array<Record<string, unknown>>;
+    selectedId: string;
+  }) {
+    const [{ act }, { createRoot }, { SessionListSidebar }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./SessionApp"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const calls = { select: [] as string[], create: 0 };
+    await act(async () => {
+      root.render(
+        <SessionListSidebar
+          sessions={props.sessions as never}
+          selectedId={props.selectedId}
+          onSelect={(id) => calls.select.push(id)}
+          onNew={() => {
+            calls.create += 1;
+          }}
+        />,
+      );
+    });
+    return { container, root, act, calls };
+  }
+
+  function makeSession(id: string, title: string): Record<string, unknown> {
+    return {
+      id,
+      title,
+      status: "running",
+      permissionMode: "normal",
+      createdAt: ts,
+      updatedAt: ts,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCachedTokens: 0,
+      totalCostCny: 0,
+      todos: [],
+      toolCallCount: 0,
+      kind: "interactive",
+    };
+  }
+
+  it("渲染全部会话，选中项带 active 样式", async () => {
+    const { container, root, act } = await setup({
+      sessions: [makeSession("s1", "第一个会话"), makeSession("s2", "第二个会话")],
+      selectedId: "s2",
+    });
+    const buttons = Array.from(container.querySelectorAll("button.sidebar-session"));
+    assert.equal(buttons.length, 2);
+    assert.deepEqual(
+      buttons.map((button) => button.textContent),
+      ["第一个会话", "第二个会话"],
+    );
+    assert.equal(buttons[0]!.classList.contains("active"), false);
+    assert.equal(buttons[1]!.classList.contains("active"), true);
+    await act(async () => root.unmount());
+  });
+
+  it("点击会话触发 onSelect 并传入该会话 id", async () => {
+    const { container, root, act, calls } = await setup({
+      sessions: [makeSession("s1", "甲"), makeSession("s2", "乙")],
+      selectedId: "s1",
+    });
+    const target = Array.from(container.querySelectorAll("button.sidebar-session")).find(
+      (button) => button.textContent === "乙",
+    );
+    assert.ok(target, "应找到标题为「乙」的会话按钮");
+    await act(async () => {
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    assert.deepEqual(calls.select, ["s2"]);
+    await act(async () => root.unmount());
+  });
+
+  it("点击「新会话」触发 onNew", async () => {
+    const { container, root, act, calls } = await setup({
+      sessions: [makeSession("s1", "会话")],
+      selectedId: "s1",
+    });
+    const newButton = container.querySelector("button.sidebar-new");
+    assert.ok(newButton, "应存在新会话按钮");
+    await act(async () => {
+      newButton.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(calls.create, 1);
+    await act(async () => root.unmount());
+  });
+
+  it("无会话时展示空状态提示", async () => {
+    const { container, root, act } = await setup({ sessions: [], selectedId: "" });
+    assert.equal(container.querySelector("button.sidebar-session"), null);
+    assert.match(container.querySelector(".sidebar-empty")?.textContent ?? "", /还没有会话/);
+    await act(async () => root.unmount());
+  });
+});
