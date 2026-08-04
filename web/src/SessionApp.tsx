@@ -1492,18 +1492,43 @@ function ItemCard(props: {
               <div className="tool-details-grid">
                 {Object.entries(
                   result.details as Record<string, unknown>,
-                ).map(([key, value]) => (
-                  <span className="tool-details-item" key={key}>
-                    <b>{key}</b>
-                    {typeof value === "object" && value !== null
-                      ? JSON.stringify(value)
-                      : String(value)}
-                  </span>
-                ))}
+                ).map(([key, value]) => {
+                  // Bash 退出码着色（0 绿/非 0 红），耗时转可读格式
+                  const toneClass =
+                    key === "code" && typeof value === "number"
+                      ? value === 0
+                        ? " detail-ok"
+                        : " detail-error"
+                      : key === "durationMs" || key === "signal"
+                        ? " detail-meta"
+                        : "";
+                  const display =
+                    key === "durationMs" && typeof value === "number"
+                      ? formatDuration(value)
+                      : typeof value === "object" && value !== null
+                        ? JSON.stringify(value)
+                        : String(value);
+                  return (
+                    <span
+                      className={`tool-details-item${toneClass}`}
+                      key={key}
+                    >
+                      <b>{key}</b>
+                      {display}
+                    </span>
+                  );
+                })}
               </div>
             )}
           {typeof result?.output === "string" && (
-            <DiffOrOutput text={result.output} />
+            <DiffOrOutput
+              text={result.output}
+              forceDiff={
+                call.tool === "Edit" ||
+                call.tool === "Write" ||
+                call.tool === "MultiEdit"
+              }
+            />
           )}
           {result?.output &&
             typeof result.output === "object" && (
@@ -1696,33 +1721,54 @@ function renderInline(text: string): ReactNode[] {
   });
 }
 
-function DiffOrOutput(props: { text: string }) {
+function DiffOrOutput(props: { text: string; forceDiff?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
   const lines = props.text.split(/\r?\n/);
-  // 同时存在 +/- 行（或带 diff 头）才按 diff 渲染，避免缩进文本误判
+  // 同时存在 +/- 行（或带 diff 头）才按 diff 渲染，避免缩进文本误判；
+  // 编辑类工具（Edit/Write/MultiEdit）输出强制按 diff 着色（纯新增文件只有 + 行）
   const hasMarker = lines.some(
     (line) => line.startsWith("@@") || line.startsWith("diff --git"),
   );
   const hasAdd = lines.some((line) => line.startsWith("+"));
   const hasRemove = lines.some((line) => line.startsWith("-"));
-  const isDiff = hasMarker || (hasAdd && hasRemove);
+  const isDiff =
+    props.forceDiff === true || hasMarker || (hasAdd && hasRemove);
+  // 长输出按需展开：默认只展示前 60 行，避免大段输出拖慢回放渲染
+  const collapseThreshold = 60;
+  const collapsed = !expanded && lines.length > collapseThreshold;
+  const visibleLines = collapsed
+    ? lines.slice(0, collapseThreshold)
+    : lines;
   return (
-    <pre className={isDiff ? "diff-output" : "tool-output"}>
-      {lines.map((line, index) => (
-        <span
-          className={
-            line.startsWith("+")
-              ? "diff-add"
-              : line.startsWith("-")
-                ? "diff-remove"
-                : "diff-context"
-          }
-          key={index}
+    <>
+      <pre className={isDiff ? "diff-output" : "tool-output"}>
+        {visibleLines.map((line, index) => (
+          <span
+            className={
+              line.startsWith("@@") || line.startsWith("diff --git")
+                ? "diff-hunk"
+                : line.startsWith("+")
+                  ? "diff-add"
+                  : line.startsWith("-")
+                    ? "diff-remove"
+                    : "diff-context"
+            }
+            key={index}
+          >
+            {line}
+            {"\n"}
+          </span>
+        ))}
+      </pre>
+      {collapsed && (
+        <button
+          className="output-expand-toggle"
+          onClick={() => setExpanded(true)}
         >
-          {line}
-          {"\n"}
-        </span>
-      ))}
-    </pre>
+          展开剩余 {lines.length - collapseThreshold} 行
+        </button>
+      )}
+    </>
   );
 }
 
@@ -1839,6 +1885,12 @@ function formatTime(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms)) return String(ms);
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms)}ms`;
 }
 
 function statusLabel(status: string): string {

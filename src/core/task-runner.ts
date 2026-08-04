@@ -38,6 +38,8 @@ export interface TaskRunnerOptions {
     costCny?: number;
   }) => void;
   recordTrace?: AgentLoopOptions["recordTrace"];
+  /** 活跃子代理循环注册表（跨嵌套层级共享，steer 时逐个软打断） */
+  steerLoops?: Set<AgentLoop>;
 }
 
 /** 同时运行的子代理数量上限（设计约定：并发 ≤ 4） */
@@ -57,6 +59,7 @@ export class TaskRunner {
     | undefined;
   readonly #recordTrace: AgentLoopOptions["recordTrace"];
   readonly #approve: ApprovalHandler | undefined;
+  readonly #steerLoops: Set<AgentLoop>;
 
   constructor(options: TaskRunnerOptions) {
     this.#cwd = options.cwd;
@@ -68,11 +71,17 @@ export class TaskRunner {
     this.#approve = options.approve;
     this.#reportUsage = options.reportUsage;
     this.#recordTrace = options.recordTrace;
+    this.#steerLoops = options.steerLoops ?? new Set();
   }
 
   /** 配置变更后替换子代理模型客户端 */
   setClient(client: ModelClient): void {
     this.#client = client;
+  }
+
+  /** Steer 软打断：传播到所有活跃的子代理循环（含嵌套层级） */
+  steer(): void {
+    for (const loop of this.#steerLoops) loop.steer();
   }
 
   async run(
@@ -167,6 +176,7 @@ export class TaskRunner {
             ...(this.#recordTrace
               ? { recordTrace: this.#recordTrace }
               : {}),
+            steerLoops: this.#steerLoops,
           })
         : undefined;
     const tools = new ToolExecutor(
@@ -213,6 +223,7 @@ export class TaskRunner {
     });
 
     const onAbort = () => loop.interrupt();
+    this.#steerLoops.add(loop);
     try {
       signal.addEventListener("abort", onAbort, { once: true });
       await loop.run();
@@ -259,6 +270,7 @@ export class TaskRunner {
       };
     } finally {
       activeRunners -= 1;
+      this.#steerLoops.delete(loop);
       signal.removeEventListener("abort", onAbort);
     }
   }

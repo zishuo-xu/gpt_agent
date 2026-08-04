@@ -463,6 +463,15 @@ export class AgentSession {
         // 插队到队首，并软打断当前循环（当前工具完成后拒绝剩余调用）
         this.#queuedInputs.unshift(queued);
         this.#activeLoop?.steer();
+        this.#taskRunner?.steer();
+        // 取消挂起审批：否则 steer 会被阻塞在 approve Promise 上无法生效
+        //（子代理审批同样冒泡到此，一并解锁）
+        for (const pending of [...this.#pendingPermissions.values()]) {
+          pending.resolve({
+            granted: false,
+            feedback: "用户插入新指令（steer），已取消审批",
+          });
+        }
       } else {
         this.#queuedInputs.push(queued);
       }

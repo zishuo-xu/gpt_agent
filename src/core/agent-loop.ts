@@ -348,6 +348,8 @@ export class AgentLoop {
                 result: { error: reason },
                 ms: Date.now() - toolStartedAt,
               });
+              // 拒绝来自 steer 取消挂起审批：直接结束本批，不再执行剩余工具
+              if (this.#steerRequested) break;
               continue;
             }
           }

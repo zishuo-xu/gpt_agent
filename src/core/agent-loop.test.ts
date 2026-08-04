@@ -310,3 +310,151 @@ test("模型 fallback 事件可观测且按实际模型单价计费", async () =
     assert.ok(Math.abs((cost.costCny ?? 0) - 0.00034) < 1e-12);
   }
 });
+
+test("run 前 steer：打断点二直接退出，不调用模型也不发 done", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-steer-pre-"),
+  );
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  let nextCalls = 0;
+  const model: AgentModel = {
+    async next() {
+      nextCalls += 1;
+      return { text: "不应被调用", done: true };
+    },
+  };
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: true }),
+  });
+
+  loop.steer();
+  await loop.run();
+
+  assert.equal(nextCalls, 0);
+  assert.equal(events.some((event) => event.type === "done"), false);
+});
+
+test("steer 打断点一：当前工具完成后拒绝本批剩余调用且不发 done", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-steer-mid-"),
+  );
+  await writeFile(path.join(directory, "a.txt"), "a\n", "utf8");
+  await writeFile(path.join(directory, "b.txt"), "b\n", "utf8");
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  const denied: Array<{ id: string; reason: string }> = [];
+  let loop: AgentLoop;
+  bus.subscribe((event) => {
+    events.push(event);
+    // 第一个工具完成后触发 steer
+    if (event.type === "tool_result" && event.callId === "read-a") {
+      loop.steer();
+    }
+  });
+  let nextCalls = 0;
+  const model: AgentModel = {
+    async next() {
+      nextCalls += 1;
+      return {
+        toolCalls: [
+          toolCall("read-a", "Read", "a.txt", { filePath: "a.txt" }),
+          toolCall("read-b", "Read", "b.txt", { filePath: "b.txt" }),
+        ],
+        done: true,
+      };
+    },
+    acceptToolDenied(call, reason) {
+      denied.push({ id: call.id, reason });
+    },
+  };
+  loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: true }),
+  });
+
+  await loop.run();
+
+  assert.equal(nextCalls, 1, "steer 后不应发起新模型轮");
+  assert.equal(
+    events.filter((event) => event.type === "tool_result").length,
+    1,
+    "只有第一个工具执行成功",
+  );
+  const deniedEvent = events.find(
+    (event) =>
+      event.type === "permission_denied" && event.call.id === "read-b",
+  );
+  assert.equal(deniedEvent?.type, "permission_denied");
+  if (deniedEvent?.type === "permission_denied") {
+    assert.match(deniedEvent.reason, /steer/);
+  }
+  assert.equal(denied.length, 1);
+  assert.equal(denied[0]?.id, "read-b");
+  assert.match(denied[0]?.reason ?? "", /steer/);
+  assert.equal(events.some((event) => event.type === "done"), false);
+});
+
+test("steer 解锁挂起审批：拒绝后直接结束本批且不发 done", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-steer-approve-"),
+  );
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  let resolveApproval: ((answer: { granted: boolean; feedback?: string }) => void) | undefined;
+  const model: AgentModel = {
+    async next() {
+      return {
+        toolCalls: [
+          toolCall("bash-1", "Bash", "echo one", { command: "echo one" }),
+          toolCall("bash-2", "Bash", "echo two", { command: "echo two" }),
+        ],
+        done: true,
+      };
+    },
+  };
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("strict"),
+    tools: new ToolExecutor(directory),
+    approve: () =>
+      new Promise((resolve) => {
+        resolveApproval = resolve;
+      }),
+  });
+
+  const runPromise = loop.run();
+  // 等待循环进入审批等待
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(
+    events.some((event) => event.type === "ask_permission"),
+    "应已发出审批请求",
+  );
+  loop.steer();
+  assert.ok(resolveApproval, "审批回调应已挂起");
+  resolveApproval?.({
+    granted: false,
+    feedback: "用户插入新指令（steer），已取消审批",
+  });
+  await runPromise;
+
+  const denied = events.filter(
+    (event) => event.type === "permission_denied",
+  );
+  assert.equal(denied.length, 1, "第二个调用被 break 跳过，不重复拒绝");
+  assert.equal(
+    events.filter((event) => event.type === "tool_result").length,
+    0,
+  );
+  assert.equal(events.some((event) => event.type === "done"), false);
+});

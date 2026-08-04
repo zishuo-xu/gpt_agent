@@ -123,6 +123,27 @@ describe("buildDisplayItems（会话回放事件流转换）", () => {
     }
   });
 
+  it("user_queued 带 steer 标记的消息保留 steer 标志供 UI 展示", () => {
+    const items = buildDisplayItems([
+      ev(1, {
+        type: "user_queued",
+        text: "改主意了",
+        queueId: "q1",
+        steer: true,
+      }),
+      ev(2, { type: "user_queued", text: "普通排队", queueId: "q2" }),
+    ]);
+    assert.equal(items.length, 2);
+    const [steered, normal] = items;
+    if (steered?.kind === "message") {
+      assert.equal(steered.steer, true);
+      assert.equal(steered.queued, true);
+    }
+    if (normal?.kind === "message") {
+      assert.equal(normal.steer, false);
+    }
+  });
+
   it("task_start 与 task_end 按 taskId 配对为 subtask", () => {
     const end = { type: "task_end", taskId: "t1", status: "done" };
     const items = buildDisplayItems([

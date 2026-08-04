@@ -248,3 +248,81 @@ test("压缩事件持久化成本并从摘要与近期对话恢复", async () =>
     false,
   );
 });
+
+test("审批等待中 steer：取消挂起审批并优先消费插队消息", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-steer-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-steer-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-steer-home-"),
+  );
+  const configService = new ConfigService({ cwd, homeDir });
+  const client = new ScriptedClient([
+    {
+      text: "",
+      toolCalls: [
+        {
+          id: "bash-slow",
+          tool: "Bash",
+          target: "echo slow",
+          args: { command: "echo slow" },
+        },
+      ],
+      usage: { input: 10, output: 2, cached: 0 },
+    },
+    response("steer 后的回答"),
+  ]);
+  const manager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    modelFactory: (messages) =>
+      new ConversationAgentModel(client, messages),
+  });
+  const session = await manager.createSession({
+    title: "steer 解锁",
+    mode: "strict",
+  });
+
+  const first = session.sendInput("跑个命令");
+  // 等待进入审批等待
+  const deadline = Date.now() + 2000;
+  while (
+    session.summary().status !== "waiting_permission" &&
+    Date.now() < deadline
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(session.summary().status, "waiting_permission");
+
+  await session.sendInput("改主意了", undefined, { steer: true });
+  await first;
+
+  const events = session.events().map((record) => record.event);
+  const queued = events.find((event) => event.type === "user_queued");
+  assert.equal(queued?.type, "user_queued");
+  if (queued?.type === "user_queued") {
+    assert.equal(queued.steer, true);
+    assert.equal(queued.text, "改主意了");
+  }
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "permission_denied" &&
+        event.reason.includes("steer"),
+    ),
+    "挂起审批应被 steer 取消",
+  );
+  assert.ok(
+    events.some((event) => event.type === "done"),
+    "steer 消息消费后应正常收尾",
+  );
+  // 插队消息进入下一轮模型请求
+  assert.equal(client.requests.length, 2);
+  assert.equal(
+    (client.requests[1]?.messages.at(-1) as { content: string }).content,
+    "改主意了",
+  );
+});

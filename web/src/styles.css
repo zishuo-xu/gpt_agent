@@ -2624,6 +2624,44 @@ select {
   color: #748091;
 }
 
+.diff-hunk {
+  background: #10233a;
+  color: #6fb3ff;
+}
+
+.tool-details-item.detail-ok {
+  border-color: #1f5c3a;
+  background: #0f2418;
+  color: #7be2a5;
+}
+
+.tool-details-item.detail-error {
+  border-color: #6e2a2a;
+  background: #2a1414;
+  color: #ff9d9d;
+}
+
+.tool-details-item.detail-meta {
+  color: #5d7290;
+}
+
+.output-expand-toggle {
+  display: block;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border: 1px solid #293441;
+  border-radius: 5px;
+  background: transparent;
+  color: #6fb3ff;
+  font: 10px/1.6 var(--mono);
+  cursor: pointer;
+}
+
+.output-expand-toggle:hover {
+  border-color: #3a4a5d;
+  background: #0a1017;
+}
+
 .subtask-card {
   margin: 9px 0;
   border: 1px solid #665caa;

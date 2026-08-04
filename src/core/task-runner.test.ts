@@ -291,3 +291,97 @@ test("超过并发上限的子代理被立即拒绝", async () => {
   const rest = await Promise.all(pending);
   assert.equal(rest.filter((result) => !result.isError).length, 4);
 });
+
+test("TaskRunner.steer 传播到活跃子代理：剩余工具调用被拒绝", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-task-steer-"));
+  await writeFile(path.join(cwd, "a.txt"), "a\n", "utf8");
+  await writeFile(path.join(cwd, "b.txt"), "b\n", "utf8");
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  let runnerRef: TaskRunner | undefined;
+  bus.subscribe((event) => {
+    events.push(event);
+    // 第一个工具完成后 steer，验证剩余调用被软打断
+    if (event.type === "task_event" && event.eventType === "tool_result") {
+      runnerRef?.steer();
+    }
+  });
+  const client = new ScriptedClient([
+    response("", [
+      {
+        id: "read-a",
+        tool: "Read",
+        target: "a.txt",
+        args: { filePath: "a.txt" },
+      },
+      {
+        id: "read-b",
+        tool: "Read",
+        target: "b.txt",
+        args: { filePath: "b.txt" },
+      },
+    ]),
+    response("Conclusion: 被 steer 打断。\nKey evidence: a.txt:1\nUnconfirmed: 无。"),
+  ]);
+  const runner = new TaskRunner({
+    cwd,
+    bus,
+    mode: "normal",
+    client,
+  });
+  runnerRef = runner;
+
+  const result = await runner.run(
+    { description: "steer 传播任务", prompt: "读取两个文件" },
+    new AbortController().signal,
+  );
+
+  assert.equal(result.isError, false);
+  // steer 后循环不发 done 也不发起新模型轮：第二个响应不被消费
+  const toolResults = events.filter(
+    (event) =>
+      event.type === "task_event" && event.eventType === "tool_result",
+  );
+  assert.equal(toolResults.length, 1, "只有第一个 Read 执行");
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "task_event" &&
+        event.eventType === "permission_denied",
+    ),
+    "第二个 Read 应被 steer 拒绝",
+  );
+});
+
+test("steerLoops 注册表在 run 结束后清空且跨嵌套共享", async () => {
+  class HangClient implements ModelClient {
+    release: ((value: ModelResponse) => void) | undefined;
+    async complete(): Promise<ModelResponse> {
+      return new Promise((resolve) => {
+        this.release = resolve;
+      });
+    }
+  }
+  const client = new HangClient();
+  const steerLoops = new Set<unknown>();
+  const cwd = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-task-steerloops-"),
+  );
+  const runner = new TaskRunner({
+    cwd,
+    bus: new AgentEventBus(),
+    mode: "normal",
+    client,
+    steerLoops: steerLoops as Set<never>,
+  });
+  const runPromise = runner.run(
+    { description: "注册表任务", prompt: "直接给结论" },
+    new AbortController().signal,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(steerLoops.size, 1, "活跃循环应已注册");
+  assert.ok(client.release, "模型调用应已挂起");
+  client.release?.(response("Conclusion: 完成。"));
+  await runPromise;
+  assert.equal(steerLoops.size, 0, "结束后应移除");
+});

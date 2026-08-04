@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ToolCall, ToolExecutionResult } from "../core/types.js";
 import { buildSystemPrompt, ConversationAgentModel } from "./agent-model.js";
 import { EXPLORE_TOOL_NAMES } from "./tool-definitions.js";
 import type {
@@ -262,4 +263,50 @@ test("压缩请求不携带工具 schema", async () => {
   });
   await model.next(new AbortController().signal);
   assert.deepEqual(cheap.requests[0]?.tools, [], "压缩请求不应携带工具");
+});
+
+test("工具结果 details 供事件层透传，不进入模型上下文", async () => {
+  const call: ToolCall = {
+    id: "bash-1",
+    tool: "Bash",
+    target: "echo hi",
+    args: { command: "echo hi" },
+  };
+  const client = new CapturingClient([
+    {
+      text: "",
+      toolCalls: [call],
+      usage: { input: 4, output: 2, cached: 0 },
+    },
+    response("收尾"),
+  ]);
+  const model = new ConversationAgentModel(client, "跑个命令");
+  await model.next(new AbortController().signal);
+
+  const result: ToolExecutionResult = {
+    summary: "退出码 0",
+    output: "hi",
+    details: {
+      command: "echo hi",
+      durationMs: 12,
+      code: 0,
+      marker: "DETAILS_ONLY_FOR_UI",
+    },
+  };
+  model.acceptToolResult(call, result, false);
+  await model.next(new AbortController().signal);
+
+  const toolMessage = client.requests[1]?.messages.at(-1);
+  assert.equal(toolMessage?.role, "tool");
+  const serialized = JSON.stringify(toolMessage);
+  assert.ok(
+    !serialized.includes("DETAILS_ONLY_FOR_UI"),
+    "details 不应进入模型上下文",
+  );
+  assert.ok(
+    !serialized.includes("durationMs"),
+    "耗时等执行元数据不应进入模型上下文",
+  );
+  assert.ok(serialized.includes("hi"), "output 应正常回灌模型");
+  assert.ok(serialized.includes("退出码 0"), "summary 应正常回灌模型");
 });
