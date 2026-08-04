@@ -2567,6 +2567,31 @@ select {
   font-size: 10px;
 }
 
+.tool-details-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0 0 8px;
+}
+
+.tool-details-item {
+  display: inline-flex;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid #293441;
+  border-radius: 5px;
+  background: #0a1017;
+  color: #8e9bab;
+  font: 10px/1.6 var(--mono);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.tool-details-item b {
+  color: #5d7290;
+  font-weight: 600;
+}
+
 .diff-output,
 .tool-output {
   max-height: 310px;

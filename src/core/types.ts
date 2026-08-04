@@ -45,7 +45,13 @@ export type AgentEvent =
       modelText?: string;
       queueId?: string;
     }
-  | { type: "user_queued"; text: string; queueId: string }
+  | {
+      type: "user_queued";
+      text: string;
+      queueId: string;
+      /** Steer 插队消息：打断当前工具批次后优先处理（参照 Pi 的 steer 两档排队） */
+      steer?: boolean;
+    }
   | { type: "permission_mode_changed"; mode: PermissionMode }
   | {
       type: "context_compacted";
@@ -111,6 +117,8 @@ export type AgentEvent =
       callId: string;
       summary: string;
       output?: unknown;
+      /** 仅 UI 展示的结构化详情（不进模型上下文，参照 Pi 的工具结果拆分） */
+      details?: unknown;
       aborted?: boolean;
       isError?: boolean;
     }
@@ -171,6 +179,8 @@ export interface RecordedEvent {
 export interface ToolExecutionResult {
   summary: string;
   output?: unknown;
+  /** 仅 UI 展示的结构化详情（不进模型上下文；旧事件回放无此字段也兼容） */
+  details?: unknown;
   traceOutput?: unknown;
   aborted?: boolean;
   todoSnapshot?: TodoItem[];

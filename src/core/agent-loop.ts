@@ -88,6 +88,8 @@ export class AgentLoop {
   #prevInputTokens = 0;
   #prevTurnAtMs = 0;
   #seenCompactions = 0;
+  /** Steer 打断请求（参照 Pi 的 steer）：当前工具完成后拒绝剩余工具调用并退出循环 */
+  #steerRequested = false;
 
   constructor(options: AgentLoopOptions) {
     this.#bus = options.bus;
@@ -110,6 +112,12 @@ export class AgentLoop {
     if (!this.#abortController || this.#abortController.signal.aborted) return;
     this.#abortController.abort();
     this.#bus.emit({ type: "interrupted", scope: "loop" });
+  }
+
+  /** Steer 软打断：不 abort 正在运行的工具，而是在它完成后拒绝本批剩余
+      工具调用并结束循环，让会话优先处理插队的用户消息。 */
+  steer(): void {
+    this.#steerRequested = true;
   }
 
   async run(): Promise<void> {
@@ -140,6 +148,10 @@ export class AgentLoop {
         const turnPolicy = await this.#beforeTurn?.(signal);
         if (turnPolicy?.stop) {
           this.#bus.emit({ type: "interrupted", scope: "loop" });
+          return;
+        }
+        if (this.#steerRequested) {
+          // 打断点二：模型轮间（上一轮无工具或已处理完毕），不再发起新轮
           return;
         }
         let turn: ModelTurn;
@@ -261,6 +273,20 @@ export class AgentLoop {
             recordTurn();
             return;
           }
+          if (this.#steerRequested) {
+            // 打断点一：当前工具已完成，拒绝本批剩余调用
+            //（模型协议要求每个 tool_use 都有 tool_result 回应）
+            const reason = "用户插入新指令（steer），跳过剩余工具调用";
+            this.#bus.emit({ type: "permission_denied", call, reason });
+            this.#model.acceptToolDenied?.(call, reason);
+            traceTools.push({
+              call,
+              permission: "steered",
+              result: { error: reason },
+              ms: Date.now() - toolStartedAt,
+            });
+            continue;
+          }
           this.#bus.emit({ type: "tool_call", call });
           if (turnPolicy?.finalOnly) {
             const reason = "任务盒已进入纯总结阶段，禁止继续调用工具";
@@ -333,6 +359,9 @@ export class AgentLoop {
               callId: call.id,
               summary: result.summary,
               ...(result.output === undefined ? {} : { output: result.output }),
+              ...(result.details === undefined
+                ? {}
+                : { details: result.details }),
               ...(result.aborted === undefined ? {} : { aborted: result.aborted }),
               ...(result.isError === undefined ? {} : { isError: result.isError }),
             });
@@ -379,6 +408,10 @@ export class AgentLoop {
 
         recordTurn();
 
+        if (this.#steerRequested) {
+          // steer 后不发 done：退出循环让会话优先消费插队消息
+          return;
+        }
         if (turn.done) {
           this.#bus.emit({ type: "done" });
           return;

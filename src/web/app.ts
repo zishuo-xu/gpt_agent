@@ -305,6 +305,7 @@ export function createWebApp(
         task?: string;
         message?: string;
         confirmBounds?: boolean;
+        steer?: boolean;
       };
       // 前端对"已有会话发消息"使用 message 字段，对"新建会话"使用 task；此处统一兼容
       const task = (body.task ?? body.message)?.trim();
@@ -332,7 +333,11 @@ export function createWebApp(
         return context.json({ accepted: true, queued: false });
       }
       const queued = session.isProcessing();
-      void session.sendInput(task);
+      void session.sendInput(
+        task,
+        undefined,
+        body.steer === true ? { steer: true } : undefined,
+      );
       return context.json({ accepted: true, queued });
     } catch (error) {
       return context.json(

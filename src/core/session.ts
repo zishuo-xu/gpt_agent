@@ -85,6 +85,8 @@ interface QueuedInput {
   id: string;
   text: string;
   displayText?: string;
+  /** Steer 插队消息：打断当前工具批次后优先处理 */
+  steer?: boolean;
 }
 
 export class AgentSession {
@@ -446,16 +448,29 @@ export class AgentSession {
   async sendInput(
     message: string,
     displayText?: string,
+    options?: { steer?: boolean },
   ): Promise<void> {
     const text = message.trim();
     if (!text) throw new Error("消息不能为空");
     if (this.#processing) {
-      const queued = { id: randomUUID(), text };
-      this.#queuedInputs.push(queued);
+      const steer = options?.steer === true;
+      const queued: QueuedInput = {
+        id: randomUUID(),
+        text,
+        ...(steer ? { steer: true } : {}),
+      };
+      if (steer) {
+        // 插队到队首，并软打断当前循环（当前工具完成后拒绝剩余调用）
+        this.#queuedInputs.unshift(queued);
+        this.#activeLoop?.steer();
+      } else {
+        this.#queuedInputs.push(queued);
+      }
       this.#bus.emit({
         type: "user_queued",
         text: queued.text,
         queueId: queued.id,
+        ...(steer ? { steer: true } : {}),
       });
       return;
     }

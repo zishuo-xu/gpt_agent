@@ -422,7 +422,7 @@ export function SessionApp() {
     setRunBoundsPreview(null);
   }
 
-  async function submitMessage(boundsConfirmed = false) {
+  async function submitMessage(boundsConfirmed = false, steer = false) {
     const content = message.trim();
     if (!content) return;
     setSubmitting(true);
@@ -463,7 +463,11 @@ export function SessionApp() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(
             selectedId
-              ? { message: content, confirmBounds }
+              ? {
+                  message: content,
+                  confirmBounds,
+                  ...(steer && busy ? { steer: true } : {}),
+                }
               : {
                   task: content,
                   permissionMode,
@@ -1111,7 +1115,10 @@ function Composer(props: {
   busy: boolean;
   submitting: boolean;
   selected: boolean;
-  onSubmit: () => Promise<void>;
+  onSubmit: (
+    boundsConfirmed?: boolean,
+    steer?: boolean,
+  ) => Promise<void>;
 }) {
   return (
     <div className="web-composer">
@@ -1126,13 +1133,17 @@ function Composer(props: {
             (event.metaKey || event.ctrlKey)
           ) {
             event.preventDefault();
-            void props.onSubmit();
+            // Shift+Enter：插队打断（当前工具完成后转向）；否则普通排队
+            void props.onSubmit(
+              false,
+              props.busy && event.shiftKey,
+            );
           }
         }}
         placeholder={
           props.selected
             ? props.busy
-              ? "发消息给 MyAgent…（自动排队，Esc 硬打断）"
+              ? "发消息给 MyAgent…（自动排队，⌘⇧Enter 插队打断，Esc 硬打断）"
               : "继续发消息给 MyAgent…"
             : "例如：检查这个项目，修复当前失败的测试"
         }
@@ -1141,9 +1152,20 @@ function Composer(props: {
       <div className="composer-footer">
         <span>
           {props.busy
-            ? "软打断 · 当前轮结束后自动处理"
+            ? "排队发送 · 插队打断会中断剩余工具调用"
             : "⌘/Ctrl + Enter 发送"}
         </span>
+        {props.busy && (
+          <button
+            className="save-button"
+            onClick={() => void props.onSubmit(false, true)}
+            disabled={
+              props.submitting || !props.message.trim()
+            }
+          >
+            插队打断
+          </button>
+        )}
         <button
           className="save-button"
           onClick={() => void props.onSubmit()}
@@ -1216,6 +1238,7 @@ export type DisplayItem =
       text: string;
       queued?: boolean;
       started?: boolean;
+      steer?: boolean;
     }
   | {
       kind: "tool";
@@ -1286,6 +1309,7 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
           text: String(event.text),
           queued: true,
           started: startedQueues.has(String(event.queueId)),
+          steer: event.steer === true,
         });
         break;
       case "text_delta": {
@@ -1417,7 +1441,15 @@ function ItemCard(props: {
       >
         <span className="message-author">
           {item.author === "user" ? "你" : "MyAgent"} · {formatTime(item.ts)}
-          {item.queued && <em>{item.started ? "已处理" : "已排队"}</em>}
+          {item.queued && (
+            <em>
+              {item.started
+                ? "已处理"
+                : item.steer
+                  ? "已插队"
+                  : "已排队"}
+            </em>
+          )}
         </span>
         <RichText text={item.text} />
       </article>
@@ -1455,6 +1487,21 @@ function ItemCard(props: {
           {call.purpose && <p>目的：{call.purpose}</p>}
           {result?.summary && <p>{result.summary}</p>}
           {result?.reason && <p>{result.reason}</p>}
+          {result?.details &&
+            typeof result.details === "object" && (
+              <div className="tool-details-grid">
+                {Object.entries(
+                  result.details as Record<string, unknown>,
+                ).map(([key, value]) => (
+                  <span className="tool-details-item" key={key}>
+                    <b>{key}</b>
+                    {typeof value === "object" && value !== null
+                      ? JSON.stringify(value)
+                      : String(value)}
+                  </span>
+                ))}
+              </div>
+            )}
           {typeof result?.output === "string" && (
             <DiffOrOutput text={result.output} />
           )}

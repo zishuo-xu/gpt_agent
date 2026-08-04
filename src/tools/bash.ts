@@ -28,6 +28,7 @@ export async function runBash(
   if (options.signal?.aborted) {
     throw abortError();
   }
+  const startedAt = Date.now();
 
   // 后台执行：启动 detached 进程立即返回，不阻塞主循环；输出不采集
   if (options.background) {
@@ -48,6 +49,7 @@ export async function runBash(
       },
       aborted: false,
       isError: false,
+      details: { command, background: true, pid },
     };
   }
 
@@ -133,6 +135,16 @@ export async function runBash(
         traceOutput: { stdout, stderr, code, signal },
         aborted: false,
         isError: typeof code === "number" && code !== 0,
+        details: {
+          command,
+          durationMs: Date.now() - startedAt,
+          code,
+          signal,
+          stdoutChars: stdout.length,
+          stderrChars: stderr.length,
+          truncated,
+          outputIncomplete,
+        },
       });
     };
 

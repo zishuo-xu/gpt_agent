@@ -130,6 +130,14 @@ export class ToolExecutor {
           )} 行（共 ${lines.length} 行）`,
           output: bounded.text,
           traceOutput: paged,
+          details: {
+            filePath: args.filePath,
+            startLine: offset,
+            endLine: Math.min(offset + limit - 1, lines.length),
+            totalLines: lines.length,
+            truncated: bounded.truncated,
+            ...(nextOffset === undefined ? {} : { nextOffset }),
+          },
         };
       }
       case "Grep": {
@@ -143,6 +151,7 @@ export class ToolExecutor {
           : undefined;
         const files = await collectFiles(root, signal);
         const matches: string[] = [];
+        const matchedFiles = new Set<string>();
         for (const filePath of files) {
           assertNotAborted(signal);
           const relative = normalizeSlashes(path.relative(this.#cwd, filePath));
@@ -153,6 +162,7 @@ export class ToolExecutor {
           for (let index = 0; index < lines.length; index += 1) {
             matcher.lastIndex = 0;
             if (!matcher.test(lines[index] ?? "")) continue;
+            matchedFiles.add(relative);
             matches.push(
               `${relative}:${index + 1}:${truncateLine(lines[index] ?? "", 2000)}`,
             );
@@ -175,6 +185,12 @@ export class ToolExecutor {
             continuationHint: "narrow path/glob and call Grep again",
           }).text,
           traceOutput: grepOutput,
+          details: {
+            pattern: args.pattern,
+            matches: matches.length,
+            files: matchedFiles.size,
+            capped: matches.length >= maxResults,
+          },
         };
       }
       case "Glob": {
@@ -202,6 +218,11 @@ export class ToolExecutor {
             continuationHint: "narrow pattern/path and call Glob again",
           }).text,
           traceOutput: globOutput,
+          details: {
+            pattern: args.pattern,
+            matches: matches.length,
+            capped: matches.length >= maxResults,
+          },
         };
       }
       case "TodoWrite": {
@@ -231,7 +252,11 @@ export class ToolExecutor {
           args.replaceAll,
           signal,
         );
-        return { summary: `已编辑 ${args.filePath}`, output: diff };
+        return {
+          summary: `已编辑 ${args.filePath}`,
+          output: diff,
+          details: { filePath: args.filePath },
+        };
       }
       case "MultiEdit": {
         const args = call.args as MultiEditArgs;
@@ -243,6 +268,7 @@ export class ToolExecutor {
         return {
           summary: `已完成 ${args.filePath} 的 ${args.edits.length} 项编辑`,
           output: diff,
+          details: { filePath: args.filePath, edits: args.edits.length },
         };
       }
       case "Write": {
@@ -252,7 +278,11 @@ export class ToolExecutor {
           args.content,
           signal,
         );
-        return { summary: `已写入 ${args.filePath}`, output: diff };
+        return {
+          summary: `已写入 ${args.filePath}`,
+          output: diff,
+          details: { filePath: args.filePath },
+        };
       }
       case "Bash": {
         const args = call.args as BashArgs;

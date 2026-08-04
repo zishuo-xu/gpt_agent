@@ -145,6 +145,7 @@ async function runCli(): Promise<void> {
         [
           "",
           "/permission <strict|normal|trust>  切换权限档",
+          "/steer <指令>                      插队打断：当前工具完成后立即转向新指令",
           "/run <任务> [--goal ... --bounds ... --until ... --budget ... --permission ...]",
           "/cost                              查看当前 token 统计",
           "/sessions                          查看全部会话",
@@ -202,6 +203,25 @@ async function runCli(): Promise<void> {
         output.write(
           `${error instanceof Error ? error.message : "/run 参数无效"}\n`,
         );
+      }
+      readline.prompt();
+      return;
+    }
+    if (line.startsWith("/steer ")) {
+      const text = line.slice("/steer ".length).trim();
+      if (!text) {
+        output.write("用法：/steer <新指令>\n");
+      } else if (!session.isProcessing()) {
+        output.write("当前没有运行中的任务，直接输入即可。\n");
+      } else {
+        void session.sendInput(text, undefined, { steer: true }).catch(
+          (error) => {
+            output.write(
+              `\nSteer 失败：${error instanceof Error ? error.message : "未知错误"}\n`,
+            );
+          },
+        );
+        output.write("已插队：当前工具完成后将转向新指令。\n");
       }
       readline.prompt();
       return;
