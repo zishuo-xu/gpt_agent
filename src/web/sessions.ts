@@ -11,7 +11,6 @@ import {
 import type { PermissionMode, PermissionRule } from "../core/types.js";
 import { parseRunCommand } from "../core/run-task.js";
 
-export { AgentSession as WebAgentSession };
 export type WebSessionEvent = AgentSessionEvent;
 export type WebSessionStatus = AgentSessionStatus;
 export type WebSessionSummary = AgentSessionSummary;

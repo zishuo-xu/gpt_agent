@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+import { usageCostCny } from "../utils/cost.js";
 import type { MyAgentConfig } from "../config/schema.js";
 import type { ConversationAgentModel } from "../model/agent-model.js";
 import { summarizeConversation } from "../model/agent-model.js";
@@ -206,7 +207,7 @@ export class AgentSession {
           approve: async (call, signal) =>
             await this.#waitForPermission(call, signal),
           reportUsage: (usage) => {
-            const costCny = calculateUsageCost(
+            const costCny = usageCostCny(
               usage,
               this.#pricing?.explore,
             );
@@ -273,7 +274,7 @@ export class AgentSession {
               usage: result.usage,
             });
           }
-          const costCny = calculateUsageCost(
+          const costCny = usageCostCny(
             result.usage,
             result.pricing ?? this.#pricing?.cheap,
           );
@@ -484,7 +485,7 @@ export class AgentSession {
       forkSeq,
       summary: result.summary,
     });
-    const costCny = calculateUsageCost(
+    const costCny = usageCostCny(
       result.usage,
       this.#pricing?.cheap,
     );
@@ -998,18 +999,4 @@ function firstUserText(
   const text = record.event.text.replace(/\s+/g, " ").trim();
   if (!text) return undefined;
   return text.length > 80 ? `${text.slice(0, 80)}…` : text;
-}
-
-function calculateUsageCost(
-  usage: { input: number; output: number; cached: number },
-  pricing?: ModelPricing,
-): number | undefined {
-  if (!pricing) return undefined;
-  return (
-    (Math.max(0, usage.input - usage.cached) *
-      pricing.inputPerMillionCny +
-      usage.output * pricing.outputPerMillionCny +
-      usage.cached * pricing.cachedInputPerMillionCny) /
-    1_000_000
-  );
 }

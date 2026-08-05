@@ -6,6 +6,7 @@ import type {
   ToolCall,
   ToolExecutionResult,
 } from "../core/types.js";
+import { stringify } from "../utils/stringify.js";
 import type {
   CompletionRequest,
   ModelClient,
@@ -504,20 +505,11 @@ function formatToolResult(result: ToolExecutionResult): string {
   const serialized =
     result.output === undefined
       ? result.summary
-      : `${result.summary}\n${stringifyOutput(result.output)}`;
+      : `${result.summary}\n${stringify(result.output)}`;
   const limit = 30_000;
   if (serialized.length <= limit) return serialized;
   const half = Math.floor((limit - 100) / 2);
   return `${serialized.slice(0, half)}\n[... tool output truncated ...]\n${serialized.slice(-half)}`;
-}
-
-function stringifyOutput(output: unknown): string {
-  if (typeof output === "string") return output;
-  try {
-    return JSON.stringify(output);
-  } catch {
-    return String(output);
-  }
 }
 
 function attachModelTrace(

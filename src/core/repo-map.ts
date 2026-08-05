@@ -75,10 +75,6 @@ export class RepoMap {
     return this.#cache;
   }
 
-  invalidate(): void {
-    this.#cache = null;
-  }
-
   async #collectFiles(dir: string, depth: number): Promise<string[]> {
     if (depth > 8) return [];
     const results: string[] = [];

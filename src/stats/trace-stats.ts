@@ -1,7 +1,5 @@
 import type { AgentTurnTrace } from "../core/events.js";
-
-/** 与 AgentTurnTrace 同构（trace 的 result 字段是宽容的 unknown，统计侧做防御解析） */
-export type AgentTurnTraceLike = AgentTurnTrace;
+import type { ToolName } from "../core/types.js";
 
 export interface SessionTraceStats {
   turns: number;
@@ -21,7 +19,11 @@ export interface SessionTraceStats {
   bashOutputIncomplete: number;
 }
 
-const DIFF_TOOLS = new Set(["Edit", "MultiEdit"]);
+/** 文本 diff 相关工具（结果中 output 为完整 diff，用于占比测量） */
+const DIFF_TOOLS: ReadonlySet<string> = new Set<ToolName>([
+  "Edit",
+  "MultiEdit",
+]);
 
 interface TolerantToolResult {
   output?: unknown;
@@ -49,7 +51,7 @@ function tolerantResult(result: unknown): TolerantToolResult | undefined {
  * - bash 截断/不完整率：评估输出上限与排空策略。
  */
 export function aggregateTraces(
-  traces: AgentTurnTraceLike[],
+  traces: AgentTurnTrace[],
 ): SessionTraceStats {
   let inputTokens = 0;
   let outputTokens = 0;

@@ -3,12 +3,19 @@ import type {
   PermissionMode,
   PermissionRule,
   ToolCall,
+  ToolName,
 } from "./types.js";
+import { escapeRegExp } from "../utils/regexp.js";
 
 export type PermissionVerdict = PermissionEffect;
 
-const STRICT_GATED = new Set(["Edit", "MultiEdit", "Write", "Bash"]);
-const NORMAL_AUTO = new Set([
+const STRICT_GATED = new Set<ToolName>([
+  "Edit",
+  "MultiEdit",
+  "Write",
+  "Bash",
+]);
+const NORMAL_AUTO = new Set<ToolName>([
   "Read",
   "Grep",
   "Glob",
@@ -17,10 +24,6 @@ const NORMAL_AUTO = new Set([
   "Edit",
   "MultiEdit",
 ]);
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
-}
 
 function wildcardToRegExp(pattern: string): RegExp {
   const source = escapeRegExp(pattern).replaceAll("*", ".*");

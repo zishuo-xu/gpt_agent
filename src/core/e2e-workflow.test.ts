@@ -10,7 +10,7 @@ import type {
   ModelResponse,
 } from "../model/types.js";
 import type { ToolCall } from "./types.js";
-import { WebAgentSession } from "../web/sessions.js";
+import { AgentSession } from "../core/session.js";
 
 class ScriptedClient implements ModelClient {
   readonly requests: CompletionRequest[] = [];
@@ -153,7 +153,7 @@ test("端到端：修复 bug 完整工作流（todo + 读取 + 搜索 + 编辑 +
     response("任务已完成，所有验证通过。", [], { input: 3000, output: 30, cached: 2200 }),
   ]);
 
-  const session = new WebAgentSession({
+  const session = new AgentSession({
     id: "e2e-fix-test",
     title: "修复 math 测试",
     cwd,
@@ -233,7 +233,7 @@ test("端到端：strict 档多步审批流程", async () => {
     response("全部完成。"),
   ]);
 
-  const session = new WebAgentSession({
+  const session = new AgentSession({
     id: "e2e-strict",
     title: "strict 审批测试",
     cwd,
@@ -300,7 +300,7 @@ test("端到端：无人值守任务盒预算耗尽触发优雅终止", async ()
     response("总结：预算耗尽。", [], { input: 1000, output: 50, cached: 0 }),
   ]);
 
-  const session = new WebAgentSession({
+  const session = new AgentSession({
     id: "e2e-budget",
     title: "预算盒测试",
     cwd,

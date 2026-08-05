@@ -6,6 +6,7 @@ import type {
   ToolCall,
   ToolExecutionResult,
 } from "../core/types.js";
+import { escapeRegExp } from "../utils/regexp.js";
 import { TodoStore } from "../core/todos.js";
 import { AtomicFileTools } from "./atomic-file.js";
 import { validateToolArgs } from "./args-validate.js";
@@ -586,10 +587,6 @@ function globToRegExp(pattern: string): RegExp {
     }
   }
   return new RegExp(`^${source}$`);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
 }
 
 /** 统计 unified diff 的 hunk 数（@@ 行），用于 Edit/Write 结果的简短描述 */

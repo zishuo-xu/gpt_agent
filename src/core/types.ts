@@ -1,15 +1,8 @@
+import type { ToolName } from "../shared/tool-names.js";
+
 export type PermissionMode = "strict" | "normal" | "trust";
 export type PermissionEffect = "allow" | "ask" | "deny";
-export type ToolName =
-  | "Read"
-  | "Grep"
-  | "Glob"
-  | "TodoWrite"
-  | "Task"
-  | "Edit"
-  | "MultiEdit"
-  | "Write"
-  | "Bash";
+export type { ToolName };
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 

@@ -86,7 +86,7 @@ test("RepoMap 忽略 node_modules 等目录", async () => {
   assert.doesNotMatch(map, /ShouldNotAppear/);
 });
 
-test("RepoMap 缓存与 invalidate", async () => {
+test("RepoMap 缓存：TTL 内文件变更不刷新", async () => {
   const cwd = await mkdtemp(
     path.join(os.tmpdir(), "myagent-repomap-cache-"),
   );
@@ -107,8 +107,4 @@ test("RepoMap 缓存与 invalidate", async () => {
   );
   const cached = await repoMap.get();
   assert.doesNotMatch(cached, /class Beta/);
-
-  repoMap.invalidate();
-  const refreshed = await repoMap.get();
-  assert.match(refreshed, /class Beta/);
 });

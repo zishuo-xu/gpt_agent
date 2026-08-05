@@ -11,6 +11,8 @@ import type {
 } from "./types.js";
 import type { ToolExecutor } from "../tools/executor.js";
 import { classifyModelError } from "../model/retry-policy.js";
+import { usageCostCny } from "../utils/cost.js";
+import { abortableSleep } from "../utils/sleep.js";
 
 export interface ModelTurn {
   text?: string;
@@ -709,20 +711,6 @@ export function computeMissedTokens(
   return { missedTokens };
 }
 
-function usageCostCny(
-  usage: { input: number; output: number; cached: number },
-  pricing?: ModelPricing,
-): number | undefined {
-  if (!pricing) return undefined;
-  return (
-    (Math.max(0, usage.input - usage.cached) *
-      pricing.inputPerMillionCny +
-      usage.output * pricing.outputPerMillionCny +
-      usage.cached * pricing.cachedInputPerMillionCny) /
-    1_000_000
-  );
-}
-
 /** miss 浪费费用：missedTokens 本可按缓存价计费，实际按全价输入计费。
     压缩是合法的缓存重置（Pi 语义：重置计数不计浪费），返回 undefined。 */
 export function missedCost(
@@ -764,30 +752,6 @@ function errorMessageOf(error: unknown): string {
 /** 输出长度截断的终止原因（Anthropic stop_reason=max_tokens / OpenAI finish_reason=length） */
 function isTruncatedStopReason(reason: string | undefined): boolean {
   return reason === "max_tokens" || reason === "length";
-}
-
-function abortableSleep(
-  delayMs: number,
-  signal: AbortSignal,
-): Promise<void> {
-  if (signal.aborted) {
-    return Promise.reject(
-      new DOMException("The operation was aborted", "AbortError"),
-    );
-  }
-  return new Promise<void>((resolve, reject) => {
-    const finish = () => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    };
-    const timer = setTimeout(finish, delayMs);
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-      reject(new DOMException("The operation was aborted", "AbortError"));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 function riskFor(call: ToolCall): string {

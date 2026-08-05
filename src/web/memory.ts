@@ -1,14 +1,7 @@
-import {
-  mkdir,
-  open,
-  readFile,
-  rename,
-  stat,
-  unlink,
-} from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { atomicWriteFile, readOptional } from "../utils/fs.js";
 import type { AgentSessionManager } from "../core/session-manager.js";
 
 export type MemoryDocumentId =
@@ -56,7 +49,7 @@ export class MemoryService {
     const documents = await Promise.all(
       memoryDefinitions(this.#cwd, this.#homeDir).map(
         async (definition) => {
-          const content = await readOptional(definition.path);
+          const content = await readOptional(definition.path) ?? "";
           const info = await stat(definition.path).catch(() => undefined);
           return {
             ...definition,
@@ -83,7 +76,7 @@ export class MemoryService {
       this.#homeDir,
     ).find((candidate) => candidate.id === id);
     if (!definition) throw new Error("未知记忆文档");
-    await atomicWrite(definition.path, content);
+    await atomicWriteFile(definition.path, content);
     const info = await stat(definition.path);
     return {
       ...definition,
@@ -164,34 +157,4 @@ function memoryDefinitions(cwd: string, homeDir: string) {
       }),
     ),
   ];
-}
-
-async function readOptional(filePath: string): Promise<string> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
-    throw error;
-  }
-}
-
-async function atomicWrite(
-  filePath: string,
-  content: string,
-): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${randomUUID()}.tmp`;
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    handle = await open(tempPath, "wx", 0o600);
-    await handle.writeFile(content, "utf8");
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    await rename(tempPath, filePath);
-  } catch (error) {
-    await handle?.close().catch(() => undefined);
-    await unlink(tempPath).catch(() => undefined);
-    throw error;
-  }
 }

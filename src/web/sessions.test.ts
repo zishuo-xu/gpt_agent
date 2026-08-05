@@ -10,7 +10,7 @@ import type {
   ModelClient,
   ModelResponse,
 } from "../model/types.js";
-import { WebAgentSession } from "./sessions.js";
+import { AgentSession } from "../core/session.js";
 
 class ScriptedClient implements ModelClient {
   readonly requests: CompletionRequest[] = [];
@@ -90,7 +90,7 @@ test("Web 会话保留连续上下文并记录实时事件", async () => {
     response("第一轮完成"),
     response("第二轮完成"),
   ]);
-  const session = new WebAgentSession({
+  const session = new AgentSession({
     id: "web-test-1",
     title: "测试会话",
     cwd,
@@ -121,7 +121,7 @@ test("Web 会话运行中接收软打断，并在当前轮结束后自动处理"
     response("第一轮完成"),
     response("补充要求完成"),
   ]);
-  const session = new WebAgentSession({
+  const session = new AgentSession({
     id: "web-test-queue",
     title: "软打断测试",
     cwd,
@@ -169,7 +169,7 @@ test("strict Web 会话等待远程审批后继续", async () => {
     response("需要运行验证。", [call]),
     response("验证完成。"),
   ]);
-  const session = new WebAgentSession({
+  const session = new AgentSession({
     id: "web-test-2",
     title: "审批测试",
     cwd,
@@ -216,7 +216,7 @@ test("本次会话批准记忆会放行后续相同工具调用", async () => {
     response("再次验证。", [second]),
     response("全部完成。"),
   ]);
-  const session = new WebAgentSession({
+  const session = new AgentSession({
     id: "approval-memory",
     title: "批准记忆",
     cwd,

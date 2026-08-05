@@ -1,14 +1,8 @@
-import { createHash, randomUUID } from "node:crypto";
-import {
-  chmod,
-  mkdir,
-  open,
-  readFile,
-  rename,
-  stat,
-  unlink,
-} from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, unlink } from "node:fs/promises";
 import path from "node:path";
+import { atomicWriteFile, readOptional } from "../utils/fs.js";
+import { abortError } from "../utils/sleep.js";
 
 export interface EditJournalEntry {
   path: string;
@@ -21,54 +15,8 @@ function hash(content: string | null): string {
   return createHash("sha256").update(content ?? "<missing>").digest("hex");
 }
 
-function abortError(): Error {
-  return new DOMException("The operation was aborted", "AbortError");
-}
-
 function assertNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortError();
-}
-
-async function readOptional(filePath: string): Promise<string | null> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-async function atomicReplace(
-  filePath: string,
-  content: string,
-  signal?: AbortSignal,
-): Promise<void> {
-  assertNotAborted(signal);
-  const directory = path.dirname(filePath);
-  await mkdir(directory, { recursive: true });
-  const tempPath = path.join(directory, `.${path.basename(filePath)}.${randomUUID()}.tmp`);
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    handle = await open(tempPath, "wx", 0o600);
-    await handle.writeFile(content, "utf8");
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-
-    try {
-      const original = await stat(filePath);
-      await chmod(tempPath, original.mode);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-
-    assertNotAborted(signal);
-    await rename(tempPath, filePath);
-  } catch (error) {
-    await handle?.close().catch(() => undefined);
-    await unlink(tempPath).catch(() => undefined);
-    throw error;
-  }
 }
 
 export class EditJournal {
@@ -91,7 +39,7 @@ export class EditJournal {
     if (entry.beforeContent === null) {
       await unlink(entry.path);
     } else {
-      await atomicReplace(entry.path, entry.beforeContent, signal);
+      await atomicWriteFile(entry.path, entry.beforeContent, signal ? { signal } : {});
     }
     this.#entries.pop();
     return true;
@@ -175,7 +123,7 @@ export class AtomicFileTools {
       before === null
         ? createNewFilePreview(filePath, content)
         : createDiffPreview(filePath, before, content);
-    await atomicReplace(filePath, content, signal);
+    await atomicWriteFile(filePath, content, signal ? { signal } : {});
     this.journal.record({
       path: filePath,
       beforeHash: hash(before),
@@ -207,7 +155,7 @@ export class AtomicFileTools {
     after: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    await atomicReplace(filePath, after, signal);
+    await atomicWriteFile(filePath, after, signal ? { signal } : {});
     this.journal.record({
       path: filePath,
       beforeHash: hash(before),

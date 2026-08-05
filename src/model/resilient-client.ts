@@ -6,6 +6,7 @@ import type {
   StreamChunk,
 } from "./types.js";
 import type { ModelPricing } from "../core/types.js";
+import { abortError, abortableSleep } from "../utils/sleep.js";
 
 export class ModelRetriesExhaustedError extends Error {
   readonly cause: unknown;
@@ -168,28 +169,4 @@ function isAbortError(error: unknown): boolean {
     error instanceof DOMException &&
     error.name === "AbortError"
   );
-}
-
-function abortError(): DOMException {
-  return new DOMException("The operation was aborted", "AbortError");
-}
-
-async function abortableSleep(
-  delayMs: number,
-  signal: AbortSignal,
-): Promise<void> {
-  if (signal.aborted) throw abortError();
-  await new Promise<void>((resolve, reject) => {
-    const finish = () => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    };
-    const timer = setTimeout(finish, delayMs);
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-      reject(abortError());
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }

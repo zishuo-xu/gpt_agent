@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ModelProviderConfig } from "../config/schema.js";
 import type { ToolCall, ToolName } from "../core/types.js";
+import { isToolName } from "../shared/tool-names.js";
 import { CODING_TOOL_DEFINITIONS } from "./tool-definitions.js";
 import type {
   CompletionRequest,
@@ -481,20 +482,6 @@ function targetFor(tool: ToolName, args: Record<string, unknown>): string {
   return stringValue(args.file_path);
 }
 
-function isToolName(value: string): value is ToolName {
-  return [
-    "Read",
-    "Grep",
-    "Glob",
-    "TodoWrite",
-    "Task",
-    "Edit",
-    "MultiEdit",
-    "Write",
-    "Bash",
-  ].includes(value);
-}
-
 function parseArguments(value: unknown): Record<string, unknown> {
   if (typeof value === "object" && value !== null) return asRecord(value);
   if (typeof value !== "string" || !value) return {};
@@ -531,7 +518,8 @@ async function parseJsonResponse(
   return parsed;
 }
 
-function appendEndpoint(baseUrl: string, endpoint: string): string {
+/** 拼接供应商端点：已含 endpoint 原样返回；已以 /v1 结尾直接追加；否则补 /v1 前缀 */
+export function appendEndpoint(baseUrl: string, endpoint: string): string {
   const normalized = baseUrl.replace(/\/+$/, "");
   if (normalized.endsWith(`/${endpoint}`)) return normalized;
   if (/\/v1$/i.test(normalized)) return `${normalized}/${endpoint}`;

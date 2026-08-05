@@ -1,14 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
-  mkdir,
-  open,
   readdir,
   readFile,
-  rename,
   unlink,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { atomicWriteFile } from "../utils/fs.js";
 import type { ConfigService } from "../config/service.js";
 import type {
   ModelProviderConfig,
@@ -412,14 +410,18 @@ export class AgentSessionManager {
   }
 
   async #ensureProjectMetadata(): Promise<void> {
-    await atomicWriteJson(
+    await atomicWriteFile(
       path.join(this.#projectDir, "project.json"),
-      {
-        version: 1,
-        name: path.basename(this.#cwd),
-        cwd: this.#cwd,
-        updatedAt: new Date().toISOString(),
-      },
+      JSON.stringify(
+        {
+          version: 1,
+          name: path.basename(this.#cwd),
+          cwd: this.#cwd,
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ) + "\n",
     );
   }
 
@@ -442,7 +444,10 @@ export class AgentSessionManager {
           kind: summary.kind,
         })),
       };
-      await atomicWriteJson(this.#indexPath, file);
+      await atomicWriteFile(
+        this.#indexPath,
+        JSON.stringify(file, null, 2) + "\n",
+      );
     });
   }
 
@@ -536,15 +541,6 @@ function sessionInfoTitle(
   return undefined;
 }
 
-function stringify(value: unknown): string {
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
 function titleFrom(message: string): string {
   const compact = message.replace(/\s+/g, " ").trim();
   return compact.length > 36 ? `${compact.slice(0, 36)}…` : compact;
@@ -571,28 +567,4 @@ function clipTitle(text: string, max = 20): string {
   );
   if (boundary > max * 0.4) return `${cut.slice(0, boundary).trimEnd()}…`;
   return `${cut.trimEnd()}…`;
-}
-
-async function atomicWriteJson(
-  filePath: string,
-  value: unknown,
-): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${randomUUID()}.tmp`;
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    handle = await open(tempPath, "wx", 0o600);
-    await handle.writeFile(
-      `${JSON.stringify(value, null, 2)}\n`,
-      "utf8",
-    );
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    await rename(tempPath, filePath);
-  } catch (error) {
-    await handle?.close().catch(() => undefined);
-    await unlink(tempPath).catch(() => undefined);
-    throw error;
-  }
 }

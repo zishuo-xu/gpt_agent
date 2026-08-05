@@ -4,6 +4,7 @@ import type {
   SessionBranch,
   ToolCall,
 } from "./types.js";
+import { stringify } from "../utils/stringify.js";
 
 export const ROOT_BRANCH = "main";
 
@@ -199,13 +200,4 @@ export function conversationFromRaw(
     }
   }
   return messages;
-}
-
-function stringify(value: unknown): string {
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }

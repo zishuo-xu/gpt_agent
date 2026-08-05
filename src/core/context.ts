@@ -4,6 +4,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { readOptional } from "../utils/fs.js";
 import type { ConversationMessage } from "../model/types.js";
 import { RepoMap } from "./repo-map.js";
 import type { TodoItem } from "./types.js";
@@ -197,7 +198,7 @@ export class ContextManager {
         "decisions.md",
       ]) {
         const filePath = path.join(memoryDir, fileName);
-        const content = await readOptional(filePath);
+        const content = (await readOptional(filePath)) ?? "";
         const titles = content
           .split(/\r?\n/)
           .map((line) => line.trim())
@@ -222,7 +223,7 @@ export class ContextManager {
     title: string,
     filePath: string,
   ): Promise<void> {
-    const content = await readOptional(filePath);
+    const content = (await readOptional(filePath)) ?? "";
     if (!content.trim()) return;
     const lines = content.split(/\r?\n/);
     const visible = lines.slice(0, this.#memoryLineLimit);
@@ -291,13 +292,4 @@ export function applySoftForgetting(
         `如需恢复，请重新调用 ${message.toolName}。]`,
     };
   });
-}
-
-async function readOptional(filePath: string): Promise<string> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
-    throw error;
-  }
 }

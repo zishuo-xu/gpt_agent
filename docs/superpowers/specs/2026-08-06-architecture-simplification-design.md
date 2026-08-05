@@ -49,8 +49,8 @@ MyAgent（本地编码 agent，TypeScript + Node.js ≥22，CLI + Web 双前端�
 - `task-box.test.ts` 并入 `run-task.test.ts` 后删除
 
 ### A6 仓库杂物
-- 删除：`.qoder/`（分析产物）、`.playwright-cli/`（436 个抓取日志）、`test-todo-api/`（grep 确认零引用）
-- 提交入库：`设计方案/`（6 份项目设计文档 + app/，此前未纳入版本控制）
+- 删除：`.qoder/`（分析产物）、`.playwright-cli/`（436 个抓取日志）、`test-todo-api/`（grep 确认零引用）——已在基线提交中完成
+- `设计方案/` 经核实已在版本控制中（commit 718a5ca/67a0516/af9b554，内容与 HEAD 一致），无需动作
 
 ## Phase B — 机制合并（中风险）
 

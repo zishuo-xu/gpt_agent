@@ -263,3 +263,192 @@ test("审批超时自动拒绝并让 Agent 继续收尾", async () => {
     "user_denied",
   );
 });
+
+test("TaskBox 构造时正确解析 deadline 和 budget", () => {
+  const deadline = new Date("2026-07-30T14:00:00.000Z");
+  const options: RunTaskOptions = {
+    description: "测试任务",
+    deadline: deadline.toISOString(),
+    budgetCny: 10,
+    hardRules: [],
+    semanticBounds: [],
+  };
+  const box = new TaskBox(options, 0);
+
+  assert.equal(box.options.description, "测试任务");
+  assert.equal(box.options.deadline, deadline.toISOString());
+  assert.equal(box.options.budgetCny, 10);
+  assert.ok(box.id.length > 0);
+});
+
+test("TaskBox 构造时无 deadline 或 budget 也能正常工作", () => {
+  const options: RunTaskOptions = {
+    description: "无限制任务",
+    hardRules: [],
+    semanticBounds: [],
+  };
+  const box = new TaskBox(options, 0);
+  assert.equal(box.options.description, "无限制任务");
+  assert.equal(box.options.deadline, undefined);
+  assert.equal(box.options.budgetCny, undefined);
+});
+
+test("check() 在超过 deadline 时返回 stop=true", () => {
+  const deadline = new Date("2026-07-30T13:00:00.000Z");
+  const options: RunTaskOptions = {
+    description: "截止测试",
+    deadline: deadline.toISOString(),
+    hardRules: [],
+    semanticBounds: [],
+  };
+  const box = new TaskBox(options, 0);
+
+  const result = box.check(deadline.getTime() + 1, 0);
+  assert.equal(result.stop, true);
+  assert.equal(result.reason, "deadline");
+});
+
+test("check() 在 deadline 前正常返回空决策", () => {
+  const deadline = new Date("2026-07-30T14:00:00.000Z");
+  const now = new Date("2026-07-30T12:00:00.000Z");
+  const options: RunTaskOptions = {
+    description: "正常范围测试",
+    deadline: deadline.toISOString(),
+    hardRules: [],
+    semanticBounds: [],
+  };
+  const box = new TaskBox(options, 0);
+
+  // 距截止还有 2 小时，远超 30 分钟阈值
+  const result = box.check(now.getTime(), 0);
+  assert.deepEqual(result, {});
+});
+
+test("check() 在无 deadline 时始终返回空决策", () => {
+  const options: RunTaskOptions = {
+    description: "无截止测试",
+    hardRules: [],
+    semanticBounds: [],
+  };
+  const box = new TaskBox(options, 0);
+
+  for (const when of [
+    0,
+    1_000_000_000_000,
+    Date.now(),
+  ]) {
+    assert.deepEqual(box.check(when, 0), {});
+  }
+});
+
+test("check() 在预算耗尽时返回 budget 决策", () => {
+  const options: RunTaskOptions = {
+    description: "预算耗尽测试",
+    budgetCny: 5,
+    hardRules: [],
+    semanticBounds: [],
+  };
+  const box = new TaskBox(options, 0);
+
+  // 花费 >= 预算，剩余 <= 0%
+  const result = box.check(Date.now(), 10);
+  assert.equal(result.reason, "budget");
+  assert.equal(result.level, "final");
+  assert.equal(result.finalOnly, true);
+});
+
+test("check() 在预算剩余不足 10% 时返回 wrapup 级别", () => {
+  const options: RunTaskOptions = {
+    description: "预算 wrapup 测试",
+    budgetCny: 10,
+    hardRules: [],
+    semanticBounds: [],
+  };
+  const box = new TaskBox(options, 0);
+
+  // 花费 9.5，剩余 5% (< 10%)
+  const result = box.check(Date.now(), 9.5);
+  assert.equal(result.reason, "budget");
+  assert.equal(result.level, "wrapup");
+});
+
+test("check() 在预算剩余不足 30% 时返回 narrow 级别", () => {
+  const options: RunTaskOptions = {
+    description: "预算 narrow 测试",
+    budgetCny: 10,
+    hardRules: [],
+    semanticBounds: [],
+  };
+  const box = new TaskBox(options, 0);
+
+  // 花费 7.5，剩余 25% (< 30%, > 10%)
+  const result = box.check(Date.now(), 7.5);
+  assert.equal(result.reason, "budget");
+  assert.equal(result.level, "narrow");
+});
+
+test("check() 在预算充裕时返回空决策", () => {
+  const options: RunTaskOptions = {
+    description: "预算充裕测试",
+    budgetCny: 10,
+    hardRules: [],
+    semanticBounds: [],
+  };
+  const box = new TaskBox(options, 0);
+
+  // 花费 2，剩余 80% (> 30%)
+  const result = box.check(Date.now(), 2);
+  assert.deepEqual(result, {});
+});
+
+test("check() 每次调用累计费用 (startCostCny 支持)", () => {
+  const options: RunTaskOptions = {
+    description: "累计费用测试",
+    budgetCny: 10,
+    hardRules: [],
+    semanticBounds: [],
+  };
+
+  // startCostCny = 2，已花费 2
+  const box = new TaskBox(options, 2);
+
+  // totalCostCny = 5，实际花费 = 5 - 2 = 3，剩余 7/10 = 70% > 30%
+  assert.deepEqual(box.check(Date.now(), 5), {});
+
+  // totalCostCny = 9，实际花费 = 9 - 2 = 7，剩余 3/10 = 30%
+  // 30% 刚好等于 narrow 阈值 (remainingRatio <= 0.3)，触发 narrow
+  assert.equal(
+    box.check(Date.now(), 9).level,
+    "narrow",
+  );
+
+  // totalCostCny = 11，实际花费 = 11 - 2 = 9，剩余 1/10 = 10%
+  // 10% 刚好等于 wrapup 阈值 (remainingRatio <= 0.1)
+  const wrapupResult = box.check(Date.now(), 11);
+  assert.equal(wrapupResult.level, "wrapup");
+
+  // totalCostCny = 12，实际花费 = 12 - 2 = 10，剩余 0/10 = 0%
+  assert.equal(
+    box.check(Date.now(), 12).level,
+    "final",
+  );
+});
+
+test("check() 仅首次触发预算阶段，后续相同 key 返回空或 finalOnly", () => {
+  const options: RunTaskOptions = {
+    description: "去重测试",
+    budgetCny: 10,
+    hardRules: [],
+    semanticBounds: [],
+  };
+  const box = new TaskBox(options, 0);
+
+  // 第一次触发 final
+  const first = box.check(Date.now(), 12);
+  assert.equal(first.level, "final");
+  assert.equal(first.finalOnly, true);
+
+  // 第二次调用相同 key，因为 finalOnly=true 所以只返回 { finalOnly: true }
+  const second = box.check(Date.now(), 12);
+  assert.deepEqual(second, { finalOnly: true });
+});

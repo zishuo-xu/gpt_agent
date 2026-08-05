@@ -1,13 +1,7 @@
-import { randomUUID } from "node:crypto";
-import {
-  mkdir,
-  open,
-  readFile,
-  rename,
-  unlink,
-} from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { atomicWriteFile } from "../utils/fs.js";
 import {
   applyEdits,
   modify,
@@ -209,7 +203,7 @@ export class ConfigService {
         formattingOptions: formatting,
       }),
     );
-    await atomicWrite(filePath, nextText);
+    await atomicWriteFile(filePath, nextText);
     await this.#notifyListeners();
   }
 
@@ -240,7 +234,7 @@ export class ConfigService {
         }),
       );
     }
-    await atomicWrite(filePath, nextText);
+    await atomicWriteFile(filePath, nextText);
     await this.#notifyListeners();
     return toPublicConfig(merged);
   }
@@ -683,23 +677,5 @@ async function readTextOrTemplate(filePath: string): Promise<string> {
       "}",
       "",
     ].join("\n");
-  }
-}
-
-async function atomicWrite(filePath: string, content: string): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${randomUUID()}.tmp`;
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    handle = await open(tempPath, "wx", 0o600);
-    await handle.writeFile(content, "utf8");
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    await rename(tempPath, filePath);
-  } catch (error) {
-    await handle?.close().catch(() => undefined);
-    await unlink(tempPath).catch(() => undefined);
-    throw error;
   }
 }

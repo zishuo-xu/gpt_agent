@@ -1,4 +1,5 @@
 import type { ModelProviderConfig } from "../config/schema.js";
+import { appendEndpoint } from "./client.js";
 
 export interface ConnectionTestResult {
   ok: boolean;
@@ -129,13 +130,6 @@ function buildRequest(
       }),
     },
   };
-}
-
-function appendEndpoint(baseUrl: string, endpoint: string): string {
-  const normalized = baseUrl.replace(/\/+$/, "");
-  if (normalized.endsWith(`/${endpoint}`)) return normalized;
-  if (/\/v1$/i.test(normalized)) return `${normalized}/${endpoint}`;
-  return `${normalized}/v1/${endpoint}`;
 }
 
 async function readResponseBody(response: Response): Promise<string> {
