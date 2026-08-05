@@ -90,7 +90,7 @@ test("deleteSession 删除会话并清除磁盘文件", async () => {
   assert.equal(await manager.deleteSession(session.id), false);
 });
 
-test("AgentSessionManager 通过 index 与 JSONL 恢复会话并继续上下文", async () => {
+test("AgentSessionManager 通过事件流恢复会话并继续上下文", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-manager-cwd-"));
   const stateDir = await mkdtemp(
     path.join(os.tmpdir(), "myagent-manager-state-"),
@@ -117,16 +117,21 @@ test("AgentSessionManager 通过 index 与 JSONL 恢复会话并继续上下文"
   await manager.flush();
 
   const projectKey = Buffer.from(cwd).toString("base64url");
-  const indexPath = path.join(
-    stateDir,
-    "projects",
-    projectKey,
-    "sessions",
-    "index.json",
+  // index.json 已废除：元数据只存事件流（显式标题经 createSession → session_info，
+  // 权限档经 setPermissionMode → permission_mode_changed）
+  await assert.rejects(
+    readFile(
+      path.join(
+        stateDir,
+        "projects",
+        projectKey,
+        "sessions",
+        "index.json",
+      ),
+      "utf8",
+    ),
+    { code: "ENOENT" },
   );
-  const indexText = await readFile(indexPath, "utf8");
-  assert.match(indexText, /"title": "持久化测试"/);
-  assert.match(indexText, /"permissionMode": "strict"/);
 
   const restoredClient = new ScriptedClient([response("第二轮完成")]);
   let restoredHistory: ConversationMessage[] = [];
@@ -442,7 +447,7 @@ test("被放弃路径小于阈值不触发分支摘要", async () => {
   );
 });
 
-test("会话标题写入事件流并在恢复时优先于 index.json", async () => {
+test("会话标题写入事件流并在恢复时还原", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-info-cwd-"));
   const stateDir = await mkdtemp(
     path.join(os.tmpdir(), "myagent-info-state-"),
@@ -476,7 +481,7 @@ test("会话标题写入事件流并在恢复时优先于 index.json", async () 
   );
   assert.equal(session.summary().title, "事件流标题");
 
-  // 恢复：即使 index.json 标题不同，也以事件流为准
+  // 恢复：标题以事件流为准（index.json 已废除，事件流是唯一来源）
   const configService = new ConfigService({ cwd, homeDir });
   let restoredTitle = "";
   const restoredManager = new AgentSessionManager({

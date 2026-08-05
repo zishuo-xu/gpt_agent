@@ -118,3 +118,10 @@ export const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
   { effect: "deny", pattern: "Edit(~/.ssh/*)" },
   { effect: "deny", pattern: "Write(~/.ssh/*)" },
 ];
+
+/** 只读会话的基础写保护（Task 子代理 readonly 模式与 Web 大厅模式共用） */
+export const READONLY_DENY_RULES: PermissionRule[] = [
+  { effect: "deny", pattern: "Edit(*)" },
+  { effect: "deny", pattern: "MultiEdit(*)" },
+  { effect: "deny", pattern: "Write(*)" },
+];

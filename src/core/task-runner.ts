@@ -14,6 +14,7 @@ import { AgentEventBus } from "./events.js";
 import {
   DEFAULT_PERMISSION_RULES,
   PermissionEngine,
+  READONLY_DENY_RULES,
 } from "./permissions.js";
 import type {
   ApprovalAnswer,
@@ -147,9 +148,7 @@ export class TaskRunner {
     const readonlyRules: PermissionRule[] = args.writable
       ? DEFAULT_PERMISSION_RULES
       : [
-          { effect: "deny", pattern: "Edit(*)" },
-          { effect: "deny", pattern: "MultiEdit(*)" },
-          { effect: "deny", pattern: "Write(*)" },
+          ...READONLY_DENY_RULES,
           ...DEFAULT_PERMISSION_RULES,
         ];
     const permissions = new PermissionEngine(

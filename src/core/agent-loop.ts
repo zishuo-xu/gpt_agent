@@ -10,7 +10,8 @@ import type {
   ToolExecutionResult,
 } from "./types.js";
 import type { ToolExecutor } from "../tools/executor.js";
-import { classifyModelError } from "../model/retry-policy.js";
+import { ModelHttpError } from "../model/client.js";
+import { classifyModelError } from "../model/error-policy.js";
 import { usageCostCny } from "../utils/cost.js";
 import { abortableSleep } from "../utils/sleep.js";
 
@@ -160,7 +161,12 @@ export class AgentLoop {
         policy === "overflow" ? 1 : this.#retryMaxRetries;
       let lastError = error;
       for (let retry = 1; retry <= maxRetries; retry += 1) {
-        const delayMs = this.#retryBaseDelayMs * 2 ** (retry - 1);
+        // Retry-After 优先（供应商显式要求等待时长），否则指数退避
+        const backoff = this.#retryBaseDelayMs * 2 ** (retry - 1);
+        const delayMs = Math.max(
+          backoff,
+          retryAfterMsOf(lastError) ?? 0,
+        );
         this.#bus.emit({
           type: "notify",
           level: "info",
@@ -747,6 +753,16 @@ function modelErrorTrace(error: unknown):
 
 function errorMessageOf(error: unknown): string {
   return error instanceof Error ? error.message : "未知模型错误";
+}
+
+/** 沿 cause 链（ModelRetriesExhaustedError → 底层错误）取供应商 Retry-After */
+function retryAfterMsOf(error: unknown): number | undefined {
+  let current: unknown = error;
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    if (current instanceof ModelHttpError) return current.retryAfterMs;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
 }
 
 /** 输出长度截断的终止原因（Anthropic stop_reason=max_tokens / OpenAI finish_reason=length） */

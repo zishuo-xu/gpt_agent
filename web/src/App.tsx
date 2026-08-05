@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { SettingsSidebar } from "./SettingsSidebar";
-import { getConfigValue, setConfigValue } from "./config-path";
+import { getConfigValue, setConfigValue } from "../../src/config/config-path.js";
 
 type Scope = "global" | "project";
 type Protocol = "anthropic" | "openai-compatible";

@@ -1,5 +1,4 @@
-import { spawn } from "node:child_process";
-import { lstat, readdir, readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   TodoItem,
@@ -7,9 +6,11 @@ import type {
   ToolExecutionResult,
 } from "../core/types.js";
 import { escapeRegExp } from "../utils/regexp.js";
+import { globToRegExp, normalizeSlashes } from "../utils/glob.js";
 import { TodoStore } from "../core/todos.js";
 import { AtomicFileTools } from "./atomic-file.js";
 import { validateToolArgs } from "./args-validate.js";
+import { collectFiles } from "./collect-files.js";
 import { runBash } from "./bash.js";
 import { TOOL_OUTPUT_LIMITS, truncateToolText } from "./truncate.js";
 
@@ -155,7 +156,7 @@ export class ToolExecutor {
         const globMatcher = args.glob
           ? globToRegExp(normalizeSlashes(args.glob))
           : undefined;
-        const files = await collectFiles(root, signal);
+        const files = await collectFiles(root, { signal });
         const matches: string[] = [];
         const matchedFiles = new Set<string>();
         for (const filePath of files) {
@@ -204,7 +205,7 @@ export class ToolExecutor {
         const root = this.#resolve(args.path ?? ".");
         const maxResults = clampInteger(args.max_results, 1, 5000, 500);
         const matcher = globToRegExp(normalizeSlashes(args.pattern));
-        const files = await collectFiles(root, signal);
+        const files = await collectFiles(root, { signal });
         const matches = files
           .map((filePath) => normalizeSlashes(path.relative(this.#cwd, filePath)))
           .filter((filePath) => matcher.test(filePath))
@@ -359,201 +360,6 @@ export class ToolExecutor {
   }
 }
 
-const IGNORED_DIRECTORIES = new Set([
-  ".git",
-  ".next",
-  ".turbo",
-  "coverage",
-  "dist",
-  "node_modules",
-]);
-
-/** 遍历并发度：目录 readdir 有界并发，避免大仓库串行 IO */
-const WALK_CONCURRENCY = 16;
-
-/**
- * 收集 root 下的全部文件路径：
- * - git 仓库内用 `git ls-files`（自带 .gitignore 语义，含未跟踪非忽略文件）；
- * - 非 git 目录维持目录遍历，并按根 .gitignore 前缀过滤；
- * - 两路都排除硬编码 IGNORED_DIRECTORIES 与符号链接。
- */
-async function collectFiles(
-  root: string,
-  signal: AbortSignal,
-): Promise<string[]> {
-  assertNotAborted(signal);
-  const info = await stat(root);
-  if (info.isFile()) return [root];
-  const gitFiles = await listGitFiles(root, signal);
-  if (gitFiles) return gitFiles;
-  return walkFiles(root, signal, await GitignoreMatcher.load(root));
-}
-
-/** git 仓库文件列表；非仓库（或 git 不可用）返回 undefined 走遍历 */
-async function listGitFiles(
-  root: string,
-  signal: AbortSignal,
-): Promise<string[] | undefined> {
-  const child = spawn(
-    "git",
-    ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-    { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
-  );
-  let stdout = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => (stdout += chunk));
-  child.stderr.on("data", (chunk: string) => (stderr += chunk));
-  const onAbort = () => child.kill();
-  signal.addEventListener("abort", onAbort, { once: true });
-  const code = await new Promise<number | null>((resolve) => {
-    child.on("error", () => resolve(null));
-    child.on("close", resolve);
-  });
-  signal.removeEventListener("abort", onAbort);
-  if (code !== 0 || stdout === "") return undefined;
-  assertNotAborted(signal);
-  const files = stdout
-    .split("\0")
-    .filter(Boolean)
-    .map((file) => path.join(root, file))
-    .filter(
-      (file) =>
-        !file.split(path.sep).some((segment) => IGNORED_DIRECTORIES.has(segment)),
-    );
-  // 过滤目录项（submodule 等）与符号链接，与遍历路径语义一致
-  const stats = await Promise.all(
-    files.map((file) => lstat(file).catch(() => null)),
-  );
-  return files.filter((_, index) => stats[index]?.isFile());
-}
-
-/** 有界并发 BFS 目录遍历 + gitignore 过滤 */
-async function walkFiles(
-  root: string,
-  signal: AbortSignal,
-  ignore: GitignoreMatcher,
-): Promise<string[]> {
-  const output: string[] = [];
-  const queue: string[] = [root];
-  let running = 0;
-  await new Promise<void>((resolve, reject) => {
-    const pump = () => {
-      while (running < WALK_CONCURRENCY && queue.length > 0) {
-        const directory = queue.shift();
-        if (!directory) break;
-        assertNotAborted(signal);
-        running += 1;
-        readdir(directory, { withFileTypes: true }).then(
-          (entries) => {
-            entries.sort((a, b) => a.name.localeCompare(b.name));
-            for (const entry of entries) {
-              if (entry.isSymbolicLink()) continue;
-              const entryPath = path.join(directory, entry.name);
-              if (entry.isDirectory()) {
-                if (!IGNORED_DIRECTORIES.has(entry.name) &&
-                    !ignore.ignores(entryPath, true)) {
-                  queue.push(entryPath);
-                }
-              } else if (entry.isFile() && !ignore.ignores(entryPath, false)) {
-                output.push(entryPath);
-              }
-            }
-            running -= 1;
-            pump();
-          },
-          (error) => {
-            running -= 1;
-            reject(error);
-          },
-        );
-      }
-      if (running === 0 && queue.length === 0) resolve();
-    };
-    pump();
-  });
-  output.sort((a, b) => a.localeCompare(b));
-  return output;
-}
-
-/**
- * 根 .gitignore 前缀过滤（非 git 目录的轻量替代）：
- * - 规则以 `/` 结尾 → 目录前缀：该目录及其子路径全部忽略；
- * - 含 `/` 的规则锚定仓库根（相对路径匹配）；
- * - 不含 `/` 的规则匹配任意层级 basename；
- * - 支持 `*`/`?`/`**` glob；不支持 `!` 否定与嵌套 .gitignore。
- */
-class GitignoreMatcher {
-  static async load(root: string): Promise<GitignoreMatcher> {
-    let content = "";
-    try {
-      content = await readFile(path.join(root, ".gitignore"), "utf8");
-    } catch {
-      // 无 .gitignore 视为无规则
-    }
-    return new GitignoreMatcher(root, content);
-  }
-
-  readonly #root: string;
-  readonly #dirPrefixes: string[] = [];
-  readonly #filePatterns: Array<{
-    re: RegExp;
-    anchored: boolean;
-    prefix?: string;
-  }> = [];
-
-  private constructor(root: string, content: string) {
-    this.#root = root;
-    for (const rawLine of content.split("\n")) {
-      const line = rawLine.replace(/\s+$/, "");
-      if (line === "" || line.startsWith("#")) continue;
-      if (line.startsWith("!")) continue; // 否定规则暂不支持
-      if (line.endsWith("/")) {
-        this.#dirPrefixes.push(line.slice(0, -1));
-        continue;
-      }
-      const anchored = line.includes("/");
-      const hasGlob = /[*?[\]]/.test(line);
-      this.#filePatterns.push({
-        re: globToRegExp(line),
-        anchored,
-        // 无 glob 字面的锚定规则按目录前缀处理（如 src/generated）
-        ...(anchored && !hasGlob ? { prefix: line } : {}),
-      });
-    }
-  }
-
-  ignores(entryPath: string, isDir: boolean): boolean {
-    const relative = normalizeSlashes(path.relative(this.#root, entryPath));
-    if (relative === "" || relative.startsWith("../")) return false;
-    const basename = relative.split("/").at(-1) ?? relative;
-    const pathSegments = relative.split("/");
-    // 目录规则匹配的应是路径上的祖先目录段（文件自身不算目录）
-    const ancestorSegments = isDir
-      ? pathSegments
-      : pathSegments.slice(0, -1);
-    for (const prefix of this.#dirPrefixes) {
-      if (prefix.includes("/")) {
-        // 含斜杠的目录规则锚定仓库根
-        if (relative.startsWith(`${prefix}/`)) return true;
-        if (isDir && relative === prefix) return true;
-      } else if (ancestorSegments.includes(prefix)) {
-        // 无斜杠的目录规则匹配任意层级
-        return true;
-      }
-    }
-    for (const { re, anchored, prefix } of this.#filePatterns) {
-      if (anchored) {
-        if (re.test(relative)) return true;
-        if (prefix && relative.startsWith(`${prefix}/`)) return true;
-      } else if (re.test(basename)) {
-        return true;
-      }
-    }
-    return false;
-  }
-}
 
 function compilePattern(pattern: string, caseInsensitive = true): RegExp {
   const flag = caseInsensitive ? "i" : "";
@@ -564,40 +370,12 @@ function compilePattern(pattern: string, caseInsensitive = true): RegExp {
   }
 }
 
-function globToRegExp(pattern: string): RegExp {
-  let source = "";
-  for (let index = 0; index < pattern.length; index += 1) {
-    const character = pattern[index];
-    if (
-      character === "*" &&
-      pattern[index + 1] === "*" &&
-      pattern[index + 2] === "/"
-    ) {
-      source += "(?:.*/)?";
-      index += 2;
-    } else if (character === "*" && pattern[index + 1] === "*") {
-      source += ".*";
-      index += 1;
-    } else if (character === "*") {
-      source += "[^/]*";
-    } else if (character === "?") {
-      source += "[^/]";
-    } else {
-      source += escapeRegExp(character ?? "");
-    }
-  }
-  return new RegExp(`^${source}$`);
-}
-
 /** 统计 unified diff 的 hunk 数（@@ 行），用于 Edit/Write 结果的简短描述 */
 function diffHunkCount(diff: string): number {
   const matches = diff.match(/^@@/gm);
   return matches?.length ?? 1;
 }
 
-function normalizeSlashes(value: string): string {
-  return value.split(path.sep).join("/");
-}
 
 function truncateLine(value: string, limit: number): string {
   return value.length <= limit

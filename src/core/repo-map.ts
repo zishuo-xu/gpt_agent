@@ -1,19 +1,6 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-
-const IGNORED_DIRS = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  "build",
-  "coverage",
-  ".next",
-  "__pycache__",
-  ".venv",
-  "venv",
-  "target",
-  ".myagent",
-]);
+import { collectFiles } from "../tools/collect-files.js";
 
 const SOURCE_EXTENSIONS = new Set([
   ".ts",
@@ -59,9 +46,14 @@ export class RepoMap {
     if (this.#cache !== null && now - this.#cacheTime < RepoMap.CACHE_TTL_MS) {
       return this.#cache;
     }
-    const files = await this.#collectFiles(this.#cwd, 0);
+    // 复用统一文件收集（git ls-files + gitignore 语义，深度上限 8 与原遍历一致）
+    const files = await collectFiles(this.#cwd, { maxDepth: 8 });
     const signatures: FileSignature[] = [];
-    for (const file of files.slice(0, MAX_FILES)) {
+    let sourceFiles = 0;
+    for (const file of files) {
+      if (!SOURCE_EXTENSIONS.has(path.extname(file))) continue;
+      if (sourceFiles >= MAX_FILES) break;
+      sourceFiles += 1;
       const sigs = await this.#extractSignatures(file);
       if (sigs.length > 0) {
         signatures.push({
@@ -73,32 +65,6 @@ export class RepoMap {
     this.#cache = this.#format(signatures);
     this.#cacheTime = now;
     return this.#cache;
-  }
-
-  async #collectFiles(dir: string, depth: number): Promise<string[]> {
-    if (depth > 8) return [];
-    const results: string[] = [];
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-    for (const entry of entries) {
-      if (entry.name.startsWith(".")) continue;
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (IGNORED_DIRS.has(entry.name)) continue;
-        results.push(...(await this.#collectFiles(fullPath, depth + 1)));
-        if (results.length >= MAX_FILES) break;
-      } else if (entry.isFile()) {
-        const ext = path.extname(entry.name);
-        if (SOURCE_EXTENSIONS.has(ext)) {
-          results.push(fullPath);
-        }
-      }
-    }
-    return results;
   }
 
   async #extractSignatures(filePath: string): Promise<string[]> {

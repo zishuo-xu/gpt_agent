@@ -6,7 +6,6 @@ import type {
   StreamChunk,
 } from "./types.js";
 import type { ModelPricing } from "../core/types.js";
-import { abortError, abortableSleep } from "../utils/sleep.js";
 
 export class ModelRetriesExhaustedError extends Error {
   readonly cause: unknown;
@@ -21,77 +20,6 @@ export class ModelRetriesExhaustedError extends Error {
     this.name = "ModelRetriesExhaustedError";
     this.cause = cause;
     this.attempts = attempts;
-  }
-}
-
-export interface ResilientModelClientOptions {
-  maxRetries?: number;
-  initialDelayMs?: number;
-  maxDelayMs?: number;
-  sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>;
-}
-
-export class ResilientModelClient implements ModelClient {
-  readonly #inner: ModelClient;
-  readonly #maxRetries: number;
-  readonly #initialDelayMs: number;
-  readonly #maxDelayMs: number;
-  readonly #sleep: (
-    delayMs: number,
-    signal: AbortSignal,
-  ) => Promise<void>;
-
-  constructor(
-    inner: ModelClient,
-    options: ResilientModelClientOptions = {},
-  ) {
-    this.#inner = inner;
-    this.#maxRetries = options.maxRetries ?? 5;
-    this.#initialDelayMs = options.initialDelayMs ?? 1_000;
-    this.#maxDelayMs = options.maxDelayMs ?? 60_000;
-    this.#sleep = options.sleep ?? abortableSleep;
-  }
-
-  get stream(): ModelClient["stream"] {
-    return this.#inner.stream?.bind(this.#inner);
-  }
-
-  async complete(
-    request: CompletionRequest,
-  ): Promise<ModelResponse> {
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= this.#maxRetries; attempt += 1) {
-      if (request.signal.aborted) throw abortError();
-      try {
-        return await this.#inner.complete(request);
-      } catch (error) {
-        if (request.signal.aborted) throw abortError();
-        if (isAbortError(error)) throw error;
-        lastError = error;
-        if (!isRetryable(error) || attempt === this.#maxRetries) {
-          throw new ModelRetriesExhaustedError(error, attempt + 1);
-        }
-        const backoff = Math.min(
-          this.#maxDelayMs,
-          this.#initialDelayMs * 2 ** attempt,
-        );
-        const retryAfter =
-          error instanceof ModelHttpError
-            ? error.retryAfterMs
-            : undefined;
-        // 25% 向下抖动（参照 Pi getRetryDelayMs：delay × (1 - random×0.25)），
-        // 避免多会话同步失败时同时重试
-        const jittered = backoff * (1 - Math.random() * 0.25);
-        await this.#sleep(
-          Math.max(jittered, retryAfter ?? 0),
-          request.signal,
-        );
-      }
-    }
-    throw new ModelRetriesExhaustedError(
-      lastError,
-      this.#maxRetries + 1,
-    );
   }
 }
 
@@ -155,13 +83,6 @@ export class FallbackModelClient implements ModelClient {
       this.#candidates.length,
     );
   }
-}
-
-function isRetryable(error: unknown): boolean {
-  if (error instanceof ModelHttpError) {
-    return error.status === 429 || error.status >= 500;
-  }
-  return error instanceof TypeError;
 }
 
 function isAbortError(error: unknown): boolean {

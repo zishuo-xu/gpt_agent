@@ -10,6 +10,10 @@ import {
 import { stdin as input, stdout as output } from "node:process";
 import { ConfigService, type ConfigScope } from "./config/service.js";
 import {
+  getConfigValue,
+  setConfigValue,
+} from "./config/config-path.js";
+import {
   toPublicConfig,
   type ModelRole,
   type MyAgentConfig,
@@ -514,8 +518,16 @@ async function runCli(): Promise<void> {
           value = value.slice(0, value.length - lastToken.length).trimEnd();
         }
         const config = await configService.read(scope);
-        setConfigValue(config, keyPath, value);
-        await configService.write(scope, config);
+        // 顶层键存在性守卫（防手误键被静默创建写脏配置）；嵌套路径自动创建
+        if (!(keyPath.split(".")[0]! in config)) {
+          throw new Error(`配置项 ${keyPath} 不存在`);
+        }
+        const next = setConfigValue(
+          config,
+          keyPath,
+          coerceConfigValue(getConfigValue(config, keyPath), value),
+        );
+        await configService.write(scope, next);
         output.write(`已更新 ${scope} 作用域配置项 ${keyPath}。\n`);
         return;
       }
@@ -724,37 +736,23 @@ function formatEffectiveConfig(config: MyAgentConfig): string {
   );
 }
 
-function setConfigValue(
-  config: MyAgentConfig,
-  keyPath: string,
-  rawValue: string,
-): void {
-  const segments = keyPath.split(".");
-  if (segments.length < 1) throw new Error("配置键不能为空");
-  let target: Record<string, unknown> =
-    config as unknown as Record<string, unknown>;
-  for (const segment of segments.slice(0, -1)) {
-    const next = target[segment];
-    if (!next || typeof next !== "object") {
-      throw new Error(`配置项 ${keyPath} 不存在`);
-    }
-    target = next as Record<string, unknown>;
-  }
-  const leaf = segments.at(-1)!;
-  const current = target[leaf];
+/** 按当前值的类型把 CLI 原始字符串强转为配置值（数字/布尔/字符串） */
+function coerceConfigValue(current: unknown, rawValue: string): unknown {
   if (typeof current === "number") {
     const value = Number(rawValue);
-    if (!Number.isFinite(value)) throw new Error(`配置项 ${keyPath} 需要数字`);
-    target[leaf] = value;
-  } else if (typeof current === "boolean") {
+    if (!Number.isFinite(value)) {
+      throw new Error(`配置项需要数字，收到：${rawValue}`);
+    }
+    return value;
+  }
+  if (typeof current === "boolean") {
     const normalized = rawValue.toLowerCase();
     if (!["true", "false"].includes(normalized)) {
-      throw new Error(`配置项 ${keyPath} 需要 true/false`);
+      throw new Error(`配置项需要 true/false，收到：${rawValue}`);
     }
-    target[leaf] = normalized === "true";
-  } else {
-    target[leaf] = rawValue;
+    return normalized === "true";
   }
+  return rawValue;
 }
 
 /** 事件时间线摘要：为 /timeline 提供单行描述（选择 fork 点用） */

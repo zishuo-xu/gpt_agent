@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getConfigValue, setConfigValue } from "./config-path";
+import { getConfigValue, setConfigValue } from "./config-path.js";
 
 /**
  * Schema 字段键读写（dotted key 支持）：
@@ -49,4 +49,25 @@ test("setConfigValue：section 缺失时创建，平铺键写顶层", () => {
     false,
   );
   assert.deepEqual(flat, { a: 1, flag: false });
+});
+
+test("任意深度 dotted 键读写（CLI /config set 复用）", () => {
+  const config: Record<string, any> = {
+    models: { main: { providerId: "deepseek", model: "chat" } },
+  };
+  assert.equal(
+    getConfigValue(config, "models.main.model"),
+    "chat",
+  );
+  const next: Record<string, any> = setConfigValue(
+    config,
+    "models.main.model",
+    "chat-v2",
+  );
+  assert.equal(next.models.main.model, "chat-v2");
+  assert.equal(config.models.main.model, "chat", "原对象不可变");
+  assert.equal(
+    getConfigValue(next, "models.main.nonexistent"),
+    undefined,
+  );
 });

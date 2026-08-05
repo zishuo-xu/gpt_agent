@@ -9,6 +9,7 @@ import {
   type AgentSessionSummary,
 } from "../core/session.js";
 import type { PermissionMode, PermissionRule } from "../core/types.js";
+import { READONLY_DENY_RULES } from "../core/permissions.js";
 import { parseRunCommand } from "../core/run-task.js";
 
 export type WebSessionEvent = AgentSessionEvent;
@@ -16,13 +17,11 @@ export type WebSessionStatus = AgentSessionStatus;
 export type WebSessionSummary = AgentSessionSummary;
 
 /**
- * 大厅模式权限规则：可读（Read/Grep/Glob）但禁一切写操作。
- * Bash 是唯一能逃逸路径约束写文件的工具，一并禁用。
+ * 大厅模式权限规则：只读基础写保护（Edit/MultiEdit/Write）之上，
+ * 额外禁用 Bash——唯一能逃逸路径约束写文件的工具。
  */
 export const LOBBY_PERMISSION_RULES: PermissionRule[] = [
-  { effect: "deny", pattern: "Edit(*)" },
-  { effect: "deny", pattern: "MultiEdit(*)" },
-  { effect: "deny", pattern: "Write(*)" },
+  ...READONLY_DENY_RULES,
   { effect: "deny", pattern: "Bash(*)" },
 ];
 

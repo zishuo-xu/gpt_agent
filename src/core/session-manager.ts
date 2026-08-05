@@ -15,10 +15,7 @@ import type {
 import { WebhookNotifier } from "./notifier.js";
 import { ConversationAgentModel } from "../model/agent-model.js";
 import { ConfiguredModelClient } from "../model/client.js";
-import {
-  FallbackModelClient,
-  ResilientModelClient,
-} from "../model/resilient-client.js";
+import { FallbackModelClient } from "../model/fallback-client.js";
 import type {
   ConversationMessage,
   ModelClient,
@@ -40,26 +37,6 @@ import type {
   RecordedEvent,
 } from "./types.js";
 
-interface SessionIndexEntry {
-  id: string;
-  title: string;
-  permissionMode: PermissionMode;
-  createdAt: string;
-  updatedAt: string;
-  status: AgentSessionSummary["status"];
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalCachedTokens: number;
-  totalCostCny?: number;
-  toolCallCount?: number;
-  kind?: "interactive" | "run";
-}
-
-interface SessionIndexFile {
-  version: 1;
-  sessions: SessionIndexEntry[];
-}
-
 export interface AgentSessionManagerOptions {
   cwd: string;
   configService: ConfigService;
@@ -77,12 +54,10 @@ export class AgentSessionManager {
   readonly #homeDir: string;
   readonly #sessionsDir: string;
   readonly #projectDir: string;
-  readonly #indexPath: string;
   readonly #modelFactory:
     | AgentSessionManagerOptions["modelFactory"]
     | undefined;
   readonly #sessions = new Map<string, AgentSession>();
-  #indexWriteTail: Promise<void> = Promise.resolve();
 
   constructor(options: AgentSessionManagerOptions) {
     this.#cwd = options.cwd;
@@ -101,7 +76,6 @@ export class AgentSessionManager {
       this.#projectDir,
       "sessions",
     );
-    this.#indexPath = path.join(this.#sessionsDir, "index.json");
     this.#configService.onChange((config) => {
       for (const session of this.#sessions.values()) {
         session.applyConfigChange(config);
@@ -141,7 +115,6 @@ export class AgentSessionManager {
       session.interrupt();
     }
     this.#sessions.delete(id);
-    this.#queueIndexWrite();
     await this.flush();
     for (const suffix of [".jsonl", ".trace.jsonl"]) {
       await unlink(path.join(this.#sessionsDir, `${id}${suffix}`)).catch(
@@ -165,7 +138,6 @@ export class AgentSessionManager {
       throw error;
     }
     if (entries.length === 0) return;
-    const index = await this.#readIndex();
     const runtimeConfig = await this.#configService.readEffective();
 
     for (const entry of entries) {
@@ -177,7 +149,6 @@ export class AgentSessionManager {
       );
       if (!firstUser || firstUser.event.type !== "user") continue;
       const id = entry.slice(0, -".jsonl".length);
-      const metadata = index.get(id);
       const compactModelClient =
         await this.#createRoleClient("cheap");
       const exploreModelClient =
@@ -188,11 +159,9 @@ export class AgentSessionManager {
         id,
         title:
           sessionInfoTitle(records) ??
-          metadata?.title ??
           titleFrom(firstUser.event.text),
         cwd: this.#cwd,
         mode:
-          metadata?.permissionMode ??
           lastPermissionMode(records) ??
           runtimeConfig.permissions.mode,
         // 恢复当前分支链视角的消息历史（分支点之前不变，之后只含当前分支）
@@ -225,7 +194,6 @@ export class AgentSessionManager {
       });
       this.#register(session);
     }
-    this.#queueIndexWrite();
     await this.flush();
   }
 
@@ -274,7 +242,10 @@ export class AgentSessionManager {
       pricing: rolePricing(runtimeConfig.models),
     });
     this.#register(session);
-    this.#queueIndexWrite();
+    if (options.title?.trim()) {
+      // 显式标题写入事件流（恢复的唯一来源；默认「新会话」/消息推导标题可在恢复时重算）
+      session.setTitle(options.title.trim());
+    }
     // 外部 webhook 推送（配置了 notify.webhook 时）：任务完成/出错/审批超时
     if (runtimeConfig.notify.webhook) {
       new WebhookNotifier(
@@ -296,7 +267,6 @@ export class AgentSessionManager {
         await session.flush();
       }),
     );
-    await this.#indexWriteTail;
   }
 
   async #createModel(
@@ -342,7 +312,9 @@ export class AgentSessionManager {
             );
         return {
           id: `${target.providerId}/${target.model}`,
-          client: new ResilientModelClient(inner),
+          // 重试已上收到回合级（AgentLoop.#requestTurn，参照 Pi 的 turn 级 auto-retry），
+          // 模型客户端只做协议与 fallback 链，不再请求级重试
+          client: inner,
           ...(target.pricing
             ? { pricing: target.pricing }
             : {}),
@@ -353,7 +325,6 @@ export class AgentSessionManager {
 
   #register(session: AgentSession): void {
     this.#sessions.set(session.id, session);
-    session.subscribe(() => this.#queueIndexWrite());
     this.#maybeGenerateTitle(session);
   }
 
@@ -398,12 +369,10 @@ export class AgentSessionManager {
           : title;
       if (fallback) {
         session.setTitle(fallback);
-        this.#queueIndexWrite();
       }
     } catch {
       // 生成失败时用首条消息的前缀兜底，避免标题永远停在「新会话」
       session.setTitle(titleFrom(userText));
-      this.#queueIndexWrite();
     } finally {
       clearTimeout(timeout);
     }
@@ -423,51 +392,6 @@ export class AgentSessionManager {
         2,
       ) + "\n",
     );
-  }
-
-  #queueIndexWrite(): void {
-    this.#indexWriteTail = this.#indexWriteTail.then(async () => {
-      const file: SessionIndexFile = {
-        version: 1,
-        sessions: this.list().map((summary) => ({
-          id: summary.id,
-          title: summary.title,
-          permissionMode: summary.permissionMode,
-          createdAt: summary.createdAt,
-          updatedAt: summary.updatedAt,
-          status: summary.status,
-          totalInputTokens: summary.totalInputTokens,
-          totalOutputTokens: summary.totalOutputTokens,
-          totalCachedTokens: summary.totalCachedTokens,
-          totalCostCny: summary.totalCostCny,
-          toolCallCount: summary.toolCallCount,
-          kind: summary.kind,
-        })),
-      };
-      await atomicWriteFile(
-        this.#indexPath,
-        JSON.stringify(file, null, 2) + "\n",
-      );
-    });
-  }
-
-  async #readIndex(): Promise<Map<string, SessionIndexEntry>> {
-    try {
-      const parsed = JSON.parse(
-        await readFile(this.#indexPath, "utf8"),
-      ) as Partial<SessionIndexFile>;
-      return new Map(
-        (parsed.sessions ?? []).map((entry) => [entry.id, entry]),
-      );
-    } catch (error) {
-      if (
-        (error as NodeJS.ErrnoException).code === "ENOENT" ||
-        error instanceof SyntaxError
-      ) {
-        return new Map();
-      }
-      throw error;
-    }
   }
 }
 

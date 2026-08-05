@@ -5,8 +5,8 @@ import { usageCostCny } from "../utils/cost.js";
 import type { MyAgentConfig } from "../config/schema.js";
 import type { ConversationAgentModel } from "../model/agent-model.js";
 import { summarizeConversation } from "../model/agent-model.js";
-import { modelErrorGuidanceText } from "../model/error-guidance.js";
-import { ModelRetriesExhaustedError } from "../model/resilient-client.js";
+import { modelErrorGuidanceText } from "../model/error-policy.js";
+import { ModelRetriesExhaustedError } from "../model/fallback-client.js";
 import type { ModelClient } from "../model/types.js";
 import { ToolExecutor } from "../tools/executor.js";
 import { AgentLoop } from "./agent-loop.js";
@@ -109,7 +109,6 @@ export class AgentSession {
   readonly #store: SessionStore;
   readonly #traceStore: TraceStore;
   readonly #events: AgentSessionEvent[] = [];
-  readonly #listeners = new Set<(event: AgentSessionEvent) => void>();
   readonly #pendingPermissions = new Map<string, PendingPermission>();
   readonly #queuedInputs: QueuedInput[] = [];
   #approvalTimeoutMs: number;
@@ -510,8 +509,11 @@ export class AgentSession {
   }
 
   subscribe(listener: (event: AgentSessionEvent) => void): () => void {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
+    // 单一注册表（#bus）：外部订阅排在 #record 之后，直接复用刚记录的 record
+    return this.#bus.subscribe((event) => {
+      const record = this.#events[this.#events.length - 1];
+      if (record && record.event === event) listener(record);
+    });
   }
 
   isProcessing(): boolean {
@@ -544,10 +546,10 @@ export class AgentSession {
     this.#bus.emit({ type: "permission_mode_changed", mode });
   }
 
-  /** 更新会话标题并写入事件流（恢复时以事件流为准） */
+  /** 更新会话标题并写入事件流（恢复时以事件流为准；同名也写，保证显式标题可恢复） */
   setTitle(name: string): void {
     const trimmed = name.trim();
-    if (!trimmed || trimmed === this.title) return;
+    if (!trimmed) return;
     this.title = trimmed;
     this.#bus.emit({ type: "session_info", name: trimmed });
   }
@@ -761,6 +763,12 @@ export class AgentSession {
         ...rememberedDuringTask,
       ]);
       this.#permissions.setMode(previousMode);
+      // 权限档是会话级状态且只在事件流持久化（index.json 已废除）：
+      // 恢复任务前模式的事件，保证重启后 restore 能还原到任务结束时的真实档位
+      this.#bus.emit({
+        type: "permission_mode_changed",
+        mode: previousMode,
+      });
       this.#taskBox = undefined;
       this.#bus.emit({
         type: "run_finished",
@@ -920,7 +928,6 @@ export class AgentSession {
     this.#events.push(record);
     this.#updatedAt = record.ts;
     this.#applyEventState(event);
-    for (const listener of this.#listeners) listener(record);
   }
 
   #applyEventState(event: AgentEvent): void {
