@@ -1,6 +1,6 @@
 import type { ToolCall } from "../core/types.js";
 import type { ModelPricing } from "../core/types.js";
-import type { ToolDefinition } from "./tool-definitions.js";
+import type { ToolDefinition } from "../tools/tool-definitions.js";
 
 export type ConversationMessage =
   | { role: "user"; content: string }

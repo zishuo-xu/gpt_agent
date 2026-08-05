@@ -1,34 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { SettingsSidebar } from "./SettingsSidebar";
-
-type DocumentId =
-  | "preferences"
-  | "conventions"
-  | "pitfalls"
-  | "decisions";
-
-interface MemoryDocument {
-  id: DocumentId;
-  label: string;
-  scope: "global" | "project";
-  path: string;
-  content: string;
-  updatedAt?: string;
-}
-
-interface TimelineEntry {
-  ts: string;
-  sessionId: string;
-  sessionTitle: string;
-  documentId: DocumentId;
-  summary: string;
-}
+import type {
+  MemoryDocument,
+  MemoryDocumentId,
+  MemoryTimelineEntry,
+} from "@shared/types.js";
 
 export function MemoryApp() {
   const [documents, setDocuments] = useState<MemoryDocument[]>([]);
-  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [timeline, setTimeline] = useState<MemoryTimelineEntry[]>([]);
   const [selectedId, setSelectedId] =
-    useState<DocumentId>("preferences");
+    useState<MemoryDocumentId>("preferences");
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

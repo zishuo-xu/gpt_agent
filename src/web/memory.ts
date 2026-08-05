@@ -3,29 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { atomicWriteFile, readOptional } from "../utils/fs.js";
 import type { AgentSessionManager } from "../core/session-manager.js";
+import type {
+  MemoryDocument,
+  MemoryDocumentId,
+  MemoryTimelineEntry,
+} from "../shared/types.js";
 
-export type MemoryDocumentId =
-  | "preferences"
-  | "conventions"
-  | "pitfalls"
-  | "decisions";
-
-export interface MemoryDocument {
-  id: MemoryDocumentId;
-  label: string;
-  scope: "global" | "project";
-  path: string;
-  content: string;
-  updatedAt?: string;
-}
-
-export interface MemoryTimelineEntry {
-  ts: string;
-  sessionId: string;
-  sessionTitle: string;
-  documentId: MemoryDocumentId;
-  summary: string;
-}
+export type { MemoryDocument, MemoryDocumentId, MemoryTimelineEntry };
 
 export class MemoryService {
   readonly #cwd: string;

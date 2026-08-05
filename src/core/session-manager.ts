@@ -13,7 +13,7 @@ import type {
   ModelRole,
 } from "../config/schema.js";
 import { WebhookNotifier } from "./notifier.js";
-import { ConversationAgentModel } from "../model/agent-model.js";
+import { ConversationAgentModel } from "./agent-model.js";
 import { ConfiguredModelClient } from "../model/client.js";
 import { FallbackModelClient } from "../model/fallback-client.js";
 import type {

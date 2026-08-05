@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ModelProviderConfig } from "../config/schema.js";
 import type { ToolCall, ToolName } from "../core/types.js";
 import { isToolName } from "../shared/tool-names.js";
-import { CODING_TOOL_DEFINITIONS } from "./tool-definitions.js";
+import { CODING_TOOL_DEFINITIONS } from "../tools/tool-definitions.js";
 import type {
   CompletionRequest,
   ConversationMessage,

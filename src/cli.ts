@@ -19,8 +19,12 @@ import {
   type MyAgentConfig,
 } from "./config/schema.js";
 import { AgentSessionManager } from "./core/session-manager.js";
-import { shouldShowCacheMissNotice } from "./core/agent-loop.js";
 import { AgentSession } from "./core/session.js";
+import {
+  createEventRenderer,
+  summarizeEvent,
+  type ApprovalState,
+} from "./cli-render.js";
 import {
   parseRunCommand,
   type RunTaskOptions,
@@ -76,7 +80,7 @@ async function runCli(): Promise<void> {
     output,
     prompt: "myagent › ",
   });
-  let pendingApprovalCallId = "";
+  const approvalState: ApprovalState = { pendingCallId: "" };
   let pendingRun: RunTaskOptions | undefined;
   let closed = false;
 
@@ -88,13 +92,13 @@ async function runCli(): Promise<void> {
       readline.prompt();
       return;
     }
-    if (pendingApprovalCallId && isApprovalAnswer(line)) {
+    if (approvalState.pendingCallId && isApprovalAnswer(line)) {
       const answer = parseApprovalAnswer(line);
       const resolved = session.resolvePermission(
-        pendingApprovalCallId,
+        approvalState.pendingCallId,
         answer,
       );
-      if (resolved) pendingApprovalCallId = "";
+      if (resolved) approvalState.pendingCallId = "";
       readline.prompt();
       return;
     }
@@ -290,7 +294,7 @@ async function runCli(): Promise<void> {
       } else {
         unsubscribe();
         session = target;
-        pendingApprovalCallId = "";
+        approvalState.pendingCallId = "";
         unsubscribe = subscribeToSession(session);
         const summary = session.summary();
         output.write(
@@ -464,14 +468,14 @@ async function runCli(): Promise<void> {
       return;
     }
     if (line.startsWith("/allow") || line.startsWith("/deny")) {
-      if (!pendingApprovalCallId) {
+      if (!approvalState.pendingCallId) {
         output.write("当前没有待处理审批。\n");
       } else {
         session.resolvePermission(
-          pendingApprovalCallId,
+          approvalState.pendingCallId,
           parseApprovalAnswer(line),
         );
-        pendingApprovalCallId = "";
+        approvalState.pendingCallId = "";
       }
       readline.prompt();
       return;
@@ -559,151 +563,11 @@ async function runCli(): Promise<void> {
     readline.close();
   }
 
-  function renderEvent(event: AgentEvent): void {
-    if (event.type === "user_queued") {
-      output.write(`\n↳ 已排队：${event.text}\n`);
-    }
-    if (event.type === "text_delta") {
-      output.write(`\n${event.text}\n`);
-    }
-    if (event.type === "todo_update") {
-      output.write("\n任务清单：\n");
-      for (const todo of event.todos) {
-        const marker =
-          todo.status === "completed"
-            ? "✓"
-            : todo.status === "in_progress"
-              ? "→"
-              : "○";
-        output.write(`  ${marker} ${todo.content}\n`);
-      }
-    }
-    if (event.type === "tool_call") {
-      output.write(`\n→ ${event.call.tool}(${event.call.target})\n`);
-    }
-    if (event.type === "ask_permission") {
-      pendingApprovalCallId = event.call.id;
-      output.write(
-        `  需要审批：${event.risk}\n` +
-          `  ${event.call.tool}(${event.call.target})\n` +
-          `${event.detail ? `${event.detail}\n` : ""}` +
-          "  输入 y/n；/allow session|project|global 可记住；/deny 可附留言。\n",
-      );
-    }
-    if (event.type === "permission_denied") {
-      if (pendingApprovalCallId === event.call.id) {
-        pendingApprovalCallId = "";
-      }
-      output.write(`\n拒绝：${event.reason}\n`);
-    }
-    if (event.type === "tool_result") {
-      output.write(`  ${event.summary}\n`);
-    }
-    if (event.type === "cost_update") {
-      // 显示门控（参照 Pi cache-stats）：压缩重置属合法信息始终提示；
-      // 其余 miss 提示需开启 behavior.showCacheMissNotices 且超过显示阈值
-      const hasMiss = Boolean(
-        event.missedTokens && event.missedTokens > 0,
-      );
-      const showMiss =
-        hasMiss &&
-        (event.missedReason === "compaction" ||
-          (showCacheMissNotices &&
-            shouldShowCacheMissNotice(
-              event.missedTokens,
-              event.missedCostCny,
-            )));
-      const missedLabel = !showMiss
-        ? ""
-        : event.missedReason === "compaction"
-          ? " · 缓存已重置（压缩）"
-          : event.missedReason === "model_switch"
-            ? ` · 缓存失效 ${event.missedTokens}（模型切换）`
-            : event.missedReason === "idle"
-              ? ` · 缓存过期 ${event.missedTokens}（空闲超时）`
-              : ` · 缓存未命中浪费 ${event.missedTokens}`;
-      const missedCostLabel =
-        showMiss && event.missedCostCny && event.missedCostCny > 0
-          ? `（多花 ¥${event.missedCostCny.toFixed(4)}）`
-          : "";
-      output.write(
-        `  本轮 ${event.input} in / ${event.output} out` +
-          `${event.cached ? ` / ${event.cached} cached` : ""}` +
-          ` · 会话累计 ${event.totalTokens}` +
-          missedLabel +
-          missedCostLabel +
-          "\n",
-      );
-    }
-    if (event.type === "context_compacted") {
-      output.write(
-        `\n上下文已压缩：保留比例 ${(event.ratio * 100).toFixed(1)}%\n`,
-      );
-    }
-    if (event.type === "task_start") {
-      output.write(`\n◇ 子代理：${event.description}\n`);
-    }
-    if (event.type === "task_end") {
-      output.write(
-        `  子代理 ${event.status} · ${event.toolCalls} 次工具调用 · ` +
-          `${event.inputTokens} in / ${event.outputTokens} out\n`,
-      );
-    }
-    if (event.type === "run_started") {
-      output.write(
-        `\n◆ 无人值守任务 #${event.taskId} 已启动 · ${event.permissionMode} 档\n`,
-      );
-    }
-    if (event.type === "wrapup_warning") {
-      output.write(`\n⚠ 任务进入 ${event.level} 阶段：${event.message}\n`);
-    }
-    if (event.type === "run_finished") {
-      output.write(
-        `\n◆ 无人值守任务 #${event.taskId} ${event.status}` +
-          `${event.reason ? `（${event.reason}）` : ""}，权限档已回落。\n`,
-      );
-    }
-    if (event.type === "model_fallback") {
-      output.write(
-        `\n↪ ${event.role} 模型降级：${event.from} → ${event.to}\n` +
-          `  原因：${event.reason}\n`,
-      );
-    }
-    if (event.type === "need_user") {
-      output.write(`\n需要你的决定：${event.question}\n`);
-    }
-    if (event.type === "done") {
-      output.write("\n✓ 本轮任务完成，可继续输入。\n");
-    }
-    if (event.type === "error") {
-      output.write(`\n运行失败：${event.message}\n`);
-    }
-    if (event.type === "notify") {
-      const icon = event.level === "warn" ? "⚠" : event.level === "error" ? "✗" : "ℹ";
-      output.write(`\n${icon} ${event.message}\n`);
-    }
-    if (event.type === "interrupted") {
-      output.write(
-        "\n任务已中止；文件编辑保持原子性，Bash 已发生的副作用无法自动撤销。\n",
-      );
-    }
-    if (event.type === "branch_switch") {
-      output.write(
-        `\n⇄ 已切换到分支 #${event.branchId}` +
-          `${event.label ? `（${event.label}）` : ""}\n`,
-      );
-    }
-    if (event.type === "branch_summarized") {
-      const preview =
-        event.summary.length > 120
-          ? `${event.summary.slice(0, 120)}…`
-          : event.summary;
-      output.write(
-        `\n⇄ 分支摘要（来自 #${event.fromBranchId}，fork@#${event.forkSeq}）：\n  ${preview.replace(/\n/g, "\n  ")}\n`,
-      );
-    }
-  }
-
+  const renderEvent = createEventRenderer({
+    output: (text) => output.write(text),
+    approvalState,
+    showCacheMissNotices,
+  });
   function subscribeToSession(target: AgentSession): () => void {
     return target.subscribe((record) => {
       renderEvent(record.event);
@@ -753,30 +617,6 @@ function coerceConfigValue(current: unknown, rawValue: string): unknown {
     return normalized === "true";
   }
   return rawValue;
-}
-
-/** 事件时间线摘要：为 /timeline 提供单行描述（选择 fork 点用） */
-function summarizeEvent(event: AgentEvent): string {
-  switch (event.type) {
-    case "user":
-      return `用户：${event.text.slice(0, 40)}`;
-    case "text_delta":
-      return `助手：${event.text.slice(0, 40)}`;
-    case "tool_call":
-      return `工具：${event.call.tool}(${event.call.target})`;
-    case "tool_result":
-      return `结果：${event.summary.slice(0, 40)}`;
-    case "permission_denied":
-      return `拒绝：${event.reason.slice(0, 40)}`;
-    case "branch_switch":
-      return `分支切换：→ #${event.branchId}`;
-    case "context_compacted":
-      return `上下文压缩：${event.summary.slice(0, 40)}`;
-    case "run_started":
-      return `无人值守任务：${event.description.slice(0, 40)}`;
-    default:
-      return event.type;
-  }
 }
 
 function isApprovalAnswer(value: string): boolean {

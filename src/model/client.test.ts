@@ -5,7 +5,7 @@ import { ConfiguredModelClient } from "./client.js";
 import {
   EXPLORE_TOOL_NAMES,
   toolDefinitionsFor,
-} from "./tool-definitions.js";
+} from "../tools/tool-definitions.js";
 
 function provider(
   protocol: ModelProviderConfig["protocol"],

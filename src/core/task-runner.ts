@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { ConversationAgentModel } from "../model/agent-model.js";
+import { ConversationAgentModel } from "./agent-model.js";
 import type { ModelClient } from "../model/types.js";
-import { EXPLORE_TOOL_NAMES } from "../model/tool-definitions.js";
+import { EXPLORE_TOOL_NAMES } from "../tools/tool-definitions.js";
 import {
   ToolExecutor,
   type TaskArgs,

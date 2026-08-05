@@ -1,7 +1,10 @@
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { buildDisplayItems, toolResultDiffText } from "./SessionApp";
+import {
+  buildDisplayItems,
+  toolResultDiffText,
+} from "./session-display";
 import type { SessionEvent } from "./SessionApp";
 
 /**

@@ -8,7 +8,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { ConversationAgentModel } from "../model/agent-model.js";
+import { ConversationAgentModel } from "./agent-model.js";
 import type {
   CompletionRequest,
   ModelClient,

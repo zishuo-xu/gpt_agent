@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { SettingsSidebar } from "./SettingsSidebar";
 import { getConfigValue, setConfigValue } from "../../src/config/config-path.js";
+import type {
+  ConfigFieldSchema as SchemaField,
+  ConnectionTestResult as TestResult,
+} from "@shared/types.js";
 
 type Scope = "global" | "project";
 type Protocol = "anthropic" | "openai-compatible";
@@ -44,38 +48,6 @@ interface Config {
     keepRecentTokens: number;
   };
   [key: string]: unknown;
-}
-
-interface SchemaField {
-  key: string;
-  type:
-    | "provider[]"
-    | "role-models"
-    | "permissions"
-    | "context"
-    | "string"
-    | "number"
-    | "boolean"
-    | "select";
-  title: string;
-  description: string;
-  default?: string | number | boolean;
-  min?: number;
-  max?: number;
-  step?: number;
-  options?: Array<{ label: string; value: string }>;
-  hot?: boolean;
-  /** 复合字段的渲染器标识（来自 Config Schema），前端按此分派专用组件 */
-  renderer?: "provider" | "role-models" | "permissions" | "context";
-}
-
-interface TestResult {
-  ok: boolean;
-  reachable: boolean;
-  providerId: string;
-  model: string;
-  latencyMs: number;
-  message: string;
 }
 
 const roleMeta: Record<Role, { label: string; hint: string }> = {

@@ -1,23 +1,23 @@
-import type { AgentModel, ModelTurn } from "../core/agent-loop.js";
-import { ContextManager } from "../core/context.js";
+import type { AgentModel, ModelTurn } from "./agent-loop.js";
+import { ContextManager } from "./context.js";
 import type {
   ModelPricing,
   TodoItem,
   ToolCall,
   ToolExecutionResult,
-} from "../core/types.js";
+} from "./types.js";
 import { stringify } from "../utils/stringify.js";
 import type {
   CompletionRequest,
   ModelClient,
   ModelResponse,
-} from "./types.js";
-import type { ConversationMessage } from "./types.js";
-import type { ModelUsage } from "./types.js";
+} from "../model/types.js";
+import type { ConversationMessage } from "../model/types.js";
+import type { ModelUsage } from "../model/types.js";
 import {
   toolDefinitionsFor,
-} from "./tool-definitions.js";
-import type { ToolName } from "../core/types.js";
+} from "../tools/tool-definitions.js";
+import type { ToolName } from "./types.js";
 
 const PROMPT_HEADER = `You are MyAgent, a local coding agent operating in the user's current project.
 

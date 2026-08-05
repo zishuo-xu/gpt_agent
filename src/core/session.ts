@@ -3,8 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { usageCostCny } from "../utils/cost.js";
 import type { MyAgentConfig } from "../config/schema.js";
-import type { ConversationAgentModel } from "../model/agent-model.js";
-import { summarizeConversation } from "../model/agent-model.js";
+import type { ConversationAgentModel } from "./agent-model.js";
 import { modelErrorGuidanceText } from "../model/error-policy.js";
 import { ModelRetriesExhaustedError } from "../model/fallback-client.js";
 import type { ModelClient } from "../model/types.js";
@@ -18,20 +17,14 @@ import {
 import {
   DEFAULT_PERMISSION_RULES,
   PermissionEngine,
-  callSignature,
 } from "./permissions.js";
 import {
   TaskBox,
   type RunTaskOptions,
 } from "./run-task.js";
 import { TaskRunner } from "./task-runner.js";
-import {
-  branchesFromEvents,
-  conversationFrom,
-  conversationFromRaw,
-  currentBranchIdFrom,
-  ROOT_BRANCH,
-} from "./branch.js";
+import { BranchCoordinator } from "./session-branch.js";
+import { PermissionWaiter } from "./session-approval.js";
 import type {
   AgentEvent,
   ApprovalAnswer,
@@ -44,50 +37,15 @@ import type {
   ToolCall,
 } from "./types.js";
 
-export type AgentSessionStatus =
-  | "idle"
-  | "running"
-  | "waiting_permission"
-  | "done"
-  | "error"
-  | "interrupted";
+import type {
+  SessionStatus as AgentSessionStatus,
+  SessionSummary as AgentSessionSummary,
+} from "../shared/types.js";
 
-export interface AgentSessionEvent {
-  seq: number;
-  ts: string;
-  /** 事件所属分支；缺省 "main"（旧会话文件兼容） */
-  branchId?: string;
-  event: AgentEvent;
-}
+export type { AgentSessionStatus, AgentSessionSummary };
 
-export interface AgentSessionSummary {
-  id: string;
-  title: string;
-  status: AgentSessionStatus;
-  permissionMode: PermissionMode;
-  createdAt: string;
-  updatedAt: string;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalCachedTokens: number;
-  totalCostCny: number;
-  /** 累计缓存浪费 token（仅异常失效；压缩不计） */
-  totalMissedTokens: number;
-  /** 累计缓存浪费费用（元） */
-  totalMissedCostCny: number;
-  todos: TodoItem[];
-  toolCallCount: number;
-  kind: "interactive" | "run";
-  /** 首条用户消息文本（Web 会话搜索用）；截断至 80 字符 */
-  firstMessage?: string;
-}
-
-interface PendingPermission {
-  resolve: (answer: ApprovalAnswer) => void;
-}
-
-/** 分支摘要触发阈值：被放弃路径估算 token 低于此值不值得一次 cheap 调用 */
-const BRANCH_SUMMARY_MIN_TOKENS = 5_000;
+/** 事件记录（RecordedEvent 的会话内形态：sessionId 由 SessionStore 落盘时补齐） */
+export type AgentSessionEvent = RecordedEvent;
 
 interface QueuedInput {
   id: string;
@@ -104,12 +62,15 @@ export class AgentSession {
   readonly #bus = new AgentEventBus();
   readonly #model: ConversationAgentModel;
   readonly #permissions: PermissionEngine;
+  /** 审批等待（超时/abort/scope 记忆/steer 解锁） */
+  readonly #approvalWaiter: PermissionWaiter;
+  /** 分支树协调（fork/switch/被放弃路径摘要） */
+  readonly #branchOps: BranchCoordinator;
   readonly #tools: ToolExecutor;
   readonly #taskRunner: TaskRunner | undefined;
   readonly #store: SessionStore;
   readonly #traceStore: TraceStore;
   readonly #events: AgentSessionEvent[] = [];
-  readonly #pendingPermissions = new Map<string, PendingPermission>();
   readonly #queuedInputs: QueuedInput[] = [];
   #approvalTimeoutMs: number;
   readonly #rememberPermission:
@@ -138,13 +99,6 @@ export class AgentSession {
   #taskBox: TaskBox | undefined;
   #taskStopReason: "deadline" | "budget" | undefined;
   #taskHardStopped = false;
-  /** 会话分支树（branch_switch 事件即真相，恢复时重建） */
-  #branches: SessionBranch[];
-  #currentBranchId: string;
-  /** 分支摘要的 cheap 客户端（复用压缩客户端；未配置则跳过摘要） */
-  readonly #branchSummaryClient: ModelClient | undefined;
-  /** 分支摘要异步链：fork/switch 触发的摘要串行执行，flush 时等待落定 */
-  #branchSummaryTail: Promise<void> = Promise.resolve();
 
   constructor(options: {
     id: string;
@@ -181,6 +135,34 @@ export class AgentSession {
       options.mode,
       options.permissionRules ?? DEFAULT_PERMISSION_RULES,
     );
+    this.#approvalTimeoutMs = options.approvalTimeoutMs ?? 300_000;
+    this.#rememberPermission = options.rememberPermission;
+    this.#parallelTools = options.parallelTools ?? false;
+    this.#approvalWaiter = new PermissionWaiter({
+      bus: this.#bus,
+      permissions: this.#permissions,
+      approvalTimeoutMs: this.#approvalTimeoutMs,
+      ...(this.#rememberPermission
+        ? { rememberPermission: this.#rememberPermission }
+        : {}),
+      setStatus: (status) => {
+        this.#status = status;
+      },
+    });
+    this.#branchOps = new BranchCoordinator({
+      bus: this.#bus,
+      model: this.#model,
+      ...(options.compactModelClient
+        ? { branchSummaryClient: options.compactModelClient }
+        : {}),
+      ...(this.#pricing ? { pricing: this.#pricing } : {}),
+      getTotalTokens: () =>
+        this.#totalInputTokens + this.#totalOutputTokens,
+      getTotalCostCny: () => this.#totalCostCny,
+      ...(options.restoredEvents
+        ? { restoredEvents: options.restoredEvents }
+        : {}),
+    });
     const projectKey = Buffer.from(options.cwd).toString("base64url");
     const stateRoot =
       options.stateDir ?? path.join(os.homedir(), ".myagent");
@@ -204,7 +186,7 @@ export class AgentSession {
           client: options.exploreModelClient,
           mode: () => this.#permissions.mode,
           approve: async (call, signal) =>
-            await this.#waitForPermission(call, signal),
+            await this.#approvalWaiter.wait(call, signal),
           reportUsage: (usage) => {
             const costCny = usageCostCny(
               usage,
@@ -241,15 +223,7 @@ export class AgentSession {
             await taskRunner.run(args, signal)
         : undefined,
     );
-    this.#approvalTimeoutMs = options.approvalTimeoutMs ?? 300_000;
-    this.#rememberPermission = options.rememberPermission;
-    this.#parallelTools = options.parallelTools ?? false;
-    this.#branchSummaryClient = options.compactModelClient;
-    this.#branches = branchesFromEvents(options.restoredEvents ?? []);
-    this.#currentBranchId = currentBranchIdFrom(
-      options.restoredEvents ?? [],
-    );
-    this.#store.attach(this.#bus, () => this.#currentBranchId);
+    this.#store.attach(this.#bus, () => this.#branchOps.currentBranchId());
     this.#bus.subscribe((event) => this.#record(event));
     if (options.compactModelClient) {
       this.#model.configureCompaction({
@@ -368,12 +342,12 @@ export class AgentSession {
 
   /** 分支树（根分支 main 恒存在） */
   branches(): SessionBranch[] {
-    return structuredClone(this.#branches);
+    return this.#branchOps.branches();
   }
 
   /** 当前分支 id */
   currentBranchId(): string {
-    return this.#currentBranchId;
+    return this.#branchOps.currentBranchId();
   }
 
   /** 从指定 seq 处分裂新分支并切换；后续消息走新分支。
@@ -382,33 +356,7 @@ export class AgentSession {
     if (this.#processing || this.#taskBox) {
       throw new Error("会话运行中，请在当前轮结束后分支");
     }
-    const maxSeq = this.#events.at(-1)?.seq ?? 0;
-    if (!Number.isInteger(forkSeq) || forkSeq < 1 || forkSeq > maxSeq) {
-      throw new Error(`分支点 seq 无效：需要 1-${maxSeq} 之间的整数`);
-    }
-    const branchId = randomUUID().slice(0, 6);
-    this.#branches.push({
-      id: branchId,
-      parent: this.#currentBranchId,
-      forkSeq,
-      ...(label?.trim() ? { label: label.trim() } : {}),
-      createdAt: new Date().toISOString(),
-    });
-    const fromBranchId = this.#currentBranchId;
-    // branch_switch 事件落在新分支上（#applyEventState 同步切换 currentBranchId）
-    this.#bus.emit({
-      type: "branch_switch",
-      branchId,
-      parent: fromBranchId,
-      forkSeq,
-      ...(label?.trim() ? { label: label.trim() } : {}),
-    });
-    this.#model.resetConversation(
-      conversationFrom(this.#events, this.#branches, branchId),
-    );
-    // 分支摘要：被放弃的旧分支路径（fork 点之后）压缩注入新分支（参照 Pi branch-summarization）
-    this.#queueBranchSummary(forkSeq, fromBranchId);
-    return branchId;
+    return this.#branchOps.fork(this.#events, forkSeq, label);
   }
 
   /** 回溯切换到已存在的分支（不建新节点）；后续消息写入目标分支 */
@@ -416,96 +364,7 @@ export class AgentSession {
     if (this.#processing || this.#taskBox) {
       throw new Error("会话运行中，请在当前轮结束后切换");
     }
-    const target = this.#branches.find(
-      (branch) => branch.id === branchId,
-    );
-    if (!target) {
-      throw new Error(`分支 #${branchId} 不存在（/tree 查看）`);
-    }
-    if (target.id === this.#currentBranchId) return;
-    const fromBranchId = this.#currentBranchId;
-    // 复用 branch_switch 事件：目标分支已存在时 branchesFromEvents 只切换不建节点
-    this.#bus.emit({
-      type: "branch_switch",
-      branchId: target.id,
-      parent: fromBranchId,
-      forkSeq: target.forkSeq ?? 0,
-      ...(target.label ? { label: target.label } : {}),
-    });
-    this.#model.resetConversation(
-      conversationFrom(this.#events, this.#branches, branchId),
-    );
-    // 离开当前分支前摘要被放弃的路径（当前分支上目标 fork 点之后的事件）
-    this.#queueBranchSummary(target.forkSeq ?? 0, fromBranchId);
-  }
-
-  /** 排队分支摘要：被放弃路径估算超过阈值时用 cheap 模型压缩并注入新分支上下文 */
-  #queueBranchSummary(forkSeq: number, fromBranchId: string): void {
-    this.#branchSummaryTail = this.#branchSummaryTail
-      .then(() => this.#summarizeAbandonedPath(forkSeq, fromBranchId))
-      .catch(() => undefined);
-  }
-
-  async #summarizeAbandonedPath(
-    forkSeq: number,
-    fromBranchId: string,
-  ): Promise<void> {
-    const client = this.#branchSummaryClient;
-    if (!client) return;
-    const abandoned = this.#events.filter(
-      (record) =>
-        record.branchId === fromBranchId && record.seq > forkSeq,
-    );
-    const messages = conversationFromRaw(abandoned);
-    if (messages.length === 0) return;
-    const estimated = Math.ceil(
-      JSON.stringify(messages).length / 4,
-    );
-    if (estimated < BRANCH_SUMMARY_MIN_TOKENS) return;
-    let result: { summary: string; usage: { input: number; output: number; cached: number } };
-    try {
-      result = await summarizeConversation(
-        client,
-        messages,
-        new AbortController().signal,
-      );
-    } catch {
-      // 摘要失败不阻断分支切换（上下文延续是增强，不是硬依赖）
-      return;
-    }
-    this.#model.addUserMessage(
-      `[分支摘要]（来自分支 ${fromBranchId}，fork@#${forkSeq}）\n` +
-        result.summary,
-    );
-    this.#bus.emit({
-      type: "branch_summarized",
-      branchId: this.#currentBranchId,
-      fromBranchId,
-      forkSeq,
-      summary: result.summary,
-    });
-    const costCny = usageCostCny(
-      result.usage,
-      this.#pricing?.cheap,
-    );
-    const actualCostCny = costCny;
-    this.#bus.emit({
-      type: "cost_update",
-      input: result.usage.input,
-      output: result.usage.output,
-      cached: result.usage.cached,
-      totalTokens:
-        this.#totalInputTokens +
-        this.#totalOutputTokens +
-        result.usage.input +
-        result.usage.output,
-      ...(actualCostCny === undefined
-        ? {}
-        : {
-            costCny: actualCostCny,
-            totalCostCny: this.#totalCostCny + actualCostCny,
-          }),
-    });
+    this.#branchOps.switch(this.#events, branchId);
   }
 
   subscribe(listener: (event: AgentSessionEvent) => void): () => void {
@@ -575,12 +434,7 @@ export class AgentSession {
         this.#taskRunner?.steer();
         // 取消挂起审批：否则 steer 会被阻塞在 approve Promise 上无法生效
         //（子代理审批同样冒泡到此，一并解锁）
-        for (const pending of [...this.#pendingPermissions.values()]) {
-          pending.resolve({
-            granted: false,
-            feedback: "用户插入新指令（steer），已取消审批",
-          });
-        }
+        this.#approvalWaiter.cancelAll("用户插入新指令（steer），已取消审批");
       } else {
         this.#queuedInputs.push(queued);
       }
@@ -619,7 +473,7 @@ export class AgentSession {
           permissions: this.#permissions,
           tools: this.#tools,
           approve: async (call, signal) =>
-            await this.#waitForPermission(call, signal),
+            await this.#approvalWaiter.wait(call, signal),
           initialTotalTokens:
             this.#totalInputTokens + this.#totalOutputTokens,
           getTotalTokens: () =>
@@ -818,15 +672,7 @@ export class AgentSession {
     callId: string,
     answer: boolean | ApprovalAnswer,
   ): boolean {
-    const pending = this.#pendingPermissions.get(callId);
-    if (!pending) return false;
-    const normalized: ApprovalAnswer =
-      typeof answer === "boolean"
-        ? { granted: answer, scope: "once" }
-        : answer;
-    this.#status = "running";
-    pending.resolve(normalized);
-    return true;
+    return this.#approvalWaiter.resolve(callId, answer);
   }
 
   interrupt(): boolean {
@@ -840,7 +686,7 @@ export class AgentSession {
     await Promise.all([
       this.#store.flush(),
       this.#traceStore.flush(),
-      this.#branchSummaryTail,
+      this.#branchOps.flush(),
     ]);
   }
 
@@ -857,63 +703,6 @@ export class AgentSession {
     return compacted;
   }
 
-  async #waitForPermission(
-    call: ToolCall,
-    signal: AbortSignal,
-  ): Promise<ApprovalAnswer> {
-    this.#status = "waiting_permission";
-    return await new Promise<ApprovalAnswer>((resolve) => {
-      const timeout = setTimeout(
-        () => {
-          this.#bus.emit({
-            type: "notify",
-            level: "warn",
-            message: `审批超时（${this.#approvalTimeoutMs / 1000}s 无人响应），已自动拒绝：${call.tool} ${call.target ?? ""}`,
-          });
-          finish({ granted: false });
-        },
-        this.#approvalTimeoutMs,
-      );
-      const onAbort = () => finish({ granted: false });
-      signal.addEventListener("abort", onAbort, { once: true });
-
-      const finish = (answer: ApprovalAnswer) => {
-        clearTimeout(timeout);
-        signal.removeEventListener("abort", onAbort);
-        this.#pendingPermissions.delete(call.id);
-        if (
-          answer.granted &&
-          answer.scope &&
-          answer.scope !== "once"
-        ) {
-          this.#permissions.remember(call);
-          if (
-            (answer.scope === "project" ||
-              answer.scope === "global") &&
-            this.#rememberPermission
-          ) {
-            void this.#rememberPermission(answer.scope, {
-              effect: "allow",
-              pattern: callSignature(call),
-            }).catch((error) => {
-              this.#bus.emit({
-                type: "error",
-                message:
-                  error instanceof Error
-                    ? `保存审批规则失败：${error.message}`
-                    : "保存审批规则失败",
-              });
-            });
-          }
-        }
-        resolve(answer);
-      };
-      this.#pendingPermissions.set(call.id, {
-        resolve: finish,
-      });
-    });
-  }
-
   #record(event: AgentEvent): void {
     const record: AgentSessionEvent = {
       seq: this.#events.length + 1,
@@ -922,7 +711,7 @@ export class AgentSession {
       branchId:
         event.type === "branch_switch"
           ? event.branchId
-          : this.#currentBranchId,
+          : this.#branchOps.currentBranchId(),
       event,
     };
     this.#events.push(record);
@@ -955,7 +744,7 @@ export class AgentSession {
     if (event.type === "error") this.#status = "error";
     if (event.type === "interrupted") this.#status = "interrupted";
     if (event.type === "branch_switch") {
-      this.#currentBranchId = event.branchId;
+      this.#branchOps.noteSwitch(event.branchId);
     }
   }
 

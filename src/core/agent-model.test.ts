@@ -1,20 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ToolCall, ToolExecutionResult } from "../core/types.js";
+import type { ToolCall, ToolExecutionResult } from "./types.js";
 import {
   buildSystemPrompt,
   ConversationAgentModel,
   findCompactionCutPoint,
   sanitizeMessages,
 } from "./agent-model.js";
-import { EXPLORE_TOOL_NAMES } from "./tool-definitions.js";
+import { EXPLORE_TOOL_NAMES } from "../tools/tool-definitions.js";
 import type {
   CompletionRequest,
   ConversationMessage,
   ModelClient,
   ModelResponse,
   StreamChunk,
-} from "./types.js";
+} from "../model/types.js";
 
 class CapturingClient implements ModelClient {
   readonly requests: CompletionRequest[] = [];

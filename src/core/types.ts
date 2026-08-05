@@ -178,7 +178,8 @@ export interface SessionBranch {
 export interface RecordedEvent {
   seq: number;
   ts: string;
-  sessionId: string;
+  /** 落盘时由 SessionStore 补齐；会话内事件记录无此字段 */
+  sessionId?: string;
   /** 事件所属分支；缺省 "main"（旧会话文件兼容） */
   branchId?: string;
   event: AgentEvent;

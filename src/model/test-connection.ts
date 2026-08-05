@@ -1,14 +1,8 @@
 import type { ModelProviderConfig } from "../config/schema.js";
 import { appendEndpoint } from "./client.js";
+import type { ConnectionTestResult } from "../shared/types.js";
 
-export interface ConnectionTestResult {
-  ok: boolean;
-  reachable: boolean;
-  providerId: string;
-  model: string;
-  latencyMs: number;
-  message: string;
-}
+export type { ConnectionTestResult };
 
 export async function testModelConnection(
   provider: ModelProviderConfig,

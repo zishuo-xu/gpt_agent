@@ -3,6 +3,9 @@ import type {
   PermissionMode,
   PermissionRule,
 } from "../core/types.js";
+import type { ConfigFieldSchema } from "../shared/types.js";
+
+export type { ConfigFieldSchema };
 
 export type ProviderProtocol = "anthropic" | "openai-compatible";
 export type ModelRole = "main" | "cheap" | "explore";
@@ -83,29 +86,6 @@ export interface PublicMyAgentConfig {
   notify: NotifyConfig;
   behavior: BehaviorConfig;
   [key: string]: unknown;
-}
-
-export interface ConfigFieldSchema {
-  key: string;
-  type:
-    | "provider[]"
-    | "role-models"
-    | "permissions"
-    | "context"
-    | "string"
-    | "number"
-    | "boolean"
-    | "select";
-  title: string;
-  description: string;
-  default?: string | number | boolean;
-  min?: number;
-  max?: number;
-  step?: number;
-  options?: Array<{ label: string; value: string }>;
-  hot?: boolean;
-  /** 复合字段的渲染器标识，前端按此分派专用组件 */
-  renderer?: "provider" | "role-models" | "permissions" | "context";
 }
 
 export const CONFIG_SCHEMA: ConfigFieldSchema[] = [

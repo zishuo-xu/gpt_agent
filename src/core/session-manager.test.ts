@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ConfigService } from "../config/service.js";
-import { ConversationAgentModel } from "../model/agent-model.js";
+import { ConversationAgentModel } from "./agent-model.js";
 import type {
   CompletionRequest,
   ConversationMessage,

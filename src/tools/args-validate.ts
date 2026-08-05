@@ -1,6 +1,6 @@
 import { Ajv } from "ajv";
 import type { ToolCall } from "../core/types.js";
-import { CODING_TOOL_DEFINITIONS } from "../model/tool-definitions.js";
+import { CODING_TOOL_DEFINITIONS } from "../tools/tool-definitions.js";
 
 /**
  * Schema 单层参数校验（参照 Pi validation.ts：AJV 编译缓存 + 类型强转 + 字段级报错）。
