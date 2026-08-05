@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { MyAgentConfig } from "../config/schema.js";
 import type { ConversationAgentModel } from "../model/agent-model.js";
+import { summarizeConversation } from "../model/agent-model.js";
 import { modelErrorGuidanceText } from "../model/error-guidance.js";
 import { ModelRetriesExhaustedError } from "../model/resilient-client.js";
 import type { ModelClient } from "../model/types.js";
@@ -26,6 +27,7 @@ import { TaskRunner } from "./task-runner.js";
 import {
   branchesFromEvents,
   conversationFrom,
+  conversationFromRaw,
   currentBranchIdFrom,
   ROOT_BRANCH,
 } from "./branch.js";
@@ -75,11 +77,16 @@ export interface AgentSessionSummary {
   todos: TodoItem[];
   toolCallCount: number;
   kind: "interactive" | "run";
+  /** 首条用户消息文本（Web 会话搜索用）；截断至 80 字符 */
+  firstMessage?: string;
 }
 
 interface PendingPermission {
   resolve: (answer: ApprovalAnswer) => void;
 }
+
+/** 分支摘要触发阈值：被放弃路径估算 token 低于此值不值得一次 cheap 调用 */
+const BRANCH_SUMMARY_MIN_TOKENS = 5_000;
 
 interface QueuedInput {
   id: string;
@@ -118,6 +125,8 @@ export class AgentSession {
   #updatedAt: string;
   #activeLoop: AgentLoop | undefined;
   #processing = false;
+  /** 工具并行执行开关（behavior.parallelTools，热生效；批次含审批需求时自动串行） */
+  #parallelTools = false;
   #totalInputTokens = 0;
   #totalOutputTokens = 0;
   #totalCachedTokens = 0;
@@ -132,6 +141,10 @@ export class AgentSession {
   /** 会话分支树（branch_switch 事件即真相，恢复时重建） */
   #branches: SessionBranch[];
   #currentBranchId: string;
+  /** 分支摘要的 cheap 客户端（复用压缩客户端；未配置则跳过摘要） */
+  readonly #branchSummaryClient: ModelClient | undefined;
+  /** 分支摘要异步链：fork/switch 触发的摘要串行执行，flush 时等待落定 */
+  #branchSummaryTail: Promise<void> = Promise.resolve();
 
   constructor(options: {
     id: string;
@@ -150,7 +163,8 @@ export class AgentSession {
     exploreModelClient?: ModelClient;
     compactModelClient?: ModelClient;
     compactAtEstimatedTokens?: number;
-    keepRecentTurns?: number;
+    keepRecentTokens?: number;
+    parallelTools?: boolean;
     pricing?: Partial<
       Record<"main" | "cheap" | "explore", ModelPricing>
     >;
@@ -229,6 +243,8 @@ export class AgentSession {
     );
     this.#approvalTimeoutMs = options.approvalTimeoutMs ?? 300_000;
     this.#rememberPermission = options.rememberPermission;
+    this.#parallelTools = options.parallelTools ?? false;
+    this.#branchSummaryClient = options.compactModelClient;
     this.#branches = branchesFromEvents(options.restoredEvents ?? []);
     this.#currentBranchId = currentBranchIdFrom(
       options.restoredEvents ?? [],
@@ -240,7 +256,7 @@ export class AgentSession {
         client: options.compactModelClient,
         thresholdTokens:
           options.compactAtEstimatedTokens ?? 90_000,
-        keepRecentTurns: options.keepRecentTurns ?? 4,
+        keepRecentTokens: options.keepRecentTokens ?? 20_000,
         onCompacted: (result) => {
           for (const fallback of result.fallbacks ?? []) {
             this.#bus.emit({
@@ -283,7 +299,7 @@ export class AgentSession {
             (record) => record.event.type === "user",
           );
           const keepFromSeq =
-            userEvents.at(-result.keepRecentTurns)?.seq ?? 1;
+            userEvents.at(-result.retainedUserCount)?.seq ?? 1;
           this.#bus.emit({
             type: "context_compacted",
             summary: result.summary,
@@ -315,7 +331,7 @@ export class AgentSession {
   }
 
   summary(): AgentSessionSummary {
-    return {
+    const summary: AgentSessionSummary = {
       id: this.id,
       title: this.title,
       status: this.#status,
@@ -338,6 +354,12 @@ export class AgentSession {
         ? "run"
         : "interactive",
     };
+    // exactOptionalPropertyTypes 下条件展开会带出 undefined，改用条件赋值
+    const firstMessage = firstUserText(this.#events);
+    if (firstMessage) {
+      summary.firstMessage = firstMessage;
+    }
+    return summary;
   }
 
   events(after = 0): AgentSessionEvent[] {
@@ -372,17 +394,20 @@ export class AgentSession {
       ...(label?.trim() ? { label: label.trim() } : {}),
       createdAt: new Date().toISOString(),
     });
+    const fromBranchId = this.#currentBranchId;
     // branch_switch 事件落在新分支上（#applyEventState 同步切换 currentBranchId）
     this.#bus.emit({
       type: "branch_switch",
       branchId,
-      parent: this.#currentBranchId,
+      parent: fromBranchId,
       forkSeq,
       ...(label?.trim() ? { label: label.trim() } : {}),
     });
     this.#model.resetConversation(
       conversationFrom(this.#events, this.#branches, branchId),
     );
+    // 分支摘要：被放弃的旧分支路径（fork 点之后）压缩注入新分支（参照 Pi branch-summarization）
+    this.#queueBranchSummary(forkSeq, fromBranchId);
     return branchId;
   }
 
@@ -398,17 +423,89 @@ export class AgentSession {
       throw new Error(`分支 #${branchId} 不存在（/tree 查看）`);
     }
     if (target.id === this.#currentBranchId) return;
+    const fromBranchId = this.#currentBranchId;
     // 复用 branch_switch 事件：目标分支已存在时 branchesFromEvents 只切换不建节点
     this.#bus.emit({
       type: "branch_switch",
       branchId: target.id,
-      parent: this.#currentBranchId,
+      parent: fromBranchId,
       forkSeq: target.forkSeq ?? 0,
       ...(target.label ? { label: target.label } : {}),
     });
     this.#model.resetConversation(
       conversationFrom(this.#events, this.#branches, branchId),
     );
+    // 离开当前分支前摘要被放弃的路径（当前分支上目标 fork 点之后的事件）
+    this.#queueBranchSummary(target.forkSeq ?? 0, fromBranchId);
+  }
+
+  /** 排队分支摘要：被放弃路径估算超过阈值时用 cheap 模型压缩并注入新分支上下文 */
+  #queueBranchSummary(forkSeq: number, fromBranchId: string): void {
+    this.#branchSummaryTail = this.#branchSummaryTail
+      .then(() => this.#summarizeAbandonedPath(forkSeq, fromBranchId))
+      .catch(() => undefined);
+  }
+
+  async #summarizeAbandonedPath(
+    forkSeq: number,
+    fromBranchId: string,
+  ): Promise<void> {
+    const client = this.#branchSummaryClient;
+    if (!client) return;
+    const abandoned = this.#events.filter(
+      (record) =>
+        record.branchId === fromBranchId && record.seq > forkSeq,
+    );
+    const messages = conversationFromRaw(abandoned);
+    if (messages.length === 0) return;
+    const estimated = Math.ceil(
+      JSON.stringify(messages).length / 4,
+    );
+    if (estimated < BRANCH_SUMMARY_MIN_TOKENS) return;
+    let result: { summary: string; usage: { input: number; output: number; cached: number } };
+    try {
+      result = await summarizeConversation(
+        client,
+        messages,
+        new AbortController().signal,
+      );
+    } catch {
+      // 摘要失败不阻断分支切换（上下文延续是增强，不是硬依赖）
+      return;
+    }
+    this.#model.addUserMessage(
+      `[分支摘要]（来自分支 ${fromBranchId}，fork@#${forkSeq}）\n` +
+        result.summary,
+    );
+    this.#bus.emit({
+      type: "branch_summarized",
+      branchId: this.#currentBranchId,
+      fromBranchId,
+      forkSeq,
+      summary: result.summary,
+    });
+    const costCny = calculateUsageCost(
+      result.usage,
+      this.#pricing?.cheap,
+    );
+    const actualCostCny = costCny;
+    this.#bus.emit({
+      type: "cost_update",
+      input: result.usage.input,
+      output: result.usage.output,
+      cached: result.usage.cached,
+      totalTokens:
+        this.#totalInputTokens +
+        this.#totalOutputTokens +
+        result.usage.input +
+        result.usage.output,
+      ...(actualCostCny === undefined
+        ? {}
+        : {
+            costCny: actualCostCny,
+            totalCostCny: this.#totalCostCny + actualCostCny,
+          }),
+    });
   }
 
   subscribe(listener: (event: AgentSessionEvent) => void): () => void {
@@ -427,6 +524,7 @@ export class AgentSession {
       ...config.permissions.rules,
     ]);
     this.#approvalTimeoutMs = config.permissions.approvalTimeoutMs;
+    this.#parallelTools = config.behavior?.parallelTools === true;
   }
 
   /** 配置变更后替换各角色模型客户端（API Key、模型、fallback 等即时生效） */
@@ -443,6 +541,14 @@ export class AgentSession {
   setPermissionMode(mode: PermissionMode): void {
     this.#permissions.setMode(mode);
     this.#bus.emit({ type: "permission_mode_changed", mode });
+  }
+
+  /** 更新会话标题并写入事件流（恢复时以事件流为准） */
+  setTitle(name: string): void {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === this.title) return;
+    this.title = trimmed;
+    this.#bus.emit({ type: "session_info", name: trimmed });
   }
 
   async sendInput(
@@ -522,6 +628,7 @@ export class AgentSession {
           beforeTurn: async () => this.#checkTaskBox(),
           modelRole: "main",
           modelCompactCount: () => this.#model.compactionCount,
+          parallelTools: this.#parallelTools,
           recordTrace: (trace) => this.#traceStore.record(trace),
         });
         this.#activeLoop = loop;
@@ -724,6 +831,7 @@ export class AgentSession {
     await Promise.all([
       this.#store.flush(),
       this.#traceStore.flush(),
+      this.#branchSummaryTail,
     ]);
   }
 
@@ -879,6 +987,17 @@ export class AgentSession {
       ...(decision.finalOnly ? { finalOnly: true } : {}),
     };
   }
+}
+
+/** 事件流中首条 user 消息文本（截断 80 字符）；无则返回 undefined */
+function firstUserText(
+  events: readonly AgentSessionEvent[],
+): string | undefined {
+  const record = events.find((item) => item.event.type === "user");
+  if (!record || record.event.type !== "user") return undefined;
+  const text = record.event.text.replace(/\s+/g, " ").trim();
+  if (!text) return undefined;
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
 }
 
 function calculateUsageCost(

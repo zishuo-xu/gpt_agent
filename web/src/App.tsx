@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { SettingsSidebar } from "./SettingsSidebar";
+import { getConfigValue, setConfigValue } from "./config-path";
 
 type Scope = "global" | "project";
 type Protocol = "anthropic" | "openai-compatible";
@@ -40,7 +41,7 @@ interface Config {
   };
   context: {
     compactAtEstimatedTokens: number;
-    keepRecentTurns: number;
+    keepRecentTokens: number;
   };
   [key: string]: unknown;
 }
@@ -1229,17 +1230,17 @@ export function App() {
                   />
                 </label>
                 <label>
-                  压缩后保留最近轮数
+                  压缩后保留最近 tokens
                   <input
                     type="number"
-                    min="1"
-                    value={config.context.keepRecentTurns}
+                    min="1000"
+                    value={config.context.keepRecentTokens}
                     onChange={(event) =>
                       replaceConfig((current) => ({
                         ...current,
                         context: {
                           ...current.context,
-                          keepRecentTurns: Number(
+                          keepRecentTokens: Number(
                             event.target.value,
                           ),
                         },
@@ -1287,8 +1288,11 @@ export function App() {
                 </div>
                 <div className="schema-field-grid">
                   {generatedFields.map((field) => {
+                    // dotted 键（server.host 等）读写嵌套 section，避免被后端静默丢弃
                     const value =
-                      config[field.key] ?? field.default ?? "";
+                      getConfigValue(config, field.key) ??
+                      field.default ??
+                      "";
                     return (
                       <label className="schema-field" key={field.key}>
                         <span>
@@ -1301,20 +1305,26 @@ export function App() {
                             type="checkbox"
                             checked={value === true}
                             onChange={(event) =>
-                              replaceConfig((current) => ({
-                                ...current,
-                                [field.key]: event.target.checked,
-                              }))
+                              replaceConfig((current) =>
+                                setConfigValue(
+                                  current,
+                                  field.key,
+                                  event.target.checked,
+                                ),
+                              )
                             }
                           />
                         ) : field.type === "select" ? (
                           <select
                             value={String(value)}
                             onChange={(event) =>
-                              replaceConfig((current) => ({
-                                ...current,
-                                [field.key]: event.target.value,
-                              }))
+                              replaceConfig((current) =>
+                                setConfigValue(
+                                  current,
+                                  field.key,
+                                  event.target.value,
+                                ),
+                              )
                             }
                           >
                             {(field.options ?? []).map((option) => (
@@ -1331,13 +1341,15 @@ export function App() {
                             max={field.max}
                             step={field.step}
                             onChange={(event) =>
-                              replaceConfig((current) => ({
-                                ...current,
-                                [field.key]:
+                              replaceConfig((current) =>
+                                setConfigValue(
+                                  current,
+                                  field.key,
                                   field.type === "number"
                                     ? Number(event.target.value)
                                     : event.target.value,
-                              }))
+                                ),
+                              )
                             }
                           />
                         )}

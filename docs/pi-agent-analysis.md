@@ -2,6 +2,8 @@
 
 > 整理时间：2026-08-03
 > 素材来源：pi.dev 官方站点、Mario Zechner 博客《What I learned building an opinionated and minimal coding agent》（2025-11-30）、Armin Ronacher 博客、GitHub 源码（system-prompt.ts / cache-stats.ts / exec.ts）、多篇第三方评测。
+>
+> **源码级深化见 `docs/pi-core-analysis.md`**（2026-08-05，基于 pi@v0.83.0 逐文件对照，含落地优先级）。
 
 ---
 

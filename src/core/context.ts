@@ -14,6 +14,8 @@ export interface ContextManagerOptions {
   keepRecentUserTurns?: number;
   memoryLineLimit?: number;
   stateDir?: string;
+  /** 注入其他项目记忆标题索引；处理敏感项目的用户可关闭（behavior.crossProjectMemory） */
+  crossProjectMemory?: boolean;
 }
 
 export interface PreparedContext {
@@ -27,6 +29,7 @@ export class ContextManager {
   readonly #keepRecentUserTurns: number;
   readonly #memoryLineLimit: number;
   readonly #stateDir: string;
+  readonly #crossProjectMemory: boolean;
   #todos: TodoItem[] = [];
   #repoMap: RepoMap | null = null;
   /** RepoMap 首次获取后固化的快照：RepoMap 内部有 TTL 缓存，文件改动后会重建，
@@ -46,6 +49,7 @@ export class ContextManager {
     this.#memoryLineLimit = options.memoryLineLimit ?? 200;
     this.#stateDir =
       options.stateDir ?? path.join(this.#homeDir, ".myagent");
+    this.#crossProjectMemory = options.crossProjectMemory ?? true;
   }
 
   setTodos(todos: TodoItem[]): void {
@@ -161,6 +165,7 @@ export class ContextManager {
   }
 
   async #buildCrossProjectMemoryIndex(): Promise<string> {
+    if (!this.#crossProjectMemory) return "";
     const projectsDir = path.join(this.#stateDir, "projects");
     let projectKeys: string[];
     try {

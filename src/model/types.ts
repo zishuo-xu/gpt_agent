@@ -24,6 +24,8 @@ export interface ModelResponse {
   text: string;
   toolCalls: ToolCall[];
   usage: ModelUsage;
+  /** 供应商原始终止原因（Anthropic stop_reason / OpenAI finish_reason） */
+  stopReason?: string;
   model?: string;
   providerId?: string;
   pricing?: ModelPricing;
@@ -42,6 +44,9 @@ export interface CompletionRequest {
   /** 本次请求注入的工具集；缺省时由客户端决定（全量编码工具）。
       同一模型会话内必须固定，否则破坏 prompt cache 前缀。 */
   tools?: ToolDefinition[];
+  /** 缓存写入策略（参照 Pi cacheRetention）：摘要等一次性辅助请求用 "none"
+      省略 cache_control，避免污染主会话缓存前缀。缺省 "default"（正常写缓存）。 */
+  cacheRetention?: "default" | "none";
 }
 
 export type StreamChunk =

@@ -35,20 +35,59 @@ async function readChildPid(pidFile: string): Promise<number | undefined> {
   return undefined;
 }
 
+test("输出截断时全量 stdout/stderr 落盘并返回 fullOutputPath", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-"));
+  const payload = "A".repeat(100_000);
+  const result = await runBash(
+    `${process.execPath} -e "process.stdout.write('${payload}')"`,
+    { cwd: directory, timeoutMs: 30_000 },
+  );
+  const details = result.details as Record<string, unknown>;
+  assert.equal(typeof details.fullOutputPath, "string", "截断时应落盘全量输出");
+  const full = await readFile(String(details.fullOutputPath), "utf8");
+  assert.ok(full.includes(payload), "落盘内容应为全量输出");
+  const output = result.output as { stdout: string; stderr: string };
+  assert.ok(
+    output.stdout.length < 200_000,
+    "模型可见的 output 仍是截断版",
+  );
+  assert.match(String(result.summary), /完整输出/, "summary 提示完整输出路径");
+});
+
+test("未截断的输出不落盘", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-"));
+  const result = await runBash(`echo hello`, {
+    cwd: directory,
+    timeoutMs: 10_000,
+  });
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.fullOutputPath, undefined);
+});
+
 function longRunningCommand(pidFile: string): string {
   return `${process.execPath} -e "require('fs').writeFileSync('${pidFile}', String(process.pid)); setInterval(() => {}, 1000)"`;
 }
 
-test("Abort 会先 kill 子进程再以 AbortError 拒绝", async () => {
+test("Abort 会 kill 子进程并返回已收集的部分输出", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-"));
   const pidFile = path.join(directory, "child.pid");
   const controller = new AbortController();
-  const running = runBash(longRunningCommand(pidFile), {
-    cwd: directory,
-    signal: controller.signal,
-  });
-  setTimeout(() => controller.abort(), 100);
-  await assert.rejects(running, { name: "AbortError" });
+  const running = runBash(
+    `${process.execPath} -e "console.log('started'); require('fs').writeFileSync('${pidFile}', String(process.pid)); setInterval(() => {}, 1000)"`,
+    {
+      cwd: directory,
+      signal: controller.signal,
+    },
+  );
+  setTimeout(() => controller.abort(), 150);
+  const result = await running;
+  assert.equal(result.aborted, true, "abort 应标记 aborted");
+  assert.equal(result.isError, true);
+  assert.match(
+    String((result.output as { stdout: string }).stdout),
+    /started/,
+    "已收集的部分输出应保留，不因中止而丢弃",
+  );
 
   const pid = await readChildPid(pidFile);
   assert.ok(pid, "子进程应已启动并记录 pid");
@@ -59,14 +98,24 @@ test("Abort 会先 kill 子进程再以 AbortError 拒绝", async () => {
   );
 });
 
-test("Bash 超时也会 kill 子进程并以 AbortError 拒绝", async () => {
+test("Bash 超时也会 kill 子进程并返回已收集的部分输出", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-timeout-"));
   const pidFile = path.join(directory, "child.pid");
-  const running = runBash(longRunningCommand(pidFile), {
-    cwd: directory,
-    timeoutMs: 100,
-  });
-  await assert.rejects(running, { name: "AbortError" });
+  const result = await runBash(
+    `${process.execPath} -e "console.log('started'); require('fs').writeFileSync('${pidFile}', String(process.pid)); setInterval(() => {}, 1000)"`,
+    { cwd: directory, timeoutMs: 100 },
+  );
+  assert.equal(result.isError, true);
+  assert.equal(
+    (result.details as { timedOut?: boolean }).timedOut,
+    true,
+    "超时应在 details 标记 timedOut",
+  );
+  assert.match(
+    String((result.output as { stdout: string }).stdout),
+    /started/,
+    "已收集的部分输出应保留",
+  );
 
   const pid = await readChildPid(pidFile);
   assert.ok(pid, "子进程应已启动并记录 pid");
@@ -120,6 +169,28 @@ test("后台孙进程继承管道句柄时仍快速返回（不挂住）", async
       // 进程已自行退出
     }
   }
+});
+
+test("孙进程持续输出时排空定时器随 data 续期，完整收集不截断", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-renew-"));
+  // sh 立即退出；孙进程每 300ms 输出一行共 10 行（约 3s，超过旧固定 2s 排空窗口）。
+  // 排空定时器必须在 data 到达时续期，否则尾部输出被截断（参照 Pi waitForChildProcess）
+  const command = `${process.execPath} -e "let i=0; const t=setInterval(()=>{console.log('line'+(i++)); if(i>=10) clearInterval(t)}, 300)" & echo done`;
+  const startedAt = Date.now();
+  const result = await runBash(command, {
+    cwd: directory,
+    timeoutMs: 60_000,
+  });
+  const elapsed = Date.now() - startedAt;
+  assert.ok(
+    elapsed < 15_000,
+    `应在排空窗口内返回（实际 ${elapsed}ms）`,
+  );
+  assert.match(result.summary, /命令退出：0/);
+  assert.doesNotMatch(result.summary, /输出可能不完整/);
+  const stdout = String((result.output as { stdout: string }).stdout);
+  assert.match(stdout, /done/);
+  assert.match(stdout, /line9/, "持续输出的尾部应被完整收集");
 });
 
 test("background 命令立即返回且进程在后台运行", async () => {

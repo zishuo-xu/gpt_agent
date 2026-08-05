@@ -47,7 +47,12 @@ test("429/5xx 按指数退避重试并尊重 Retry-After", async () => {
 
   assert.equal((await client.complete(request())).text, "ok");
   assert.equal(calls, 3);
-  assert.deepEqual(delays, [3_000, 2_000]);
+  // retryAfter 优先（3s），不受 jitter 影响；指数退避项 ×25% 向下抖动（2000×0.75~1.0）
+  assert.equal(delays[0], 3_000);
+  assert.ok(
+    delays[1]! >= 1_500 && delays[1]! <= 2_000,
+    `指数退避应带 25% 向下抖动，实际 ${delays[1]}`,
+  );
 });
 
 test("非瞬时错误不重试，重试耗尽返回可识别错误", async () => {

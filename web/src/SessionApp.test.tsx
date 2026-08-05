@@ -1,7 +1,7 @@
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { buildDisplayItems } from "./SessionApp";
+import { buildDisplayItems, toolResultDiffText } from "./SessionApp";
 import type { SessionEvent } from "./SessionApp";
 
 /**
@@ -16,6 +16,30 @@ const ts = "2026-08-01T10:00:00.000Z";
 function ev(seq: number, event: Record<string, unknown> & { type: string }): SessionEvent {
   return { seq, ts, event } as SessionEvent;
 }
+
+/**
+ * 模拟真实用户输入：经原型 setter 写值（绕过 React 19 实例级 value 追踪器——
+ * 直接赋值会同步 tracker，导致 onChange 的 change-detection 判定无变化），
+ * 再派发 input 事件触发 React 合成 onChange。
+ */
+function typeInto(input: HTMLInputElement, value: string) {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!
+    .set!.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+describe("toolResultDiffText（P0-3 diff 渲染取数）", () => {
+  it("优先取 details.diff，其次回退 output", () => {
+    assert.equal(
+      toolResultDiffText({ output: "旧输出", details: { diff: "新 diff" } }),
+      "新 diff",
+    );
+    assert.equal(toolResultDiffText({ output: "旧 trace 输出" }), "旧 trace 输出");
+    assert.equal(toolResultDiffText({ details: { diff: 42 } }), undefined);
+    assert.equal(toolResultDiffText(undefined), undefined);
+    assert.equal(toolResultDiffText({}), undefined);
+  });
+});
 
 describe("buildDisplayItems（会话回放事件流转换）", () => {
   it("用户消息渲染为 user message，带 queueId 的 user 事件不单独展示", () => {
@@ -245,7 +269,7 @@ describe("SessionListSidebar（会话列表交互）", () => {
     return { container, root, act, calls };
   }
 
-  function makeSession(id: string, title: string): Record<string, unknown> {
+  function makeSession(id: string, title: string, firstMessage?: string): Record<string, unknown> {
     return {
       id,
       title,
@@ -260,6 +284,7 @@ describe("SessionListSidebar（会话列表交互）", () => {
       todos: [],
       toolCallCount: 0,
       kind: "interactive",
+      ...(firstMessage ? { firstMessage } : {}),
     };
   }
 
@@ -315,4 +340,73 @@ describe("SessionListSidebar（会话列表交互）", () => {
     assert.match(container.querySelector(".sidebar-empty")?.textContent ?? "", /还没有会话/);
     await act(async () => root.unmount());
   });
+
+  it("按标题或首条消息过滤会话，无匹配时提示", async () => {
+    const s1 = makeSession("s1", "缓存优化", "修复登录超时问题");
+    const s2 = makeSession("s2", "权限修复");
+    const { container, root, act } = await setup({
+      sessions: [s1, s2],
+      selectedId: "",
+    });
+    const input = container.querySelector(
+      "input.sidebar-search",
+    ) as HTMLInputElement;
+    assert.ok(input, "应渲染搜索框");
+
+    await act(async () => {
+      typeInto(input, "缓存");
+    });
+    let buttons = Array.from(
+      container.querySelectorAll("button.sidebar-session"),
+    );
+    assert.equal(buttons.length, 1);
+    assert.equal(buttons[0]?.textContent, "缓存优化");
+
+    // firstMessage 匹配
+    await act(async () => {
+      typeInto(input, "登录超时");
+    });
+    buttons = Array.from(
+      container.querySelectorAll("button.sidebar-session"),
+    );
+    assert.equal(buttons.length, 1, "应命中 firstMessage 匹配的会话");
+    assert.equal(buttons[0]?.textContent, "缓存优化");
+
+    // 无匹配提示
+    await act(async () => {
+      typeInto(input, "不存在的关键词");
+    });
+    assert.match(
+      container.querySelector(".sidebar-empty")?.textContent ?? "",
+      /无匹配/,
+    );
+    await act(async () => root.unmount());
+  });
+
+  it("清空搜索词恢复完整列表", async () => {
+    const { container, root, act } = await setup({
+      sessions: [makeSession("s1", "甲"), makeSession("s2", "乙")],
+      selectedId: "",
+    });
+    const input = container.querySelector(
+      "input.sidebar-search",
+    ) as HTMLInputElement;
+    await act(async () => {
+      typeInto(input, "甲");
+    });
+    assert.equal(
+      container.querySelectorAll("button.sidebar-session").length,
+      1,
+    );
+    await act(async () => {
+      typeInto(input, "");
+    });
+    assert.equal(
+      container.querySelectorAll("button.sidebar-session").length,
+      2,
+      "清空搜索后应恢复全部会话",
+    );
+    await act(async () => root.unmount());
+  });
 });
+

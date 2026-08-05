@@ -35,7 +35,8 @@ export interface PermissionConfig {
 
 export interface ContextConfig {
   compactAtEstimatedTokens: number;
-  keepRecentTurns: number;
+  /** 压缩后保留的最近 token 预算（参照 Pi keepRecentTokens，默认 20k） */
+  keepRecentTokens: number;
 }
 
 export interface ServerConfig {
@@ -47,6 +48,15 @@ export interface NotifyConfig {
   webhook: string;
 }
 
+export interface BehaviorConfig {
+  /** 每轮缓存 miss 提示（tokens/费用）开关；默认关（参照 Pi showCacheMissNotices） */
+  showCacheMissNotices: boolean;
+  /** 工具并行执行试点（参照 Pi 默认并行）；批次含审批需求时自动退化为串行 */
+  parallelTools: boolean;
+  /** 注入其他项目记忆标题索引；处理敏感项目的用户可关闭 */
+  crossProjectMemory: boolean;
+}
+
 export interface MyAgentConfig {
   providers: ModelProviderConfig[];
   models: Record<ModelRole, RoleModelConfig>;
@@ -54,6 +64,7 @@ export interface MyAgentConfig {
   context: ContextConfig;
   server: ServerConfig;
   notify: NotifyConfig;
+  behavior: BehaviorConfig;
   [key: string]: unknown;
 }
 
@@ -70,6 +81,7 @@ export interface PublicMyAgentConfig {
   context: ContextConfig;
   server: ServerConfig;
   notify: NotifyConfig;
+  behavior: BehaviorConfig;
   [key: string]: unknown;
 }
 
@@ -149,6 +161,33 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
       "任务完成 / 出错 / 审批超时推送到外部（企业微信机器人、飞书机器人、Bark 或任意接受 JSON POST 的网关）。留空则不推送。",
     hot: true,
   },
+  {
+    key: "behavior.showCacheMissNotices",
+    type: "boolean",
+    title: "缓存 miss 提示",
+    description:
+      "每轮显示缓存未命中浪费（tokens/费用）。默认关闭避免刷屏；压缩导致的缓存重置说明不受此开关影响。",
+    default: false,
+    hot: true,
+  },
+  {
+    key: "behavior.parallelTools",
+    type: "boolean",
+    title: "工具并行执行",
+    description:
+      "同一轮内多个无需审批的工具并发执行（参照 Pi）。批次含审批需求时自动退化为串行；默认关闭（试点）。",
+    default: false,
+    hot: true,
+  },
+  {
+    key: "behavior.crossProjectMemory",
+    type: "boolean",
+    title: "跨项目记忆联想",
+    description:
+      "向当前会话注入其他项目记忆的标题索引，判断相关时模型可自行调取全文。处理敏感项目时可关闭。",
+    default: true,
+    hot: true,
+  },
 ];
 
 export const DEFAULT_CONFIG: MyAgentConfig = {
@@ -175,7 +214,7 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
   },
   context: {
     compactAtEstimatedTokens: 90_000,
-    keepRecentTurns: 4,
+    keepRecentTokens: 20_000,
   },
   server: {
     host: "127.0.0.1",
@@ -183,6 +222,11 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
   },
   notify: {
     webhook: "",
+  },
+  behavior: {
+    showCacheMissNotices: false,
+    parallelTools: false,
+    crossProjectMemory: true,
   },
 };
 

@@ -113,8 +113,8 @@ test("端到端：修复 bug 完整工作流（todo + 读取 + 搜索 + 编辑 +
     ], { input: 1200, output: 200, cached: 0 }),
 
     response("先看看测试文件和源码。", [
-      call("read-test", "Read", "tests/math.test.ts", { filePath: "tests/math.test.ts" }),
-      call("read-src", "Read", "src/math.ts", { filePath: "src/math.ts" }),
+      call("read-test", "Read", "tests/math.test.ts", { file_path: "tests/math.test.ts" }),
+      call("read-src", "Read", "src/math.ts", { file_path: "src/math.ts" }),
     ], { input: 1500, output: 80, cached: 800 }),
 
     response("搜索一下是否有其他文件引用了 add 函数。", [
@@ -123,9 +123,9 @@ test("端到端：修复 bug 完整工作流（todo + 读取 + 搜索 + 编辑 +
 
     response("找到问题了：add 函数用了减法。修复它。", [
       call("edit-1", "Edit", "src/math.ts", {
-        filePath: "src/math.ts",
-        oldString: "  return a - b;",
-        newString: "  return a + b;",
+        file_path: "src/math.ts",
+        old_string: "  return a - b;",
+        new_string: "  return a + b;",
       }),
       call("todo-2", "TodoWrite", "3 items", {
         todos: [
@@ -216,13 +216,13 @@ test("端到端：strict 档多步审批流程", async () => {
 
   const mainClient = new ScriptedClient([
     response("先读取文件。", [
-      call("read-strict", "Read", "src/math.ts", { filePath: "src/math.ts" }),
+      call("read-strict", "Read", "src/math.ts", { file_path: "src/math.ts" }),
     ]),
     response("我来修改文件。", [
       call("edit-strict", "Edit", "src/math.ts", {
-        filePath: "src/math.ts",
-        oldString: "  return a - b;",
-        newString: "  return a + b;",
+        file_path: "src/math.ts",
+        old_string: "  return a - b;",
+        new_string: "  return a + b;",
       }),
     ]),
     response("运行验证。", [
@@ -289,10 +289,10 @@ test("端到端：无人值守任务盒预算耗尽触发优雅终止", async ()
 
   const mainClient = new ScriptedClient([
     response("开始工作。", [
-      call("read-run", "Read", "src/math.ts", { filePath: "src/math.ts" }),
+      call("read-run", "Read", "src/math.ts", { file_path: "src/math.ts" }),
     ], { input: 5000, output: 100, cached: 0 }),
     response("继续分析。", [
-      call("read-run-2", "Read", "tests/math.test.ts", { filePath: "tests/math.test.ts" }),
+      call("read-run-2", "Read", "tests/math.test.ts", { file_path: "tests/math.test.ts" }),
     ], { input: 5000, output: 100, cached: 0 }),
     response("还在工作。", [
       call("grep-run", "Grep", "add", { pattern: "add", path: cwd }),

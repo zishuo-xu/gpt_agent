@@ -4,13 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ToolExecutor } from "../tools/executor.js";
-import { AgentLoop, type AgentModel, type ModelTurn } from "./agent-loop.js";
+import { AgentLoop, shouldShowCacheMissNotice, type AgentModel, type ModelTurn } from "./agent-loop.js";
 import { AgentEventBus } from "./events.js";
 import { PermissionEngine } from "./permissions.js";
-import type { AgentEvent, ToolCall } from "./types.js";
+import type { AgentEvent, ToolCall, ToolExecutionResult } from "./types.js";
 
 class ScriptedModel implements AgentModel {
   #turns: ModelTurn[];
+  /** acceptToolResult 回灌记录（用于断言工具结果如何反馈模型） */
+  readonly results: Array<{ call: ToolCall; isError: boolean }> = [];
 
   constructor(turns: ModelTurn[]) {
     this.#turns = [...turns];
@@ -18,6 +20,14 @@ class ScriptedModel implements AgentModel {
 
   async next(): Promise<ModelTurn> {
     return this.#turns.shift() ?? { done: true };
+  }
+
+  acceptToolResult(
+    call: ToolCall,
+    _result: ToolExecutionResult,
+    isError = false,
+  ): void {
+    this.results.push({ call, isError });
   }
 }
 
@@ -43,16 +53,16 @@ test("AgentLoop 完成 Read → Edit → Bash → done 纵向闭环", async () =
     {
       text: "先读取文件。",
       toolCalls: [
-        toolCall("read-1", "Read", "sample.txt", { filePath: "sample.txt" }),
+        toolCall("read-1", "Read", "sample.txt", { file_path: "sample.txt" }),
       ],
     },
     {
       text: "执行精确编辑。",
       toolCalls: [
         toolCall("edit-1", "Edit", "sample.txt", {
-          filePath: "sample.txt",
-          oldString: "before",
-          newString: "after",
+          file_path: "sample.txt",
+          old_string: "before",
+          new_string: "after",
         }),
       ],
     },
@@ -92,7 +102,10 @@ test("AgentLoop 完成 Read → Edit → Bash → done 纵向闭环", async () =
   );
   assert.equal(editResult?.type, "tool_result");
   if (editResult?.type === "tool_result") {
-    assert.match(String(editResult.output), /-before\n\+after/);
+    // diff 移出 output（模型上下文），完整 diff 在 details 供 UI 渲染
+    assert.doesNotMatch(String(editResult.output), /-before/);
+    const details = editResult.details as { diff?: unknown };
+    assert.match(String(details.diff), /-before\n\+after/);
   }
 });
 
@@ -218,16 +231,16 @@ test("strict 编辑审批在落盘前携带真实 diff", async () => {
     {
       toolCalls: [
         toolCall("read-config", "Read", "config.txt", {
-          filePath: "config.txt",
+          file_path: "config.txt",
         }),
       ],
     },
     {
       toolCalls: [
         toolCall("edit-config", "Edit", "config.txt", {
-          filePath: "config.txt",
-          oldString: "port=3000",
-          newString: "port=8080",
+          file_path: "config.txt",
+          old_string: "port=3000",
+          new_string: "port=8080",
         }),
       ],
     },
@@ -363,8 +376,8 @@ test("steer 打断点一：当前工具完成后拒绝本批剩余调用且不�
       nextCalls += 1;
       return {
         toolCalls: [
-          toolCall("read-a", "Read", "a.txt", { filePath: "a.txt" }),
-          toolCall("read-b", "Read", "b.txt", { filePath: "b.txt" }),
+          toolCall("read-a", "Read", "a.txt", { file_path: "a.txt" }),
+          toolCall("read-b", "Read", "b.txt", { file_path: "b.txt" }),
         ],
         done: true,
       };
@@ -457,4 +470,306 @@ test("steer 解锁挂起审批：拒绝后直接结束本批且不发 done", asy
     0,
   );
   assert.equal(events.some((event) => event.type === "done"), false);
+});
+
+test("缓存 miss 提示显示阈值（参照 Pi：<20k tokens 且 <¥0.1 不显示）", () => {
+  assert.equal(shouldShowCacheMissNotice(19_999, 0), false);
+  assert.equal(shouldShowCacheMissNotice(20_000, 0), true);
+  assert.equal(shouldShowCacheMissNotice(0, 0.09), false);
+  assert.equal(shouldShowCacheMissNotice(0, 0.1), true);
+  assert.equal(shouldShowCacheMissNotice(5_000, 0.2), true);
+  assert.equal(shouldShowCacheMissNotice(5_000, 0.05), false);
+});
+
+test("turn 级 auto-retry：瞬时错误退避重试成功并发出 notify", async () => {
+  let calls = 0;
+  const model: AgentModel = {
+    async next() {
+      calls += 1;
+      if (calls === 1) throw new Error("upstream 500 Internal Server Error");
+      return { text: "重试成功", done: true };
+    },
+  };
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor(process.cwd()),
+    approve: async () => ({ granted: true }),
+    retryBaseDelayMs: 1,
+  });
+  await loop.run();
+  assert.equal(calls, 2, "瞬时错误后应自动重试一次");
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "notify" && /自动重试/.test(event.message),
+    ),
+    "应发出重试 notify",
+  );
+  assert.ok(events.some((event) => event.type === "done"));
+});
+
+test("turn 级 auto-retry：连续失败重试耗尽后 run 抛错", async () => {
+  let calls = 0;
+  const model: AgentModel = {
+    async next() {
+      calls += 1;
+      throw new Error("fetch failed");
+    },
+  };
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor(process.cwd()),
+    approve: async () => ({ granted: true }),
+    retryBaseDelayMs: 1,
+    retryMaxRetries: 3,
+  });
+  await assert.rejects(loop.run(), /fetch failed/);
+  assert.equal(calls, 4, "初始 1 次 + 重试 3 次");
+  assert.equal(
+    events.filter((event) => event.type === "notify").length,
+    3,
+    "每次重试前发出 notify",
+  );
+});
+
+test("quota 类错误不重试（fail-closed）", async () => {
+  let calls = 0;
+  const model: AgentModel = {
+    async next() {
+      calls += 1;
+      throw new Error("insufficient_quota");
+    },
+  };
+  const loop = new AgentLoop({
+    bus: new AgentEventBus(),
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor(process.cwd()),
+    approve: async () => ({ granted: true }),
+    retryBaseDelayMs: 1,
+  });
+  await assert.rejects(loop.run(), /insufficient_quota/);
+  assert.equal(calls, 1, "quota 错误不应重试");
+});
+
+test("overflow 错误：先压缩再重试一次", async () => {
+  let calls = 0;
+  let compactCalls = 0;
+  const model: AgentModel = {
+    async next() {
+      calls += 1;
+      if (calls === 1) {
+        throw new Error("This model's maximum context length is 200000 tokens");
+      }
+      return { text: "压缩后重试成功", done: true };
+    },
+    async compact() {
+      compactCalls += 1;
+      return true;
+    },
+  };
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor(process.cwd()),
+    approve: async () => ({ granted: true }),
+    retryBaseDelayMs: 1,
+  });
+  await loop.run();
+  assert.equal(compactCalls, 1, "overflow 应触发一次压缩");
+  assert.equal(calls, 2);
+  assert.ok(
+    events.some((event) => event.type === "notify" && /上下文超长/.test(event.message)),
+  );
+});
+
+test("重试期间 abort：立即中止且不再发起请求", async () => {
+  let calls = 0;
+  const model: AgentModel = {
+    async next() {
+      calls += 1;
+      throw new Error("fetch failed");
+    },
+  };
+  const loop = new AgentLoop({
+    bus: new AgentEventBus(),
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor(process.cwd()),
+    approve: async () => ({ granted: true }),
+    retryBaseDelayMs: 50_000, // 长退避：确保 abort 发生在 sleep 中
+  });
+  const running = loop.run();
+  setTimeout(() => loop.interrupt(), 10);
+  await running; // abort 后应正常返回而非抛错
+  assert.ok(calls >= 1);
+});
+
+test("并行模式：同一批无需审批的工具并发执行（总时长 < 串行总和）", async () => {
+  const model = new ScriptedModel([
+    {
+      text: "",
+      toolCalls: [
+        toolCall("p1", "Bash", "sleep 0.4", { command: "sleep 0.4" }),
+        toolCall("p2", "Bash", "sleep 0.4", { command: "sleep 0.4" }),
+      ],
+    },
+    { text: "并行完成", done: true },
+  ]);
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const loop = new AgentLoop({
+    bus,
+    model,
+    // trust 档：Bash 默认放行（normal 档 Bash 需审批，批次会退化为串行——审批优先）
+    permissions: new PermissionEngine("trust"),
+    tools: new ToolExecutor(process.cwd()),
+    approve: async () => ({ granted: true }),
+    parallelTools: true,
+  });
+  const startedAt = Date.now();
+  await loop.run();
+  const elapsed = Date.now() - startedAt;
+  assert.ok(
+    elapsed < 700,
+    `两个 0.4s 命令应并发执行（实际 ${elapsed}ms）`,
+  );
+  assert.equal(
+    events.filter((event) => event.type === "tool_result").length,
+    2,
+  );
+});
+
+test("并行模式：批次含 ask 工具时退化为串行并正常审批", async () => {
+  let approveCalls = 0;
+  const model = new ScriptedModel([
+    {
+      text: "",
+      toolCalls: [
+        toolCall("s1", "Edit", "src/a.ts", {
+          file_path: "src/a.ts",
+          old_string: "a",
+          new_string: "b",
+        }),
+        toolCall("s2", "Read", "src/b.ts", { file_path: "src/b.ts" }),
+      ],
+    },
+    { text: "串行完成", done: true },
+  ]);
+  const loop = new AgentLoop({
+    bus: new AgentEventBus(),
+    model,
+    permissions: new PermissionEngine("strict"),
+    tools: new ToolExecutor(process.cwd()),
+    approve: async () => {
+      approveCalls += 1;
+      return { granted: true };
+    },
+    parallelTools: true,
+  });
+  await loop.run();
+  assert.equal(approveCalls, 1, "Edit 应走审批");
+});
+
+test("并行模式：deny 在并行路径被拒绝且不执行", async () => {
+  let executed = 0;
+  const model = new ScriptedModel([
+    {
+      text: "",
+      toolCalls: [
+        toolCall("d1", "Bash", "rm -rf /tmp/x", { command: "rm -rf /tmp/x" }),
+        toolCall("d2", "Read", "src/a.ts", { file_path: "src/a.ts" }),
+      ],
+    },
+    { text: "完成", done: true },
+  ]);
+  const tools = new ToolExecutor(process.cwd());
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, signal) => {
+    executed += 1;
+    return await originalExecute(call, signal);
+  };
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("trust", [
+      { effect: "deny", pattern: "Bash(rm -rf *)" },
+    ]),
+    tools,
+    approve: async () => ({ granted: true }),
+    parallelTools: true,
+  });
+  await loop.run();
+  assert.equal(executed, 1, "deny 的工具不应执行");
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "permission_denied" &&
+        event.call.id === "d1",
+    ),
+  );
+});
+
+test("截断回合（stopReason=max_tokens）工具调用全部判失败且不执行", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-trunc-"));
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([
+    {
+      text: "先读取文件，但输出被截断",
+      stopReason: "max_tokens",
+      toolCalls: [
+        toolCall("t-1", "Read", "a.ts", { file_path: "a.ts" }),
+        toolCall("t-2", "Grep", "TODO", { pattern: "TODO", path: "." }),
+      ],
+    },
+    { text: "收到失败结果后总结", done: true },
+  ]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("trust"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: true }),
+  });
+  await loop.run();
+
+  // 两个工具调用均以失败回灌模型，且实际未执行
+  assert.equal(model.results.length, 2);
+  assert.ok(model.results.every((item) => item.isError), "截断回合工具应全部判失败");
+  assert.deepEqual(
+    model.results.map((item) => item.call.id),
+    ["t-1", "t-2"],
+  );
+  // 事件流：每个调用都有 tool_call + tool_result(isError)，无成功结果
+  const toolResults = events.filter((event) => event.type === "tool_result");
+  assert.equal(toolResults.length, 2);
+  assert.ok(
+    toolResults.every(
+      (event) =>
+        event.type === "tool_result" &&
+        event.isError === true &&
+        String(event.summary).includes("截断"),
+    ),
+  );
+  assert.equal(events.at(-1)?.type, "done");
 });

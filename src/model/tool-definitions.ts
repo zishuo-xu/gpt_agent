@@ -36,7 +36,7 @@ export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        file_path: { type: "string", description: "Absolute or project-relative path" },
+        file_path: { type: "string", minLength: 1, description: "Absolute or project-relative path" },
         offset: {
           type: "number",
           description: "One-based first line. Defaults to 1.",
@@ -57,7 +57,7 @@ export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        pattern: { type: "string", description: "Regular expression" },
+        pattern: { type: "string", minLength: 1, description: "Regular expression" },
         path: {
           type: "string",
           description: "Project-relative file or directory. Defaults to .",
@@ -86,7 +86,7 @@ export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        pattern: { type: "string" },
+        pattern: { type: "string", minLength: 1 },
         path: {
           type: "string",
           description: "Project-relative directory. Defaults to .",
@@ -137,10 +137,12 @@ export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
       properties: {
         description: {
           type: "string",
+          minLength: 1,
           description: "Short task label",
         },
         prompt: {
           type: "string",
+          minLength: 1,
           description:
             "Complete standalone instructions, expected evidence, and output format",
         },
@@ -160,9 +162,9 @@ export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        file_path: { type: "string" },
-        old_string: { type: "string" },
-        new_string: { type: "string" },
+        file_path: { type: "string", minLength: 1 },
+        old_string: { type: "string", minLength: 1 },
+        new_string: { type: "string", minLength: 1 },
         replace_all: { type: "boolean" },
       },
       required: ["file_path", "old_string", "new_string"],
@@ -176,14 +178,15 @@ export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        file_path: { type: "string" },
+        file_path: { type: "string", minLength: 1 },
         edits: {
           type: "array",
+          minItems: 1,
           items: {
             type: "object",
             properties: {
-              old_string: { type: "string" },
-              new_string: { type: "string" },
+              old_string: { type: "string", minLength: 1 },
+              new_string: { type: "string", minLength: 1 },
               replace_all: { type: "boolean" },
             },
             required: ["old_string", "new_string"],
@@ -202,8 +205,8 @@ export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        file_path: { type: "string" },
-        content: { type: "string" },
+        file_path: { type: "string", minLength: 1 },
+        content: { type: "string", minLength: 1 },
       },
       required: ["file_path", "content"],
       additionalProperties: false,
@@ -216,7 +219,7 @@ export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        command: { type: "string" },
+        command: { type: "string", minLength: 1 },
         timeout_ms: {
           type: "number",
           description: "Optional timeout in milliseconds",

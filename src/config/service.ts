@@ -331,6 +331,10 @@ function mergeLayers(
     ...((global.notify ?? {}) as Record<string, unknown>),
     ...((project.notify ?? {}) as Record<string, unknown>),
   };
+  merged.behavior = {
+    ...((global.behavior ?? {}) as Record<string, unknown>),
+    ...((project.behavior ?? {}) as Record<string, unknown>),
+  };
   return merged;
 }
 
@@ -431,15 +435,19 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
         ? config.permissions.approvalTimeoutMs
         : 300_000,
   };
+  const rawContext = config.context as Record<string, unknown> | undefined;
   const context: ContextConfig = {
     compactAtEstimatedTokens:
       typeof config.context?.compactAtEstimatedTokens === "number"
         ? config.context.compactAtEstimatedTokens
         : 90_000,
-    keepRecentTurns:
-      typeof config.context?.keepRecentTurns === "number"
-        ? config.context.keepRecentTurns
-        : 4,
+    // 旧配置 keepRecentTurns（保留 N 轮）迁移：按每轮约 5k tokens 换算
+    keepRecentTokens:
+      typeof config.context?.keepRecentTokens === "number"
+        ? config.context.keepRecentTokens
+        : typeof rawContext?.keepRecentTurns === "number"
+          ? (rawContext.keepRecentTurns as number) * 5_000
+          : 20_000,
   };
   const rawConfig = config as Record<string, unknown>;
   const normalized: MyAgentConfig = {
@@ -466,6 +474,12 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
         typeof config.notify?.webhook === "string"
           ? config.notify.webhook
           : "",
+    },
+    behavior: {
+      showCacheMissNotices:
+        config.behavior?.showCacheMissNotices === true,
+      parallelTools: config.behavior?.parallelTools === true,
+      crossProjectMemory: config.behavior?.crossProjectMemory !== false,
     },
   };
   for (const field of CONFIG_SCHEMA) {
@@ -522,6 +536,14 @@ function mergeSecrets(
     ),
     notify: structuredClone(
       incoming.notify ?? existing.notify ?? { webhook: "" },
+    ),
+    behavior: structuredClone(
+      incoming.behavior ??
+        existing.behavior ?? {
+          showCacheMissNotices: false,
+          parallelTools: false,
+          crossProjectMemory: true,
+        },
     ),
   };
   for (const field of CONFIG_SCHEMA) {
@@ -638,10 +660,10 @@ function validateConfig(config: MyAgentConfig): void {
     issues.push("context.compactAtEstimatedTokens 不能小于 1000");
   }
   if (
-    !Number.isInteger(config.context.keepRecentTurns) ||
-    config.context.keepRecentTurns < 1
+    !Number.isInteger(config.context.keepRecentTokens) ||
+    config.context.keepRecentTokens < 1_000
   ) {
-    issues.push("context.keepRecentTurns 必须是正整数");
+    issues.push("context.keepRecentTokens 不能小于 1000");
   }
   if (issues.length > 0) throw new ConfigValidationError(issues);
 }

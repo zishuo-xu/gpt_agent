@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
@@ -20,6 +21,18 @@ function call(
   return { id, tool, target, args };
 }
 
+function runGit(cwd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", args, { cwd });
+    child.on("error", reject);
+    child.on("close", (code) =>
+      code === 0
+        ? resolve()
+        : reject(new Error(`git ${args.join(" ")} 退出码 ${code}`)),
+    );
+  });
+}
+
 test("Read 返回行号并支持 offset/limit 续读", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-read-"));
   await writeFile(
@@ -30,7 +43,7 @@ test("Read 返回行号并支持 offset/limit 续读", async () => {
   const executor = new ToolExecutor(cwd);
   const result = await executor.execute(
     call("read-page", "Read", "sample.txt", {
-      filePath: "sample.txt",
+      file_path: "sample.txt",
       offset: 2,
       limit: 2,
     }),
@@ -84,6 +97,156 @@ test("Grep 与 Glob 返回文件行号证据并跳过依赖目录", async () => 
   assert.equal(glob.output, "src/auth.ts");
 });
 
+test("Edit/Write 结果将 diff 移出 output（模型只见 summary，diff 进 details）", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-diffout-"));
+  await writeFile(path.join(cwd, "sample.txt"), "before\n", "utf8");
+  const executor = new ToolExecutor(cwd);
+  const signal = new AbortController().signal;
+
+  // Edit 语义要求先 Read 目标文件
+  await executor.execute(
+    call("read", "Read", "sample.txt", { file_path: "sample.txt" }),
+    signal,
+  );
+  const edit = await executor.execute(
+    call("edit", "Edit", "sample.txt", {
+      file_path: "sample.txt",
+      old_string: "before",
+      new_string: "after",
+    }),
+    signal,
+  );
+  assert.match(String(edit.output), /已编辑/, "output 应为简短 summary");
+  assert.doesNotMatch(
+    String(edit.output),
+    /-before|\+after/,
+    "diff 不应进入模型上下文",
+  );
+  assert.match(
+    String((edit.details as { diff?: unknown }).diff),
+    /-before\n\+after/,
+    "完整 diff 进 details 供 UI 渲染",
+  );
+
+  const write = await executor.execute(
+    call("write", "Write", "new.txt", {
+      file_path: "new.txt",
+      content: "line1\nline2\n",
+    }),
+    signal,
+  );
+  assert.match(String(write.output), /已写入/, "Write output 应为简短 summary");
+  assert.match(String(write.output), /字节/, "Write 只报字节数（Pi 同款）");
+  assert.doesNotMatch(String(write.output), /line1/);
+  assert.equal(
+    (write.details as { diff?: unknown }).diff,
+    undefined,
+    "Write 不产生 diff（避免事件流持久化膨胀）",
+  );
+});
+
+test("git 仓库内 Grep/Glob 走 git 文件列表并遵循 .gitignore", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-gitsearch-"));
+  await mkdir(path.join(cwd, "src"), { recursive: true });
+  await mkdir(path.join(cwd, "tmp"), { recursive: true });
+  await writeFile(
+    path.join(cwd, ".gitignore"),
+    "tmp/\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(cwd, "src", "auth.ts"),
+    "export const TOKEN = 1;\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(cwd, "tmp", "scratch.ts"),
+    "export const TOKEN = 2;\n",
+    "utf8",
+  );
+  await runGit(cwd, ["init", "-q"]);
+  await runGit(cwd, ["add", "src/auth.ts", ".gitignore"]);
+  const executor = new ToolExecutor(cwd);
+  const signal = new AbortController().signal;
+
+  const grep = await executor.execute(
+    call("grep", "Grep", "TOKEN", {
+      pattern: "TOKEN",
+      path: ".",
+      glob: "**/*.ts",
+    }),
+    signal,
+  );
+  assert.match(String(grep.output), /src\/auth\.ts:1:/);
+  assert.doesNotMatch(String(grep.output), /scratch\.ts|tmp\//);
+
+  const glob = await executor.execute(
+    call("glob", "Glob", "**/*.ts", {
+      pattern: "**/*.ts",
+      path: ".",
+    }),
+    signal,
+  );
+  assert.equal(glob.output, "src/auth.ts");
+});
+
+test("非 git 目录按 .gitignore 规则过滤（目录前缀与 glob 模式）", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-ig-"));
+  await mkdir(path.join(cwd, "src"), { recursive: true });
+  await mkdir(path.join(cwd, "tmp"), { recursive: true });
+  await mkdir(path.join(cwd, "sub", "tmp"), { recursive: true });
+  await writeFile(path.join(cwd, ".gitignore"), "tmp/\n*.log\n", "utf8");
+  await writeFile(
+    path.join(cwd, "src", "a.ts"),
+    "const marker = 'TRACE-IN-SRC';\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(cwd, "tmp", "junk.log"),
+    "TRACE-IN-TMP-LOG\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(cwd, "debug.log"),
+    "TRACE-IN-DEBUG\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(cwd, "sub", "tmp", "x.txt"),
+    "TRACE-IN-NESTED\n",
+    "utf8",
+  );
+  const executor = new ToolExecutor(cwd);
+  const signal = new AbortController().signal;
+
+  const grep = await executor.execute(
+    call("grep", "Grep", "TRACE", {
+      pattern: "TRACE",
+      path: ".",
+    }),
+    signal,
+  );
+  assert.match(String(grep.output), /src\/a\.ts:1:/);
+  assert.doesNotMatch(
+    String(grep.output),
+    /junk\.log|debug\.log|nested|x\.txt/,
+  );
+
+  const glob = await executor.execute(
+    call("glob", "Glob", "**/*", {
+      pattern: "**/*",
+      path: ".",
+    }),
+    signal,
+  );
+  // .gitignore 自身不被忽略（与 git 语义一致），被忽略的文件均不出现
+  assert.match(String(glob.output), /src\/a\.ts/);
+  assert.doesNotMatch(
+    String(glob.output),
+    /junk\.log|debug\.log|x\.txt/,
+  );
+});
+
 test("TodoWrite 保存全量快照并拒绝多个进行中任务", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-todo-"));
   const executor = new ToolExecutor(cwd);
@@ -121,13 +284,13 @@ test("Write 可原子创建尚不存在的父目录", async () => {
   const executor = new ToolExecutor(cwd);
   const result = await executor.execute(
     call("write-memory", "Write", ".myagent/memory/pitfalls.md", {
-      filePath: ".myagent/memory/pitfalls.md",
+      file_path: ".myagent/memory/pitfalls.md",
       content: "- verified fact\n",
     }),
     new AbortController().signal,
   );
 
-  assert.match(String(result.output), /新建/);
+  assert.match(String(result.output), /已写入/);
   assert.equal(
     await readFile(
       path.join(cwd, ".myagent", "memory", "pitfalls.md"),
@@ -152,7 +315,7 @@ test("Grep caseInsensitive:true 匹配不同大小写", async () => {
     call("grep-ci", "Grep", "hello", {
       pattern: "hello",
       path: ".",
-      caseInsensitive: true,
+      case_insensitive: true,
     }),
     signal,
   );
@@ -177,7 +340,7 @@ test("Grep caseInsensitive:false 只匹配精确大小写", async () => {
     call("grep-cs", "Grep", "parse", {
       pattern: "parse",
       path: ".",
-      caseInsensitive: false,
+      case_insensitive: false,
     }),
     signal,
   );

@@ -141,7 +141,7 @@ export class AtomicFileTools {
 
   async multiEdit(
     filePath: string,
-    edits: Array<{ oldString: string; newString: string; replaceAll?: boolean }>,
+    edits: Array<{ old_string: string; new_string: string; replace_all?: boolean }>,
     signal?: AbortSignal,
   ): Promise<string> {
     this.#assertRead(filePath);
@@ -153,7 +153,7 @@ export class AtomicFileTools {
 
   async previewMultiEdit(
     filePath: string,
-    edits: Array<{ oldString: string; newString: string; replaceAll?: boolean }>,
+    edits: Array<{ old_string: string; new_string: string; replace_all?: boolean }>,
   ): Promise<string> {
     this.#assertRead(filePath);
     const before = await readFile(filePath, "utf8");
@@ -253,22 +253,22 @@ function applyEdit(
 
 function applyMultiEdit(
   before: string,
-  edits: Array<{ oldString: string; newString: string; replaceAll?: boolean }>,
+  edits: Array<{ old_string: string; new_string: string; replace_all?: boolean }>,
 ): string {
   let after = before;
   for (const edit of edits) {
-    const occurrences = after.split(edit.oldString).length - 1;
+    const occurrences = after.split(edit.old_string).length - 1;
     if (occurrences === 0) {
       throw new Error("MultiEdit 中的 old_string 未找到");
     }
-    if (!edit.replaceAll && occurrences !== 1) {
+    if (!edit.replace_all && occurrences !== 1) {
       throw new Error(
         `MultiEdit 中的 old_string 匹配 ${occurrences} 处`,
       );
     }
-    after = edit.replaceAll
-      ? after.split(edit.oldString).join(edit.newString)
-      : after.replace(edit.oldString, edit.newString);
+    after = edit.replace_all
+      ? after.split(edit.old_string).join(edit.new_string)
+      : after.replace(edit.old_string, edit.new_string);
   }
   return after;
 }

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ToolCall, ToolExecutionResult } from "../core/types.js";
-import { buildSystemPrompt, ConversationAgentModel } from "./agent-model.js";
+import {
+  buildSystemPrompt,
+  ConversationAgentModel,
+  findCompactionCutPoint,
+  sanitizeMessages,
+} from "./agent-model.js";
 import { EXPLORE_TOOL_NAMES } from "./tool-definitions.js";
 import type {
   CompletionRequest,
@@ -63,6 +68,21 @@ function response(
     usage: { input, output, cached: 1 },
   };
 }
+
+test("next() 透传 stopReason 到 ModelTurn", async () => {
+  const client = new CapturingClient([
+    {
+      text: "内容被输出长度截断",
+      toolCalls: [],
+      usage: { input: 10, output: 3, cached: 1 },
+      stopReason: "max_tokens",
+    },
+  ]);
+  const model = new ConversationAgentModel(client, []);
+  const turn = await model.next(new AbortController().signal);
+  assert.equal(turn.text, "内容被输出长度截断");
+  assert.equal(turn.stopReason, "max_tokens");
+});
 
 test("配置 onTextDelta 后走流式路径并逐段回调", async () => {
   const streamClient = new StreamingClient([
@@ -137,7 +157,7 @@ test("setCompactionClient 替换压缩客户端", async () => {
   model.configureCompaction({
     client: cheapFirst,
     thresholdTokens: 100,
-    keepRecentTurns: 1,
+    keepRecentTokens: 100,
     onCompacted: () => undefined,
   });
   await model.compact(new AbortController().signal, true);
@@ -155,7 +175,7 @@ test("硬压缩使用 cheap 模型摘要并保留最近对话", async () => {
     history.push({ role: "user", content: `用户问题 ${index}` });
     history.push({
       role: "assistant",
-      content: `助手回答 ${index} ${"x".repeat(200)}`,
+      content: `助手回答 ${index} ${"x".repeat(1000)}`,
       toolCalls: [],
     });
   }
@@ -178,7 +198,8 @@ test("硬压缩使用 cheap 模型摘要并保留最近对话", async () => {
   model.configureCompaction({
     client: cheap,
     thresholdTokens: 1,
-    keepRecentTurns: 2,
+    // 每轮 ≈ 260+ tokens：预算 400 恰好保留最近 2 轮（4 个 user 消息中的后 2 个）
+    keepRecentTokens: 400,
     onCompacted: (result) => {
       compacted = result;
     },
@@ -258,7 +279,7 @@ test("压缩请求不携带工具 schema", async () => {
   model.configureCompaction({
     client: cheap,
     thresholdTokens: 1,
-    keepRecentTurns: 2,
+    keepRecentTokens: 100,
     onCompacted: () => undefined,
   });
   await model.next(new AbortController().signal);
@@ -309,4 +330,144 @@ test("工具结果 details 供事件层透传，不进入模型上下文", async
   );
   assert.ok(serialized.includes("hi"), "output 应正常回灌模型");
   assert.ok(serialized.includes("退出码 0"), "summary 应正常回灌模型");
+});
+
+test("压缩切点按 token 预算并保持轮次完整（tool 不与其 assistant 拆开）", () => {
+  const messages: ConversationMessage[] = [
+    { role: "user", content: "u1" },
+    {
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        { id: "t1", tool: "Read", target: "a.ts", args: { filePath: "a.ts" } },
+      ],
+    },
+    {
+      role: "tool",
+      toolCallId: "t1",
+      toolName: "Read",
+      target: "a.ts",
+      content: "r1",
+    },
+    { role: "user", content: "u2" },
+    { role: "assistant", content: `a2 ${"x".repeat(2000)}`, toolCalls: [] },
+    { role: "user", content: "u3" },
+    {
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        { id: "t3", tool: "Bash", target: "ls", args: { command: "ls" } },
+      ],
+    },
+    {
+      role: "tool",
+      toolCallId: "t3",
+      toolName: "Bash",
+      target: "ls",
+      content: "r3",
+    },
+  ];
+  // 预算穿越第二轮（大消息）：切点必须回退到 u2，recent 从轮次起点开始
+  const cut = findCompactionCutPoint(messages, 300);
+  assert.ok(cut !== null);
+  assert.equal(messages[cut]!.role, "user");
+  assert.equal(messages[cut]!.content, "u2");
+});
+
+test("会话小于保留预算或无可压缩时返回 null", () => {
+  const small: ConversationMessage[] = [
+    { role: "user", content: "hi" },
+    { role: "assistant", content: "hello", toolCalls: [] },
+  ];
+  assert.equal(findCompactionCutPoint(small, 100_000), null);
+  assert.equal(findCompactionCutPoint([], 100), null);
+  assert.equal(
+    findCompactionCutPoint([{ role: "user", content: "only" }], 10),
+    null,
+  );
+  // 切点回退到头部（摘要消息本身）时不可压缩
+  const summaryOnly: ConversationMessage[] = [
+    { role: "user", content: "[会话压缩摘要] old" },
+    { role: "assistant", content: "a", toolCalls: [] },
+  ];
+  assert.equal(findCompactionCutPoint(summaryOnly, 10), null);
+});
+
+test("sanitizeMessages：不合规 toolCallId 重写为 Anthropic 合规格式且映射一致", () => {
+  const messages: ConversationMessage[] = [
+    {
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        {
+          id: "call_abc.def!xyz",
+          tool: "Read",
+          target: "a.ts",
+          args: { filePath: "a.ts" },
+        },
+        { id: "ok_id_123", tool: "Bash", target: "ls", args: { command: "ls" } },
+      ],
+    },
+    {
+      role: "tool",
+      toolCallId: "call_abc.def!xyz",
+      toolName: "Read",
+      target: "a.ts",
+      content: "内容",
+    },
+    {
+      role: "tool",
+      toolCallId: "ok_id_123",
+      toolName: "Bash",
+      target: "ls",
+      content: "内容2",
+    },
+  ];
+  const sanitized = sanitizeMessages(messages);
+  const assistant = sanitized[0] as Extract<ConversationMessage, { role: "assistant" }>;
+  const rewritten = assistant.toolCalls.find(
+    (call) => call.target === "a.ts",
+  )!;
+  assert.match(rewritten.id, /^[a-zA-Z0-9_-]{1,64}$/, "重写后必须合规");
+  assert.notEqual(rewritten.id, "call_abc.def!xyz", "不合规 id 必须被重写");
+  const okCall = assistant.toolCalls.find((call) => call.target === "ls")!;
+  assert.equal(okCall.id, "ok_id_123", "已合规 id 保持不变");
+  const tool = sanitized.find(
+    (message) =>
+      message.role === "tool" &&
+      (message as Extract<ConversationMessage, { role: "tool" }>).target === "a.ts",
+  ) as Extract<ConversationMessage, { role: "tool" }>;
+  assert.equal(tool.toolCallId, rewritten.id, "tool 消息的 toolCallId 同步重写");
+  // 原消息不被修改（不可变）
+  const original = messages[0] as Extract<ConversationMessage, { role: "assistant" }>;
+  assert.equal(original.toolCalls[0]!.id, "call_abc.def!xyz");
+});
+
+test("sanitizeMessages：空 content 的 tool 消息补占位", () => {
+  const messages: ConversationMessage[] = [
+    {
+      role: "tool",
+      toolCallId: "t1",
+      toolName: "Bash",
+      target: "ls",
+      content: "",
+    },
+    {
+      role: "tool",
+      toolCallId: "t2",
+      toolName: "Read",
+      target: "a.ts",
+      content: "正常内容",
+    },
+  ];
+  const sanitized = sanitizeMessages(messages);
+  assert.equal(
+    (sanitized[0] as Extract<ConversationMessage, { role: "tool" }>).content,
+    "No result provided",
+  );
+  assert.equal(
+    (sanitized[1] as Extract<ConversationMessage, { role: "tool" }>).content,
+    "正常内容",
+    "非空内容不受影响",
+  );
 });

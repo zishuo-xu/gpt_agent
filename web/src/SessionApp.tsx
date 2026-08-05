@@ -56,6 +56,7 @@ interface SessionSummary {
   todos: Todo[];
   toolCallCount: number;
   kind: "interactive" | "run";
+  firstMessage?: string;
 }
 
 export interface SessionEvent {
@@ -121,6 +122,9 @@ export function SessionApp() {
   const [error, setError] = useState("");
   const [replay, setReplay] = useState(false);
   const [replayCursor, setReplayCursor] = useState(0);
+  /** 缓存 miss 提示开关（behavior.showCacheMissNotices；默认关，参照 Pi） */
+  const [showCacheMissNotices, setShowCacheMissNotices] =
+    useState(false);
   const [runBoundsPreview, setRunBoundsPreview] =
     useState<RunBoundsPreview | null>(null);
   const chatStreamRef = useRef<HTMLDivElement>(null);
@@ -245,6 +249,18 @@ export function SessionApp() {
       const payload = await response.json();
       setProjects((payload.projects ?? []) as ProjectEntry[]);
       setCurrentProject((current) => current || (payload.defaultKey ?? ""));
+    })();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      const response = await fetch("/api/config/effective");
+      if (!response.ok) return;
+      const payload = await response.json();
+      setShowCacheMissNotices(
+        (payload.config as { behavior?: { showCacheMissNotices?: boolean } })
+          ?.behavior?.showCacheMissNotices === true,
+      );
     })();
   }, []);
 
@@ -692,6 +708,7 @@ export function SessionApp() {
                     >
                       <ItemCard
                         item={item}
+                        showCacheMissNotices={showCacheMissNotices}
                         locallyResolved={resolvedPermissions}
                         feedback={
                           item.kind === "approval"
@@ -1051,6 +1068,15 @@ export function SessionListSidebar(props: {
   onSelect: (id: string) => void;
   onNew: () => void;
 }) {
+  const [search, setSearch] = useState("");
+  const keyword = search.trim().toLowerCase();
+  const visible = keyword
+    ? props.sessions.filter(
+        (session) =>
+          session.title.toLowerCase().includes(keyword) ||
+          (session.firstMessage ?? "").toLowerCase().includes(keyword),
+      )
+    : props.sessions;
   return (
     <aside className="sidebar session-list-sidebar">
       <div className="brand">
@@ -1060,11 +1086,20 @@ export function SessionListSidebar(props: {
       <button className="sidebar-new" onClick={props.onNew}>
         ＋ 新会话
       </button>
+      <input
+        className="sidebar-search"
+        type="search"
+        placeholder="搜索会话…"
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+      />
       <div className="sidebar-sessions" aria-label="会话列表">
-        {props.sessions.length === 0 && (
-          <div className="sidebar-empty">还没有会话</div>
+        {visible.length === 0 && (
+          <div className="sidebar-empty">
+            {props.sessions.length === 0 ? "还没有会话" : "无匹配会话"}
+          </div>
         )}
-        {props.sessions.map((session) => {
+        {visible.map((session) => {
           const active = session.id === props.selectedId;
           const status = statusMeta[session.status];
           return (
@@ -1263,6 +1298,18 @@ export type DisplayItem =
   | { kind: "system"; seq: number; text: string; tone?: string };
 
 /**
+ * 工具结果显示文本：优先 details.diff（P0-3 后 Edit/Write 的 diff 移入 details，
+ * 不进模型上下文），旧 trace 的 tool_result 无 details.diff 时回退 output。
+ */
+export function toolResultDiffText(
+  result: Record<string, any> | undefined,
+): string | undefined {
+  const details = result?.details as Record<string, unknown> | undefined;
+  if (typeof details?.diff === "string") return details.diff;
+  return typeof result?.output === "string" ? result.output : undefined;
+}
+
+/**
  * 事件流 → 显示条目：单次遍历完成 delta 合并、call/result 配对、
  * 审批 resolved 判定，渲染层不再做 O(n) 回看。
  */
@@ -1357,6 +1404,13 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
             ` · 自事件 #${event.forkSeq} 分裂`,
         );
         break;
+      case "branch_summarized":
+        system(
+          seq,
+          `⇄ 分支摘要（来自 #${String(event.fromBranchId)}）：` +
+            String(event.summary).replace(/\n/g, " ").slice(0, 120),
+        );
+        break;
       case "context_compacted":
         system(seq, `上下文已压缩 · 保留 ${(event.ratio * 100).toFixed(1)}%`);
         break;
@@ -1420,6 +1474,8 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
 
 function ItemCard(props: {
   item: DisplayItem;
+  /** 缓存 miss 提示开关（behavior.showCacheMissNotices；默认关） */
+  showCacheMissNotices: boolean;
   locallyResolved: Set<string>;
   feedback: string;
   onFeedback: (callId: string, value: string) => void;
@@ -1430,7 +1486,7 @@ function ItemCard(props: {
     feedback?: string,
   ) => Promise<void>;
 }) {
-  const { item } = props;
+  const { item, showCacheMissNotices } = props;
 
   if (item.kind === "message") {
     return (
@@ -1493,6 +1549,8 @@ function ItemCard(props: {
                 {Object.entries(
                   result.details as Record<string, unknown>,
                 ).map(([key, value]) => {
+                  // diff 单独渲染为高亮块，不进 details 网格
+                  if (key === "diff") return null;
                   // Bash 退出码着色（0 绿/非 0 红），耗时转可读格式
                   const toneClass =
                     key === "code" && typeof value === "number"
@@ -1520,16 +1578,21 @@ function ItemCard(props: {
                 })}
               </div>
             )}
-          {typeof result?.output === "string" && (
-            <DiffOrOutput
-              text={result.output}
-              forceDiff={
-                call.tool === "Edit" ||
-                call.tool === "Write" ||
-                call.tool === "MultiEdit"
-              }
-            />
-          )}
+          {(() => {
+            // P0-3 后 Edit/Write diff 在 details.diff（不进模型上下文），渲染优先取它；
+            // 旧 trace 的 tool_result 无 details.diff 时回退 output
+            const text = toolResultDiffText(result);
+            return text === undefined ? null : (
+              <DiffOrOutput
+                text={text}
+                forceDiff={
+                  call.tool === "Edit" ||
+                  call.tool === "Write" ||
+                  call.tool === "MultiEdit"
+                }
+              />
+            );
+          })()}
           {result?.output &&
             typeof result.output === "object" && (
               <pre className="tool-output">
@@ -1660,10 +1723,18 @@ function ItemCard(props: {
     // 缓存浪费度量（参照 Pi 的 cache-stats）：区分合法失效（压缩）与异常失效
     const missed = Number(event.missedTokens ?? 0);
     const missedCostCny = Number(event.missedCostCny ?? 0);
+    // 显示门控：压缩重置属合法信息始终提示；其余 miss 提示需开启开关且超过显示阈值
+    const showMiss =
+      missed > 0 &&
+      (event.missedReason === "compaction" ||
+        (showCacheMissNotices &&
+          (missed >= 20_000 || missedCostCny >= 0.1)));
     const missedCostLabel =
-      missedCostCny > 0 ? `（多花 ¥${missedCostCny.toFixed(4)}）` : "";
+      showMiss && missedCostCny > 0
+        ? `（多花 ¥${missedCostCny.toFixed(4)}）`
+        : "";
     const missedLabel =
-      missed <= 0
+      !showMiss
         ? ""
         : event.missedReason === "compaction"
           ? " · 缓存已重置（压缩）"

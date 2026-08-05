@@ -1420,6 +1420,26 @@ select {
   filter: brightness(1.08);
 }
 
+.sidebar-search {
+  margin: 0 14px 10px;
+  padding: 8px 10px;
+  border: 1px solid #2c3442;
+  border-radius: 7px;
+  background: #141a24;
+  color: #c3cbda;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.sidebar-search:focus {
+  border-color: #7597ff;
+}
+
+.sidebar-search::placeholder {
+  color: #5a6474;
+}
+
 .sidebar-sessions {
   flex: 1;
   overflow-y: auto;

@@ -31,6 +31,9 @@ test("Web API 暴露 Schema 和脱敏配置", async () => {
       "server.host",
       "server.password",
       "notify.webhook",
+      "behavior.showCacheMissNotices",
+      "behavior.parallelTools",
+      "behavior.crossProjectMemory",
     ],
   );
 

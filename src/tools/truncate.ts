@@ -2,6 +2,8 @@ export interface TruncateOptions {
   maxLines?: number;
   maxChars?: number;
   continuationHint?: string;
+  /** 尾部优先：头尾预算比例互换（Bash 等错误/结果在尾部的输出，参照 Pi truncateTail） */
+  preferTail?: boolean;
 }
 
 export interface ToolOutputLimits {
@@ -40,14 +42,16 @@ export function truncateToolText(
     return { text: value, truncated: false, omittedLines: 0 };
   }
 
-  const headBudget = Math.floor(maxChars * 0.58);
-  const tailBudget = Math.floor(maxChars * 0.32);
+  const headBudget = Math.floor(maxChars * (options.preferTail ? 0.32 : 0.58));
+  const tailBudget = Math.floor(maxChars * (options.preferTail ? 0.58 : 0.32));
   const headLines: string[] = [];
   const tailLines: string[] = [];
   let headChars = 0;
   let tailChars = 0;
   const lineBudget = Math.max(2, maxLines - 1);
-  const headLineBudget = Math.ceil(lineBudget * 0.6);
+  const headLineBudget = options.preferTail
+    ? Math.ceil(lineBudget * 0.4)
+    : Math.ceil(lineBudget * 0.6);
   const tailLineBudget = lineBudget - headLineBudget;
 
   for (

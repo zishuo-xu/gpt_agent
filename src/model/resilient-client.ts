@@ -78,8 +78,11 @@ export class ResilientModelClient implements ModelClient {
           error instanceof ModelHttpError
             ? error.retryAfterMs
             : undefined;
+        // 25% 向下抖动（参照 Pi getRetryDelayMs：delay × (1 - random×0.25)），
+        // 避免多会话同步失败时同时重试
+        const jittered = backoff * (1 - Math.random() * 0.25);
         await this.#sleep(
-          Math.max(backoff, retryAfter ?? 0),
+          Math.max(jittered, retryAfter ?? 0),
           request.signal,
         );
       }

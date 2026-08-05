@@ -1,5 +1,8 @@
 import type { AgentEventBus } from "./events.js";
-import type { PermissionEngine } from "./permissions.js";
+import {
+  PermissionEngine,
+  type PermissionVerdict,
+} from "./permissions.js";
 import type {
   ApprovalHandler,
   ModelPricing,
@@ -7,12 +10,15 @@ import type {
   ToolExecutionResult,
 } from "./types.js";
 import type { ToolExecutor } from "../tools/executor.js";
+import { classifyModelError } from "../model/retry-policy.js";
 
 export interface ModelTurn {
   text?: string;
   toolCalls?: ToolCall[];
   done?: boolean;
   question?: string;
+  /** 供应商原始终止原因（Anthropic max_tokens / OpenAI length 等） */
+  stopReason?: string;
   usage?: { input: number; output: number; cached: number };
   usagePricing?: ModelPricing;
   fallbacks?: Array<{
@@ -28,6 +34,8 @@ export interface ModelTurn {
 
 export interface AgentModel {
   next(signal: AbortSignal): Promise<ModelTurn>;
+  /** 上下文超长（overflow）时的压缩重试（可选）：AgentLoop 在 overflow 错误时调用 */
+  compact?(signal: AbortSignal, force?: boolean): Promise<boolean>;
   acceptToolResult?(
     call: ToolCall,
     result: ToolExecutionResult,
@@ -55,6 +63,12 @@ export interface AgentLoopOptions {
   maxTurns?: number;
   /** 会话内压缩发生次数（缓存浪费度量区分合法失效用）；由 ConversationAgentModel 提供 */
   modelCompactCount?: () => number;
+  /** turn 级自动重试次数（参照 Pi auto-retry）；默认 3 */
+  retryMaxRetries?: number;
+  /** turn 级重试基础退避（指数 ×2）；默认 2000ms */
+  retryBaseDelayMs?: number;
+  /** 工具并行执行（参照 Pi 默认 parallel）：同一批全部无需审批时并发执行 */
+  parallelTools?: boolean;
   recordTrace?: (trace: {
     request?: unknown;
     response?: unknown;
@@ -84,6 +98,9 @@ export class AgentLoop {
   readonly #recordTrace: AgentLoopOptions["recordTrace"];
   readonly #maxTurns: number | undefined;
   readonly #modelCompactCount: AgentLoopOptions["modelCompactCount"];
+  readonly #retryMaxRetries: number;
+  readonly #retryBaseDelayMs: number;
+  readonly #parallelTools: boolean;
   /** 缓存浪费度量状态：上一轮 input、上一轮时间、已见压缩数 */
   #prevInputTokens = 0;
   #prevTurnAtMs = 0;
@@ -106,6 +123,9 @@ export class AgentLoop {
     this.#recordTrace = options.recordTrace;
     this.#maxTurns = options.maxTurns;
     this.#modelCompactCount = options.modelCompactCount;
+    this.#retryMaxRetries = options.retryMaxRetries ?? 3;
+    this.#retryBaseDelayMs = options.retryBaseDelayMs ?? 2_000;
+    this.#parallelTools = options.parallelTools ?? false;
   }
 
   interrupt(): void {
@@ -118,6 +138,158 @@ export class AgentLoop {
       工具调用并结束循环，让会话优先处理插队的用户消息。 */
   steer(): void {
     this.#steerRequested = true;
+  }
+
+  /**
+   * 模型回合请求 + turn 级 auto-retry（参照 Pi 的 agent-session auto-retry）：
+   * - retry：瞬时错误（限流/5xx/网络）指数退避重试（2s/4s/8s，默认 3 次）；
+   * - overflow：上下文超长先压缩再重试一次；
+   * - fatal（quota/认证/未知）：不重试，抛给上层（fail-closed）。
+   * 失败回合不会污染模型上下文（ConversationAgentModel 仅在成功时 push 消息）。
+   */
+  async #requestTurn(signal: AbortSignal): Promise<ModelTurn> {
+    try {
+      return await this.#model.next(signal);
+    } catch (error) {
+      this.#recordModelError(error);
+      const policy = classifyModelError(error);
+      if (policy === "fatal" || signal.aborted) throw error;
+      const maxRetries =
+        policy === "overflow" ? 1 : this.#retryMaxRetries;
+      let lastError = error;
+      for (let retry = 1; retry <= maxRetries; retry += 1) {
+        const delayMs = this.#retryBaseDelayMs * 2 ** (retry - 1);
+        this.#bus.emit({
+          type: "notify",
+          level: "info",
+          message:
+            policy === "overflow"
+              ? "模型调用失败：上下文超长，正在压缩后自动重试"
+              : `模型调用失败（${errorMessageOf(lastError)}），${Math.round(delayMs / 1000)}s 后自动重试（${retry}/${maxRetries}）`,
+        });
+        await abortableSleep(delayMs, signal);
+        if (signal.aborted) break;
+        if (policy === "overflow") {
+          await this.#model.compact?.(signal, true).catch(() => false);
+        }
+        try {
+          return await this.#model.next(signal);
+        } catch (retryError) {
+          this.#recordModelError(retryError);
+          lastError = retryError;
+        }
+      }
+      throw lastError;
+    }
+  }
+
+  #recordModelError(error: unknown): void {
+    const trace = modelErrorTrace(error);
+    this.#recordTrace?.({
+      ...(trace?.request === undefined ? {} : { request: trace.request }),
+      response:
+        trace?.response ?? {
+          error:
+            error instanceof Error ? error.message : "未知模型错误",
+        },
+      tools: [],
+    });
+  }
+
+  /**
+   * 并行工具执行（参照 Pi 的 parallel 模式）：deny/finalOnly 直接拒绝（同步回灌），
+   * 其余并发执行；执行完成后按 assistant 原始顺序统一回灌事件与模型消息。
+   * 审批（ask）不在此路径——含 ask 的批次由调用方退化为串行。
+   */
+  async #executeBatchParallel(
+    verdicts: Array<{ call: ToolCall; verdict: PermissionVerdict }>,
+    turnPolicy: { stop?: boolean; finalOnly?: boolean } | undefined,
+    signal: AbortSignal,
+    traceTools: Array<{
+      call: ToolCall;
+      permission: string;
+      result?: unknown;
+      ms: number;
+    }>,
+  ): Promise<void> {
+    const executions = verdicts.map(async ({ call, verdict }) => {
+      const toolStartedAt = Date.now();
+      if (signal.aborted) {
+        return { call, verdict, state: "skipped" as const };
+      }
+      if (verdict === "deny") {
+        const reason = "命中 deny 规则，不能临时强制放行";
+        this.#bus.emit({ type: "permission_denied", call, reason });
+        this.#model.acceptToolDenied?.(call, reason);
+        return { call, verdict, state: "denied" as const, reason };
+      }
+      if (turnPolicy?.finalOnly) {
+        const reason = "任务盒已进入纯总结阶段，禁止继续调用工具";
+        this.#bus.emit({
+          type: "permission_denied",
+          call,
+          reason,
+        });
+        this.#model.acceptToolDenied?.(call, reason);
+        return { call, verdict, state: "denied" as const, reason };
+      }
+      try {
+        const result = await this.#tools.execute(call, signal);
+        return { call, verdict, state: "done" as const, result, toolStartedAt };
+      } catch (error) {
+        const result: ToolExecutionResult = {
+          summary:
+            error instanceof Error ? error.message : "工具执行发生未知错误",
+        };
+        return { call, verdict, state: "error" as const, result, toolStartedAt };
+      }
+    });
+    const settled = await Promise.all(executions);
+    for (const item of settled) {
+      const { call, verdict } = item;
+      if (item.state === "skipped") continue;
+      if (item.state === "denied") {
+        traceTools.push({
+          call,
+          permission: verdict === "deny" ? "deny" : "task_box_deny",
+          result: { error: item.reason },
+          ms: 0,
+        });
+        continue;
+      }
+      const result = item.result!;
+      this.#bus.emit({
+        type: "tool_result",
+        callId: call.id,
+        summary: result.summary,
+        ...(result.output === undefined ? {} : { output: result.output }),
+        ...(result.details === undefined
+          ? {}
+          : { details: result.details }),
+        ...(result.aborted === undefined ? {} : { aborted: result.aborted }),
+        ...(result.isError === undefined ? {} : { isError: result.isError }),
+      });
+      if (result.todoSnapshot) {
+        this.#bus.emit({
+          type: "todo_update",
+          todos: result.todoSnapshot,
+        });
+      }
+      this.#model.acceptToolResult?.(
+        call,
+        result,
+        result.isError ?? false,
+      );
+      traceTools.push({
+        call,
+        permission: verdict,
+        result: {
+          ...result,
+          output: result.traceOutput ?? result.output,
+        },
+        ms: Date.now() - item.toolStartedAt,
+      });
+    }
   }
 
   async run(): Promise<void> {
@@ -156,7 +328,7 @@ export class AgentLoop {
         }
         let turn: ModelTurn;
         try {
-          turn = await this.#model.next(signal);
+          turn = await this.#requestTurn(signal);
         } catch (error) {
           const trace = modelErrorTrace(error);
           this.#recordTrace?.({
@@ -267,7 +439,67 @@ export class AgentLoop {
           return;
         }
 
-        for (const call of turn.toolCalls ?? []) {
+        const calls = turn.toolCalls ?? [];
+        // 截断回合（Pi failToolCallsFromTruncatedMessage）：输出达到长度上限时
+        // 工具调用未完整生成（参数可能残缺），一律不执行，判失败回灌模型
+        if (isTruncatedStopReason(turn.stopReason) && calls.length > 0) {
+          const reason =
+            "回合输出被长度截断，工具调用未完整生成，判为失败";
+          for (const call of calls) {
+            this.#bus.emit({ type: "tool_call", call });
+            this.#bus.emit({
+              type: "tool_result",
+              callId: call.id,
+              summary: reason,
+              isError: true,
+            });
+            this.#model.acceptToolResult?.(
+              call,
+              { summary: reason },
+              true,
+            );
+            traceTools.push({
+              call,
+              permission: "truncated",
+              result: { error: reason },
+              ms: 0,
+            });
+          }
+          recordTurn();
+          continue;
+        }
+        // 并行试点：同一批全部预检通过（allow/deny、无 ask）时并发执行，
+        // 结果按原始顺序回灌（模型协议要求 tool 消息与 tool_use 顺序一致）
+        if (
+          this.#parallelTools &&
+          calls.length > 1 &&
+          !signal.aborted &&
+          !this.#steerRequested
+        ) {
+          const verdicts = calls.map((call) => ({
+            call,
+            verdict: this.#permissions.judge(call),
+          }));
+          if (verdicts.every((item) => item.verdict !== "ask")) {
+            await this.#executeBatchParallel(
+              verdicts,
+              turnPolicy,
+              signal,
+              traceTools,
+            );
+            recordTurn();
+            if (this.#steerRequested) {
+              return;
+            }
+            if (turn.done) {
+              this.#bus.emit({ type: "done" });
+              return;
+            }
+            continue;
+          }
+        }
+
+        for (const call of calls) {
           const toolStartedAt = Date.now();
           if (signal.aborted) {
             recordTurn();
@@ -439,6 +671,18 @@ export class AgentLoop {
  *
  * <1024 tokens 的 miss 视为 breakpoint 粒度噪音忽略。
  */
+/**
+ * 缓存 miss 提示的显示阈值（参照 Pi cache-stats 的 UI 显示规则）：
+ * missedTokens < 20_000 且 missedCostCny < 0.1 时视为噪音不显示。
+ * 注意：仅用于展示门控；会话累计（/cost、summary）不受影响。
+ */
+export function shouldShowCacheMissNotice(
+  missedTokens: number | undefined,
+  missedCostCny: number | undefined,
+): boolean {
+  return (missedTokens ?? 0) >= 20_000 || (missedCostCny ?? 0) >= 0.1;
+}
+
 export function computeMissedTokens(
   usage: { input: number; output: number; cached: number },
   prevInputTokens: number,
@@ -511,6 +755,39 @@ function modelErrorTrace(error: unknown):
     }
   ).agentTrace;
   return trace;
+}
+
+function errorMessageOf(error: unknown): string {
+  return error instanceof Error ? error.message : "未知模型错误";
+}
+
+/** 输出长度截断的终止原因（Anthropic stop_reason=max_tokens / OpenAI finish_reason=length） */
+function isTruncatedStopReason(reason: string | undefined): boolean {
+  return reason === "max_tokens" || reason === "length";
+}
+
+function abortableSleep(
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) {
+    return Promise.reject(
+      new DOMException("The operation was aborted", "AbortError"),
+    );
+  }
+  return new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(new DOMException("The operation was aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function riskFor(call: ToolCall): string {

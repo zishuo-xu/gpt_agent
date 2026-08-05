@@ -71,7 +71,7 @@ test("OpenAI-compatible 响应转换为统一工具调用", async () => {
     id: "call-1",
     tool: "Read",
     target: "src/app.ts",
-    args: { filePath: "src/app.ts" },
+    args: { file_path: "src/app.ts" },
   });
   assert.deepEqual(result.usage, { input: 120, output: 15, cached: 40 });
   assert.deepEqual(
@@ -91,6 +91,102 @@ test("OpenAI-compatible 响应转换为统一工具调用", async () => {
     ],
   );
   assert.equal(requestBody.messages[0].role, "system");
+});
+
+test("OpenAI-compatible 响应解析 finish_reason 为 stopReason", async () => {
+  const client = new ConfiguredModelClient(
+    provider("openai-compatible"),
+    "test-model",
+    async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "length",
+              message: { content: "内容被输出长度截断" },
+            },
+          ],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 20,
+            prompt_tokens_details: {},
+          },
+        }),
+        { status: 200 },
+      ),
+  );
+
+  const result = await client.complete({
+    system: "system",
+    messages: [{ role: "user", content: "检查代码" }],
+    signal: new AbortController().signal,
+  });
+  assert.equal(result.text, "内容被输出长度截断");
+  assert.equal(result.stopReason, "length");
+});
+
+test("Anthropic 响应解析 stop_reason 为 stopReason", async () => {
+  const client = new ConfiguredModelClient(
+    provider("anthropic"),
+    "test-model",
+    async () =>
+      new Response(
+        JSON.stringify({
+          stop_reason: "max_tokens",
+          content: [{ type: "text", text: "内容被截断" }],
+          usage: { input_tokens: 10, output_tokens: 20 },
+        }),
+        { status: 200 },
+      ),
+  );
+
+  const result = await client.complete({
+    system: "system",
+    messages: [{ role: "user", content: "检查代码" }],
+    signal: new AbortController().signal,
+  });
+  assert.equal(result.text, "内容被截断");
+  assert.equal(result.stopReason, "max_tokens");
+});
+
+test("cacheRetention=none 时 Anthropic 请求省略 cache_control（摘要不写缓存）", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    provider("anthropic"),
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "ok" }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+  const base = {
+    system: "system",
+    messages: [{ role: "user", content: "检查代码" }],
+    signal: new AbortController().signal,
+  };
+
+  await client.complete({ ...base, cacheRetention: "none" });
+  assert.equal(
+    requestBody.system[0].cache_control,
+    undefined,
+    "none 时 system 不写缓存",
+  );
+  const lastTool = requestBody.tools.at(-1);
+  assert.equal(lastTool.cache_control, undefined, "none 时工具定义不写缓存");
+
+  await client.complete({ ...base });
+  assert.deepEqual(requestBody.system[0].cache_control, {
+    type: "ephemeral",
+  });
+  assert.deepEqual(requestBody.tools.at(-1).cache_control, {
+    type: "ephemeral",
+  });
 });
 
 test("Anthropic tool_use 与 tool_result 正确往返", async () => {
@@ -138,7 +234,7 @@ test("Anthropic tool_use 与 tool_result 正确往返", async () => {
             id: "read-1",
             tool: "Read",
             target: "src/app.ts",
-            args: { filePath: "src/app.ts" },
+            args: { file_path: "src/app.ts" },
           },
         ],
       },
@@ -155,9 +251,9 @@ test("Anthropic tool_use 与 tool_result 正确往返", async () => {
 
   assert.equal(result.toolCalls[0]?.tool, "Edit");
   assert.deepEqual(result.toolCalls[0]?.args, {
-    filePath: "src/app.ts",
-    oldString: "before",
-    newString: "after",
+    file_path: "src/app.ts",
+    old_string: "before",
+    new_string: "after",
   });
   assert.deepEqual(result.usage, { input: 88, output: 19, cached: 12 });
   assert.equal(requestBody.messages[2].role, "user");
@@ -165,7 +261,7 @@ test("Anthropic tool_use 与 tool_result 正确往返", async () => {
   assert.equal(requestBody.tools[0].input_schema.type, "object");
 });
 
-test("模型误用 camelCase 键名时仍能解析，历史回传保持 wire 格式", async () => {
+test("模型参数原样透传，客户端不做键名转换（校验交给工具层 schema）", async () => {
   let requestBody: Record<string, any> = {};
   const client = new ConfiguredModelClient(
     provider("openai-compatible"),
@@ -184,7 +280,7 @@ test("模型误用 camelCase 键名时仍能解析，历史回传保持 wire 格
                     type: "function",
                     function: {
                       name: "Read",
-                      // 模型模仿历史键名后可能发出 camelCase
+                      // 模型可能发出任意键名，客户端不归一化
                       arguments: JSON.stringify({ filePath: "src/b.ts" }),
                     },
                   },
@@ -211,7 +307,7 @@ test("模型误用 camelCase 键名时仍能解析，历史回传保持 wire 格
             id: "call-1",
             tool: "Read",
             target: "src/a.ts",
-            args: { filePath: "src/a.ts", limit: 30 },
+            args: { file_path: "src/a.ts", limit: 30 },
           },
         ],
       },
@@ -226,9 +322,9 @@ test("模型误用 camelCase 键名时仍能解析，历史回传保持 wire 格
     signal: new AbortController().signal,
   });
 
-  // camelCase 入参被容错解析
+  // 入参原样透传（camelCase 键合法性由工具层 schema 校验拒绝，客户端不转换）
   assert.deepEqual(result.toolCalls[0]?.args, { filePath: "src/b.ts" });
-  // 历史回传必须是 schema 声明的 wire 键名，防止模型模仿 camelCase
+  // 历史回传同样原样（不经过任何键名转换）
   const echoed = JSON.parse(
     requestBody.messages[2].tool_calls[0].function.arguments,
   );
@@ -353,9 +449,9 @@ test("OpenAI 流式响应逐段推送 text_delta 并累积分片工具调用", a
             },
           ],
         }),
-        // 第三片：usage
+        // 第三片：usage + finish_reason（OpenAI 在最后一片的 choices 上带出）
         JSON.stringify({
-          choices: [],
+          choices: [{ delta: {}, finish_reason: "length" }],
           usage: {
             prompt_tokens: 100,
             completion_tokens: 30,
@@ -388,10 +484,11 @@ test("OpenAI 流式响应逐段推送 text_delta 并累积分片工具调用", a
       id: "call-1",
       tool: "Read",
       target: "src/app.ts",
-      args: { filePath: "src/app.ts" },
+      args: { file_path: "src/app.ts" },
     },
   ]);
   assert.deepEqual(done?.usage, { input: 100, output: 30, cached: 20 });
+  assert.equal(done?.stopReason, "length");
 });
 
 test("Anthropic 流式响应解析 content_block 事件并累积 input_json_delta", async () => {
@@ -481,10 +578,11 @@ test("Anthropic 流式响应解析 content_block 事件并累积 input_json_delt
       id: "tool-1",
       tool: "Edit",
       target: "src/app.ts",
-      args: { filePath: "src/app.ts", oldString: "a", newString: "b" },
+      args: { file_path: "src/app.ts", old_string: "a", new_string: "b" },
     },
   ]);
   assert.deepEqual(done?.usage, { input: 50, output: 25, cached: 10 });
+  assert.equal(done?.stopReason, "tool_use");
 });
 
 test("禁用供应商、缺少 Key 和未知模型会在请求前失败", () => {

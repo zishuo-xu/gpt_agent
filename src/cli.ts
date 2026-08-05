@@ -15,6 +15,7 @@ import {
   type MyAgentConfig,
 } from "./config/schema.js";
 import { AgentSessionManager } from "./core/session-manager.js";
+import { shouldShowCacheMissNotice } from "./core/agent-loop.js";
 import { AgentSession } from "./core/session.js";
 import {
   parseRunCommand,
@@ -49,6 +50,14 @@ if (process.argv.includes("--web")) {
 async function runCli(): Promise<void> {
   const cwd = process.cwd();
   const configService = new ConfigService({ cwd });
+  // 缓存 miss 提示开关（behavior.showCacheMissNotices，热生效；默认关闭）
+  let showCacheMissNotices = false;
+  const initialConfig = await configService.readEffective();
+  showCacheMissNotices =
+    initialConfig.behavior?.showCacheMissNotices === true;
+  configService.onChange((config) => {
+    showCacheMissNotices = config.behavior?.showCacheMissNotices === true;
+  });
   const manager = new AgentSessionManager({
     cwd,
     configService,
@@ -579,18 +588,30 @@ async function runCli(): Promise<void> {
       output.write(`  ${event.summary}\n`);
     }
     if (event.type === "cost_update") {
-      const missedLabel =
-        !event.missedTokens || event.missedTokens <= 0
-          ? ""
-          : event.missedReason === "compaction"
-            ? " · 缓存已重置（压缩）"
-            : event.missedReason === "model_switch"
-              ? ` · 缓存失效 ${event.missedTokens}（模型切换）`
-              : event.missedReason === "idle"
-                ? ` · 缓存过期 ${event.missedTokens}（空闲超时）`
-                : ` · 缓存未命中浪费 ${event.missedTokens}`;
+      // 显示门控（参照 Pi cache-stats）：压缩重置属合法信息始终提示；
+      // 其余 miss 提示需开启 behavior.showCacheMissNotices 且超过显示阈值
+      const hasMiss = Boolean(
+        event.missedTokens && event.missedTokens > 0,
+      );
+      const showMiss =
+        hasMiss &&
+        (event.missedReason === "compaction" ||
+          (showCacheMissNotices &&
+            shouldShowCacheMissNotice(
+              event.missedTokens,
+              event.missedCostCny,
+            )));
+      const missedLabel = !showMiss
+        ? ""
+        : event.missedReason === "compaction"
+          ? " · 缓存已重置（压缩）"
+          : event.missedReason === "model_switch"
+            ? ` · 缓存失效 ${event.missedTokens}（模型切换）`
+            : event.missedReason === "idle"
+              ? ` · 缓存过期 ${event.missedTokens}（空闲超时）`
+              : ` · 缓存未命中浪费 ${event.missedTokens}`;
       const missedCostLabel =
-        event.missedCostCny && event.missedCostCny > 0
+        showMiss && event.missedCostCny && event.missedCostCny > 0
           ? `（多花 ¥${event.missedCostCny.toFixed(4)}）`
           : "";
       output.write(
@@ -660,6 +681,15 @@ async function runCli(): Promise<void> {
           `${event.label ? `（${event.label}）` : ""}\n`,
       );
     }
+    if (event.type === "branch_summarized") {
+      const preview =
+        event.summary.length > 120
+          ? `${event.summary.slice(0, 120)}…`
+          : event.summary;
+      output.write(
+        `\n⇄ 分支摘要（来自 #${event.fromBranchId}，fork@#${event.forkSeq}）：\n  ${preview.replace(/\n/g, "\n  ")}\n`,
+      );
+    }
   }
 
   function subscribeToSession(target: AgentSession): () => void {
@@ -688,7 +718,7 @@ function formatEffectiveConfig(config: MyAgentConfig): string {
       `权限档：${config.permissions.mode} · 审批超时 ${config.permissions.approvalTimeoutMs}ms`,
       `权限规则：allow ${counts.allow} / ask ${counts.ask} / deny ${counts.deny}`,
       `角色模型：${modelRoles}`,
-      `上下文：压缩阈值 ${config.context.compactAtEstimatedTokens} tokens · 保留 ${config.context.keepRecentTurns} 轮`,
+      `上下文：压缩阈值 ${config.context.compactAtEstimatedTokens} tokens · 保留最近 ${config.context.keepRecentTokens} tokens`,
       `Web：host ${config.server.host}${config.server.password ? " · 已设访问密码" : ""}`,
     ].join("\n") + "\n"
   );

@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import { readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { CONFIG_SCHEMA } from "../config/schema.js";
+import { CONFIG_SCHEMA, toPublicConfig } from "../config/schema.js";
 import {
   ConfigService,
   ConfigValidationError,
@@ -162,6 +162,13 @@ export function createWebApp(
     return context.json({
       scope,
       config: await target.configService.readPublic(scope),
+    });
+  });
+
+  app.get("/api/config/effective", async (context) => {
+    const target = await resolveProject(context);
+    return context.json({
+      config: toPublicConfig(await target.configService.readEffective()),
     });
   });
 

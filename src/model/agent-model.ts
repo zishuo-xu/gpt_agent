@@ -74,7 +74,7 @@ export class ConversationAgentModel implements AgentModel {
     | {
         client: ModelClient;
         thresholdTokens: number;
-        keepRecentTurns: number;
+        keepRecentTokens: number;
         onCompacted: (result: CompactionResult) => void;
       }
     | undefined;
@@ -129,7 +129,7 @@ export class ConversationAgentModel implements AgentModel {
   configureCompaction(options: {
     client: ModelClient;
     thresholdTokens: number;
-    keepRecentTurns: number;
+    keepRecentTokens: number;
     onCompacted: (result: CompactionResult) => void;
   }): void {
     this.#compaction = options;
@@ -144,14 +144,14 @@ export class ConversationAgentModel implements AgentModel {
     if (!options) return false;
     const beforeTokens = this.estimatedTokens();
     if (!force && beforeTokens < options.thresholdTokens) return false;
-    const userIndexes = this.#messages
-      .map((message, index) => (message.role === "user" ? index : -1))
-      .filter((index) => index >= 0);
-    if (userIndexes.length <= options.keepRecentTurns) return false;
-    const keepFromIndex =
-      userIndexes.at(-options.keepRecentTurns) ?? 0;
-    const older = this.#messages.slice(0, keepFromIndex);
-    const recent = this.#messages.slice(keepFromIndex);
+    // 切点按 token 预算（参照 Pi findCutPoint）：保留最近 keepRecentTokens 估算 token
+    const cutIndex = findCompactionCutPoint(
+      this.#messages,
+      options.keepRecentTokens,
+    );
+    if (cutIndex === null) return false;
+    const older = this.#messages.slice(0, cutIndex);
+    const recent = this.#messages.slice(cutIndex);
     const request: CompletionRequest = {
       system: COMPACTION_PROMPT,
       messages: [
@@ -191,7 +191,10 @@ export class ConversationAgentModel implements AgentModel {
           ? 1
           : Number((afterTokens / beforeTokens).toFixed(3)),
       usage: response.usage,
-      keepRecentTurns: options.keepRecentTurns,
+      // 摘要消息也会被计为 user 消息（恢复时 keepFromSeq 按事件流对齐，多保留无害）
+      retainedUserCount: recent.filter(
+        (message) => message.role === "user",
+      ).length,
       ...(response.pricing
         ? { pricing: response.pricing }
         : {}),
@@ -227,7 +230,9 @@ export class ConversationAgentModel implements AgentModel {
     );
     const request: CompletionRequest = {
       system: prepared.system,
-      messages: prepared.messages,
+      // 请求前消毒（消息转换最小集）：toolCallId 归一化 + 空内容兜底，
+      // 避免 OpenAI 兼容端点的特殊 id 在切到 Anthropic 时触发 400
+      messages: sanitizeMessages(prepared.messages),
       // 动态工具集：只注入本模型角色启用的工具（main 全量 / explore 只读集）
       tools: toolDefinitionsFor(this.#toolNames),
       signal,
@@ -253,6 +258,9 @@ export class ConversationAgentModel implements AgentModel {
       toolCalls: response.toolCalls,
       done: response.toolCalls.length === 0,
       usage: response.usage,
+      ...(response.stopReason
+        ? { stopReason: response.stopReason }
+        : {}),
       ...(response.pricing
         ? { usagePricing: response.pricing }
         : {}),
@@ -268,6 +276,9 @@ export class ConversationAgentModel implements AgentModel {
           text: response.text,
           toolCalls: response.toolCalls,
           usage: response.usage,
+          ...(response.stopReason
+            ? { stopReason: response.stopReason }
+            : {}),
           ...(response.model ? { model: response.model } : {}),
           ...(response.providerId
             ? { providerId: response.providerId }
@@ -328,7 +339,8 @@ export interface CompactionResult {
   summary: string;
   ratio: number;
   usage: ModelUsage;
-  keepRecentTurns: number;
+  /** 压缩后保留的 user 消息数（事件流侧据此计算 keepFromSeq） */
+  retainedUserCount: number;
   pricing?: ModelPricing;
   fallbacks?: Array<{
     from: string;
@@ -339,6 +351,124 @@ export interface CompactionResult {
     request: unknown;
     response: unknown;
   };
+}
+
+/**
+ * 压缩切点（参照 Pi 的 findCutPoint + findTurnStartIndex）：
+ * 从尾向前累计估算 token，达到 keepRecentTokens 处切断；
+ * 切点必须回退到轮次起点（user 消息），保证 tool 消息与其 assistant 不拆开。
+ * 返回 null 表示会话小于保留预算、或切点落在头部（无可压缩内容）。
+ */
+export function findCompactionCutPoint(
+  messages: readonly ConversationMessage[],
+  keepRecentTokens: number,
+): number | null {
+  if (messages.length <= 1) return null;
+  let cumulative = 0;
+  let cutIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    cumulative += estimateMessageTokens(messages[index]!);
+    if (cumulative >= keepRecentTokens) {
+      cutIndex = index;
+      break;
+    }
+  }
+  if (cutIndex <= 0) return null;
+  // 回退到最近的 user 消息（轮次起点）；回退到头部说明无可压缩内容
+  while (cutIndex > 0 && messages[cutIndex]!.role !== "user") {
+    cutIndex -= 1;
+  }
+  return cutIndex > 0 ? cutIndex : null;
+}
+
+function estimateMessageTokens(message: ConversationMessage): number {
+  return Math.ceil(JSON.stringify(message).length / 4);
+}
+
+/**
+ * 请求前消息消毒（消息转换最小集，参照 Pi 的 transform-messages）：
+ * - toolCallId 重写为 Anthropic 合规格式 `^[a-zA-Z0-9_-]{1,64}$`——OpenAI 兼容端点
+ *   可能返回含特殊字符的 id，fallback 切到 Anthropic 时会被 400 拒绝；
+ *   同一原 id 的映射确定性一致，tool 消息的 toolCallId 同步重写；
+ * - 空 content 的 tool 消息补占位，避免空消息触发供应商校验。
+ * 返回新数组，不修改原消息（会话内消息不变，重放映射稳定）。
+ */
+export function sanitizeMessages(
+  messages: readonly ConversationMessage[],
+): ConversationMessage[] {
+  const idMap = new Map<string, string>();
+  return messages.map((message) => {
+    if (message.role === "assistant" && message.toolCalls.length > 0) {
+      const toolCalls = message.toolCalls.map((call) => {
+        if (/^[a-zA-Z0-9_-]{1,64}$/.test(call.id)) return call;
+        const rewritten = `toolu_${stableId(call.id)}`;
+        idMap.set(call.id, rewritten);
+        return { ...call, id: rewritten };
+      });
+      return { ...message, toolCalls };
+    }
+    if (message.role === "tool") {
+      const toolCallId = idMap.get(message.toolCallId) ?? message.toolCallId;
+      const content =
+        message.content.trim().length > 0
+          ? message.content
+          : "No result provided";
+      if (toolCallId === message.toolCallId && content === message.content) {
+        return message;
+      }
+      return { ...message, toolCallId, content };
+    }
+    return message;
+  });
+}
+
+/** 确定性哈希：同一输入始终映射同一合规 id（跨轮重放时映射稳定） */
+function stableId(value: string): string {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36).padStart(8, "0");
+}
+
+const BRANCH_SUMMARY_SYSTEM_PROMPT =
+  "You are a context summarization assistant for a coding agent. Do NOT continue the conversation.";
+
+const BRANCH_SUMMARY_PROMPT = `Summarize this abandoned conversation branch so work can continue exactly after returning to the main branch.
+
+Return a concise structured summary with these headings:
+- Goal
+- Progress (Done / In Progress / Blocked)
+- Key Decisions
+- Next Steps
+
+Preserve concrete file paths, commands, and failed attempts. Do not invent facts.`;
+
+/**
+ * 分支摘要（参照 Pi 的 branch-summarization）：把将被放弃的路径压缩成结构化摘要，
+ * 供切分支后注入新分支上下文。独立于会话压缩管道，由 session 在 fork/switch 时触发。
+ */
+export async function summarizeConversation(
+  client: ModelClient,
+  messages: ConversationMessage[],
+  signal: AbortSignal,
+): Promise<{ summary: string; usage: ModelUsage }> {
+  const request: CompletionRequest = {
+    system: BRANCH_SUMMARY_SYSTEM_PROMPT,
+    messages: [
+      { role: "user", content: serializeConversation(messages) },
+    ],
+    // 摘要不需要工具调用，不携带工具 schema（省 token）
+    tools: [],
+    // 一次性辅助请求不写缓存（参照 Pi cacheRetention: "none"），
+    // 避免摘要的短前缀挤掉主会话缓存条目
+    cacheRetention: "none",
+    signal,
+  };
+  const response = await client.complete(request);
+  const summary = response.text.trim();
+  if (!summary) throw new Error("分支摘要模型未返回摘要");
+  return { summary, usage: response.usage };
 }
 
 const COMPACTION_PROMPT = `Summarize this coding-agent conversation for exact continuation.

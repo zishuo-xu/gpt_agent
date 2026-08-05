@@ -188,7 +188,10 @@ export class AgentSessionManager {
       const branchId = currentBranchIdFrom(records);
       const session = new AgentSession({
         id,
-        title: metadata?.title ?? titleFrom(firstUser.event.text),
+        title:
+          sessionInfoTitle(records) ??
+          metadata?.title ??
+          titleFrom(firstUser.event.text),
         cwd: this.#cwd,
         mode:
           metadata?.permissionMode ??
@@ -197,6 +200,7 @@ export class AgentSessionManager {
         // 恢复当前分支链视角的消息历史（分支点之前不变，之后只含当前分支）
         model: await this.#createModel(
           conversationFrom(records, branches, branchId),
+          runtimeConfig.behavior?.crossProjectMemory !== false,
         ),
         stateDir: this.#stateDir,
         restoredEvents: records,
@@ -217,7 +221,8 @@ export class AgentSessionManager {
           : {}),
         compactAtEstimatedTokens:
           runtimeConfig.context.compactAtEstimatedTokens,
-        keepRecentTurns: runtimeConfig.context.keepRecentTurns,
+        keepRecentTokens: runtimeConfig.context.keepRecentTokens,
+        parallelTools: runtimeConfig.behavior?.parallelTools === true,
         pricing: rolePricing(runtimeConfig.models),
       });
       this.#register(session);
@@ -247,7 +252,10 @@ export class AgentSessionManager {
         (message ? titleFrom(message) : "新会话"),
       cwd: this.#cwd,
       mode: options.mode ?? runtimeConfig.permissions.mode,
-      model: await this.#createModel([]),
+      model: await this.#createModel(
+        [],
+        runtimeConfig.behavior?.crossProjectMemory !== false,
+      ),
       stateDir: this.#stateDir,
       permissionRules: [
         ...DEFAULT_PERMISSION_RULES,
@@ -263,7 +271,8 @@ export class AgentSessionManager {
       ...(exploreModelClient ? { exploreModelClient } : {}),
       compactAtEstimatedTokens:
         runtimeConfig.context.compactAtEstimatedTokens,
-      keepRecentTurns: runtimeConfig.context.keepRecentTurns,
+      keepRecentTokens: runtimeConfig.context.keepRecentTokens,
+      parallelTools: runtimeConfig.behavior?.parallelTools === true,
       pricing: rolePricing(runtimeConfig.models),
     });
     this.#register(session);
@@ -294,6 +303,7 @@ export class AgentSessionManager {
 
   async #createModel(
     messages: ConversationMessage[],
+    crossProjectMemory = true,
   ): Promise<ConversationAgentModel> {
     if (this.#modelFactory) {
       return await this.#modelFactory(messages);
@@ -307,6 +317,7 @@ export class AgentSessionManager {
         cwd: this.#cwd,
         homeDir: this.#homeDir,
         stateDir: this.#stateDir,
+        crossProjectMemory,
       }),
     );
   }
@@ -388,12 +399,12 @@ export class AgentSessionManager {
           ? titleFrom(userText)
           : title;
       if (fallback) {
-        session.title = fallback;
+        session.setTitle(fallback);
         this.#queueIndexWrite();
       }
     } catch {
       // 生成失败时用首条消息的前缀兜底，避免标题永远停在「新会话」
-      session.title = titleFrom(userText);
+      session.setTitle(titleFrom(userText));
       this.#queueIndexWrite();
     } finally {
       clearTimeout(timeout);
@@ -510,6 +521,17 @@ function lastPermissionMode(
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const event = records[index]?.event;
     if (event?.type === "permission_mode_changed") return event.mode;
+  }
+  return undefined;
+}
+
+/** 事件流中最近的会话标题（session_info 事件）；无则返回 undefined */
+function sessionInfoTitle(
+  records: RecordedEvent[],
+): string | undefined {
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const event = records[index]?.event;
+    if (event?.type === "session_info") return event.name;
   }
   return undefined;
 }

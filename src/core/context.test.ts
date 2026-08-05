@@ -252,3 +252,53 @@ test("软遗忘只替换最近三轮之前的工具结果并给出恢复指引",
   assert.equal(toolMessages[2]?.content, "large output 3");
   assert.equal(toolMessages[4]?.content, "large output 5");
 });
+
+test("crossProjectMemory 关闭时 system 不含跨项目索引", async () => {
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-context-home-"),
+  );
+  const cwd = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-context-current-"),
+  );
+  const other = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-context-other-"),
+  );
+  const stateDir = path.join(homeDir, ".myagent");
+  await mkdir(path.join(stateDir, "projects", "other-project"), {
+    recursive: true,
+  });
+  await mkdir(path.join(other, ".myagent", "memory"), {
+    recursive: true,
+  });
+  await writeFile(
+    path.join(
+      stateDir,
+      "projects",
+      "other-project",
+      "project.json",
+    ),
+    JSON.stringify({ name: "project-a", cwd: other }),
+    "utf8",
+  );
+  await writeFile(
+    path.join(other, ".myagent", "memory", "pitfalls.md"),
+    "- Chroma 查询必须设置 timeout\n",
+    "utf8",
+  );
+  const context = new ContextManager({
+    cwd,
+    homeDir,
+    stateDir,
+    crossProjectMemory: false,
+  });
+
+  const prepared = await context.prepare("base", [
+    { role: "user", content: "问题 1" },
+  ]);
+  assert.doesNotMatch(
+    prepared.system,
+    /project-a/,
+    "关闭开关后不应注入其他项目记忆标题",
+  );
+  assert.doesNotMatch(prepared.system, /其他项目记忆索引/);
+});

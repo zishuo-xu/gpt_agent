@@ -116,12 +116,20 @@ export class ConfiguredModelClient implements ModelClient {
         output: numberValue(usage.completion_tokens),
         cached: numberValue(promptDetails.cached_tokens),
       },
+      ...(stringValue(choice.finish_reason)
+        ? { stopReason: stringValue(choice.finish_reason) }
+        : {}),
       traceRaw: payload,
     };
   }
 
   async #completeAnthropic(request: CompletionRequest): Promise<ModelResponse> {
     const tools = request.tools ?? CODING_TOOL_DEFINITIONS;
+    // 参照 Pi cacheRetention："none" 时省略 cache_control，不写缓存（摘要等一次性请求）
+    const cacheControl =
+      request.cacheRetention === "none"
+        ? undefined
+        : { type: "ephemeral" as const };
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "messages"),
       {
@@ -134,15 +142,21 @@ export class ConfiguredModelClient implements ModelClient {
         },
         body: JSON.stringify({
           model: this.#model,
-          system: [{ type: "text", text: request.system, cache_control: { type: "ephemeral" } }],
+          system: [
+            {
+              type: "text",
+              text: request.system,
+              ...(cacheControl ? { cache_control: cacheControl } : {}),
+            },
+          ],
           max_tokens: 4096,
           messages: toAnthropicMessages(request.messages),
           tools: tools.map((tool, index) => ({
             name: tool.name,
             description: tool.description,
             input_schema: tool.inputSchema,
-            ...(index === tools.length - 1
-              ? { cache_control: { type: "ephemeral" } }
+            ...(index === tools.length - 1 && cacheControl
+              ? { cache_control: cacheControl }
               : {}),
           })),
         }),
@@ -174,6 +188,9 @@ export class ConfiguredModelClient implements ModelClient {
         output: numberValue(usage.output_tokens),
         cached: numberValue(usage.cache_read_input_tokens),
       },
+      ...(stringValue(payload.stop_reason)
+        ? { stopReason: stringValue(payload.stop_reason) }
+        : {}),
       traceRaw: payload,
     };
   }
@@ -216,13 +233,19 @@ export class ConfiguredModelClient implements ModelClient {
     let text = "";
     const toolCallAccum = new Map<number, { id: string; name: string; args: string }>();
     let usage: { input: number; output: number; cached: number } = { input: 0, output: 0, cached: 0 };
+    let stopReason = "";
     for await (const event of parseSSE(response.body, request.signal)) {
       if (event === "[DONE]") break;
       let parsed: Record<string, unknown>;
       try { parsed = asRecord(JSON.parse(event)); } catch { continue; }
       const choices = asArray(parsed.choices);
       if (choices.length > 0) {
-        const delta = asRecord(asRecord(choices[0]).delta);
+        const choice = asRecord(choices[0]);
+        // finish_reason 只在最后一片上带出，取最后一次非空值
+        if (stringValue(choice.finish_reason)) {
+          stopReason = stringValue(choice.finish_reason);
+        }
+        const delta = asRecord(choice.delta);
         if (typeof delta.content === "string" && delta.content) {
           text += delta.content;
           yield { type: "text_delta", text: delta.content };
@@ -251,11 +274,23 @@ export class ConfiguredModelClient implements ModelClient {
     const toolCalls = [...toolCallAccum.values()]
       .filter((tc) => tc.name)
       .map((tc) => createToolCall(tc.id || randomUUID(), tc.name, parseArguments(tc.args)));
-    yield { type: "done", response: { text, toolCalls, usage } };
+    yield {
+      type: "done",
+      response: {
+        text,
+        toolCalls,
+        usage,
+        ...(stopReason ? { stopReason } : {}),
+      },
+    };
   }
 
   async *#streamAnthropic(request: CompletionRequest): AsyncIterable<StreamChunk> {
     const tools = request.tools ?? CODING_TOOL_DEFINITIONS;
+    const cacheControl =
+      request.cacheRetention === "none"
+        ? undefined
+        : { type: "ephemeral" as const };
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "messages"),
       {
@@ -268,7 +303,13 @@ export class ConfiguredModelClient implements ModelClient {
         },
         body: JSON.stringify({
           model: this.#model,
-          system: [{ type: "text", text: request.system, cache_control: { type: "ephemeral" } }],
+          system: [
+            {
+              type: "text",
+              text: request.system,
+              ...(cacheControl ? { cache_control: cacheControl } : {}),
+            },
+          ],
           max_tokens: 4096,
           stream: true,
           messages: toAnthropicMessages(request.messages),
@@ -276,8 +317,8 @@ export class ConfiguredModelClient implements ModelClient {
             name: tool.name,
             description: tool.description,
             input_schema: tool.inputSchema,
-            ...(index === tools.length - 1
-              ? { cache_control: { type: "ephemeral" } }
+            ...(index === tools.length - 1 && cacheControl
+              ? { cache_control: cacheControl }
               : {}),
           })),
         }),
@@ -291,6 +332,7 @@ export class ConfiguredModelClient implements ModelClient {
     let inputTokens = 0;
     let outputTokens = 0;
     let cachedTokens = 0;
+    let stopReason = "";
     const toolCallAccum = new Map<number, { id: string; name: string; args: string }>();
     let currentToolIndex = -1;
     for await (const event of parseSSE(response.body, request.signal)) {
@@ -317,6 +359,8 @@ export class ConfiguredModelClient implements ModelClient {
           if (acc) acc.args += stringValue(delta.partial_json);
         }
       } else if (eventType === "message_delta") {
+        const delta = asRecord(parsed.delta);
+        stopReason = stringValue(delta.stop_reason) || stopReason;
         const u = asRecord(parsed.usage);
         outputTokens = numberValue(u.output_tokens);
       } else if (eventType === "message_start") {
@@ -334,6 +378,7 @@ export class ConfiguredModelClient implements ModelClient {
         text,
         toolCalls,
         usage: { input: inputTokens, output: outputTokens, cached: cachedTokens },
+        ...(stopReason ? { stopReason } : {}),
       },
     };
   }
@@ -359,9 +404,8 @@ function toOpenAiMessage(message: ConversationMessage): Record<string, unknown> 
             type: "function",
             function: {
               name: call.tool,
-              arguments: JSON.stringify(
-                wireToolArgs(call.tool, asRecord(call.args)),
-              ),
+              // args 已是 wire 键名（全程 wire，无转换层）
+              arguments: JSON.stringify(asRecord(call.args)),
             },
           })),
         }),
@@ -386,7 +430,7 @@ function toAnthropicMessages(
             type: "tool_use",
             id: call.id,
             name: call.tool,
-            input: wireToolArgs(call.tool, asRecord(call.args)),
+            input: asRecord(call.args),
           })),
         ],
       });
@@ -420,174 +464,10 @@ function createToolCall(
     id,
     tool: name,
     target: targetFor(name, args),
-    args: normalizeToolArgs(name, args),
+    // 全程 wire 键名（参照 Pi：无 camelCase 转换层）；
+    // 未知键保留，由工具层的 schema 校验拒绝并回显（不静默丢弃）
+    args,
   };
-}
-
-/** 同时接受 wire 格式（file_path）与内部格式（filePath），防止模型模仿历史中的键名 */
-function firstDefined(...values: unknown[]): unknown {
-  return values.find((value) => value !== undefined);
-}
-
-function normalizeToolArgs(
-  tool: ToolName,
-  args: Record<string, unknown>,
-): Record<string, unknown> {
-  if (tool === "Read") {
-    return {
-      filePath: firstDefined(args.file_path, args.filePath),
-      ...(args.offset === undefined ? {} : { offset: args.offset }),
-      ...(args.limit === undefined ? {} : { limit: args.limit }),
-    };
-  }
-  if (tool === "Grep") {
-    return {
-      pattern: args.pattern,
-      ...(args.path === undefined ? {} : { path: args.path }),
-      ...(args.glob === undefined ? {} : { glob: args.glob }),
-      ...(firstDefined(args.max_results, args.maxResults) === undefined
-        ? {}
-        : { maxResults: firstDefined(args.max_results, args.maxResults) }),
-    };
-  }
-  if (tool === "Glob") {
-    return {
-      pattern: args.pattern,
-      ...(args.path === undefined ? {} : { path: args.path }),
-      ...(firstDefined(args.max_results, args.maxResults) === undefined
-        ? {}
-        : { maxResults: firstDefined(args.max_results, args.maxResults) }),
-    };
-  }
-  if (tool === "TodoWrite") return { todos: args.todos };
-  if (tool === "Task") {
-    return {
-      description: args.description,
-      prompt: args.prompt,
-      ...(args.writable === undefined ? {} : { writable: args.writable }),
-    };
-  }
-  if (tool === "Edit") {
-    return {
-      filePath: firstDefined(args.file_path, args.filePath),
-      oldString: firstDefined(args.old_string, args.oldString),
-      newString: firstDefined(args.new_string, args.newString),
-      ...(firstDefined(args.replace_all, args.replaceAll) === undefined
-        ? {}
-        : { replaceAll: firstDefined(args.replace_all, args.replaceAll) }),
-    };
-  }
-  if (tool === "MultiEdit") {
-    return {
-      filePath: firstDefined(args.file_path, args.filePath),
-      edits: asArray(args.edits).map((edit) => {
-        const item = asRecord(edit);
-        return {
-          oldString: firstDefined(item.old_string, item.oldString),
-          newString: firstDefined(item.new_string, item.newString),
-          ...(firstDefined(item.replace_all, item.replaceAll) === undefined
-            ? {}
-            : { replaceAll: firstDefined(item.replace_all, item.replaceAll) }),
-        };
-      }),
-    };
-  }
-  if (tool === "Write") {
-    return {
-      filePath: firstDefined(args.file_path, args.filePath),
-      content: args.content,
-    };
-  }
-  if (tool === "Bash") {
-    return {
-      command: args.command,
-      ...(firstDefined(args.timeout_ms, args.timeoutMs) === undefined
-        ? {}
-        : { timeoutMs: firstDefined(args.timeout_ms, args.timeoutMs) }),
-    };
-  }
-  return args;
-}
-
-/**
- * normalizeToolArgs 的逆映射：历史回传给模型时必须用 schema 声明的
- * wire 键名（file_path 等），否则模型会模仿上下文中的 camelCase 键名。
- */
-function wireToolArgs(
-  tool: ToolName,
-  args: Record<string, unknown>,
-): Record<string, unknown> {
-  if (tool === "Read") {
-    return {
-      file_path: args.filePath,
-      ...(args.offset === undefined ? {} : { offset: args.offset }),
-      ...(args.limit === undefined ? {} : { limit: args.limit }),
-    };
-  }
-  if (tool === "Grep") {
-    return {
-      pattern: args.pattern,
-      ...(args.path === undefined ? {} : { path: args.path }),
-      ...(args.glob === undefined ? {} : { glob: args.glob }),
-      ...(args.maxResults === undefined
-        ? {}
-        : { max_results: args.maxResults }),
-    };
-  }
-  if (tool === "Glob") {
-    return {
-      pattern: args.pattern,
-      ...(args.path === undefined ? {} : { path: args.path }),
-      ...(args.maxResults === undefined
-        ? {}
-        : { max_results: args.maxResults }),
-    };
-  }
-  if (tool === "TodoWrite") return { todos: args.todos };
-  if (tool === "Task") {
-    return {
-      description: args.description,
-      prompt: args.prompt,
-      ...(args.writable === undefined ? {} : { writable: args.writable }),
-    };
-  }
-  if (tool === "Edit") {
-    return {
-      file_path: args.filePath,
-      old_string: args.oldString,
-      new_string: args.newString,
-      ...(args.replaceAll === undefined
-        ? {}
-        : { replace_all: args.replaceAll }),
-    };
-  }
-  if (tool === "MultiEdit") {
-    return {
-      file_path: args.filePath,
-      edits: asArray(args.edits).map((edit) => {
-        const item = asRecord(edit);
-        return {
-          old_string: item.oldString,
-          new_string: item.newString,
-          ...(item.replaceAll === undefined
-            ? {}
-            : { replace_all: item.replaceAll }),
-        };
-      }),
-    };
-  }
-  if (tool === "Write") {
-    return { file_path: args.filePath, content: args.content };
-  }
-  if (tool === "Bash") {
-    return {
-      command: args.command,
-      ...(args.timeoutMs === undefined
-        ? {}
-        : { timeout_ms: args.timeoutMs }),
-    };
-  }
-  return args;
 }
 
 function targetFor(tool: ToolName, args: Record<string, unknown>): string {

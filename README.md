@@ -86,6 +86,7 @@ pnpm run web
 - `设计方案/验收文档.md` — 验收用例与状态
 - `设计方案/目标与愿景.md` — 长期目标
 - `docs/pi-agent-analysis.md` — 对标 Pi Coding Agent 的调研（特点/爆红原因/借鉴点）
+- `docs/pi-core-analysis.md` — Pi CORE 源码级对照（会话/上下文/工具/事件流实现细节 + 改造优先级）
 
 ## 项目约定（记忆）
 

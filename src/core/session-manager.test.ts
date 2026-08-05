@@ -191,7 +191,8 @@ test("压缩事件持久化成本并从摘要与近期对话恢复", async () =>
     model: new ConversationAgentModel(main, []),
     compactModelClient: cheap,
     compactAtEstimatedTokens: 100_000,
-    keepRecentTurns: 2,
+    // 每轮 ≈ 21 tokens：预算 35 恰好保留最近 2 轮（问题3/问题4）
+    keepRecentTokens: 35,
     stateDir,
   });
   for (let index = 1; index <= 4; index += 1) {
@@ -324,5 +325,180 @@ test("审批等待中 steer：取消挂起审批并优先消费插队消息", as
   assert.equal(
     (client.requests[1]?.messages.at(-1) as { content: string }).content,
     "改主意了",
+  );
+});
+
+test("fork 时被放弃路径超过阈值自动生成分支摘要并注入新分支", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-bs-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-bs-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-bs-home-"),
+  );
+  const main = new ScriptedClient([
+    response(`探索回答 ${"x".repeat(25_000)}`), // ≈ 6.3k tokens，超过 5k 阈值
+    response("新分支继续"),
+  ]);
+  const cheap = new ScriptedClient([
+    response(
+      "Goal: 探索任务\nProgress: 已完成探索\nNext Steps: 回到主线",
+    ),
+  ]);
+  const session = new AgentSession({
+    id: "bs-session",
+    title: "分支摘要",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(main, []),
+    compactModelClient: cheap,
+    stateDir,
+  });
+  await session.sendInput("探索这个仓库");
+  // 分裂点：只继承第一条 user 消息；之后的大回复被放弃
+  session.forkBranch(1, "回到主线");
+  await session.flush();
+
+  assert.equal(
+    cheap.requests.length,
+    1,
+    "被放弃路径超过阈值应触发一次摘要",
+  );
+  const summarized = session
+    .events()
+    .find((record) => record.event.type === "branch_summarized");
+  assert.equal(summarized?.event.type, "branch_summarized");
+  if (summarized?.event.type === "branch_summarized") {
+    assert.match(summarized.event.summary, /Goal:/);
+    assert.equal(summarized.event.fromBranchId, "main");
+  }
+
+  // 摘要注入模型上下文：下一轮请求应携带 [分支摘要] 消息
+  await session.sendInput("继续");
+  assert.ok(
+    main.requests.some((request) =>
+      request.messages.some(
+        (message) =>
+          message.role === "user" &&
+          String(message.content).includes("[分支摘要]"),
+      ),
+    ),
+    "分支摘要应作为 user 消息注入模型",
+  );
+
+  // 恢复视角：conversationFrom 把 branch_summarized 事件转成摘要消息
+  const configService = new ConfigService({ cwd, homeDir });
+  let restored: ConversationMessage[] = [];
+  const restoredManager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    modelFactory: (messages) => {
+      restored = structuredClone(messages);
+      return new ConversationAgentModel(
+        new ScriptedClient([response("继续")]),
+        messages,
+      );
+    },
+  });
+  await restoredManager.restore();
+  assert.ok(
+    restored.some(
+      (message) =>
+        message.role === "user" &&
+        String(message.content).includes("[分支摘要]"),
+    ),
+    "恢复后摘要消息应存在于模型历史",
+  );
+});
+
+test("被放弃路径小于阈值不触发分支摘要", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-bs2-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-bs2-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-bs2-home-"),
+  );
+  const main = new ScriptedClient([response("短回答")]);
+  const cheap = new ScriptedClient([response("摘要")]);
+  const session = new AgentSession({
+    id: "bs2-session",
+    title: "小路径",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(main, []),
+    compactModelClient: cheap,
+    stateDir,
+  });
+  await session.sendInput("hi");
+  session.forkBranch(1);
+  await session.flush();
+  assert.equal(
+    cheap.requests.length,
+    0,
+    "小路径不应浪费 cheap 调用",
+  );
+});
+
+test("会话标题写入事件流并在恢复时优先于 index.json", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-info-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-info-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-info-home-"),
+  );
+  const main = new ScriptedClient([response("回答一")]);
+  const session = new AgentSession({
+    id: "info-session",
+    title: "初始标题",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(main, []),
+    stateDir,
+  });
+  await session.sendInput("问题");
+  session.setTitle("事件流标题");
+  await session.flush();
+
+  // 事件流包含 session_info 事件
+  assert.ok(
+    session
+      .events()
+      .some(
+        (record) =>
+          record.event.type === "session_info" &&
+          record.event.name === "事件流标题",
+      ),
+    "setTitle 应写入 session_info 事件",
+  );
+  assert.equal(session.summary().title, "事件流标题");
+
+  // 恢复：即使 index.json 标题不同，也以事件流为准
+  const configService = new ConfigService({ cwd, homeDir });
+  let restoredTitle = "";
+  const restoredManager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    modelFactory: (messages) =>
+      new ConversationAgentModel(
+        new ScriptedClient([response("继续")]),
+        messages,
+      ),
+  });
+  const restored = restoredManager.get("info-session");
+  if (!restored) {
+    await restoredManager.restore();
+  }
+  const target = restoredManager.get("info-session");
+  assert.ok(target, "会话应被恢复");
+  assert.equal(
+    target?.summary().title,
+    "事件流标题",
+    "恢复后标题应来自事件流",
   );
 });

@@ -29,6 +29,43 @@ test("超长单行截断仍保留头尾", () => {
   assert.match(result.text, /-TAIL$/);
 });
 
+test("preferTail 时尾部保留更多（Bash 错误/结果在尾部，参照 Pi truncateTail）", () => {
+  const source = Array.from(
+    { length: 300 },
+    (_, index) => `line-${index + 1}`,
+  ).join("\n");
+  const result = truncateToolText(source, {
+    ...TOOL_OUTPUT_LIMITS.bash,
+    preferTail: true,
+  });
+
+  assert.equal(result.truncated, true);
+  assert.match(result.text, /line-300$/, "最后一行必须保留");
+  assert.match(result.text, /lines truncated/);
+  const markerIndex = result.text.indexOf("truncated");
+  const headLines = result.text.slice(0, markerIndex).split("\n").length;
+  const tailLines = result.text.slice(markerIndex).split("\n").length;
+  assert.ok(
+    tailLines > headLines,
+    `尾部应保留更多行（尾部 ${tailLines} vs 头部 ${headLines}）`,
+  );
+});
+
+test("preferTail 缺省时保持头尾均衡的既有行为", () => {
+  const source = Array.from(
+    { length: 300 },
+    (_, index) => `line-${index + 1}`,
+  ).join("\n");
+  const result = truncateToolText(source, TOOL_OUTPUT_LIMITS.bash);
+  const markerIndex = result.text.indexOf("truncated");
+  const headLines = result.text.slice(0, markerIndex).split("\n").length;
+  const tailLines = result.text.slice(markerIndex).split("\n").length;
+  assert.ok(
+    headLines >= tailLines,
+    "缺省时头部保留不少于尾部（既有语义不被破坏）",
+  );
+});
+
 test("差异化上限：Bash 输出比 Read 更小、Grep 只留匹配行", () => {
   assert.ok(TOOL_OUTPUT_LIMITS.bash.maxLines < TOOL_OUTPUT_LIMITS.read.maxLines);
   assert.ok(TOOL_OUTPUT_LIMITS.bash.maxChars < TOOL_OUTPUT_LIMITS.read.maxChars);

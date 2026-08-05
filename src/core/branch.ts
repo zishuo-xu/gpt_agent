@@ -119,7 +119,8 @@ export function conversationFrom(
   return conversationFromRaw(filtered);
 }
 
-function conversationFromRaw(
+/** 事件列表 → 模型消息（供分支摘要等场景直接复用；含压缩摘要与分支摘要处理） */
+export function conversationFromRaw(
   records: readonly BranchEventLike[],
 ): ConversationMessage[] {
   const lastCompaction = [...records]
@@ -186,6 +187,14 @@ function conversationFromRaw(
         target: event.call.target,
         content: `Permission denied: ${event.reason}`,
         isError: true,
+      });
+    } else if (event.type === "branch_summarized") {
+      // 分支摘要注入为新分支视角的 user 消息（切分支后保留被放弃路径的上下文）
+      messages.push({
+        role: "user",
+        content:
+          `[分支摘要]（来自分支 ${event.fromBranchId}，fork@#${event.forkSeq}）\n` +
+          event.summary,
       });
     }
   }

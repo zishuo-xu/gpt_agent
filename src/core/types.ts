@@ -156,6 +156,21 @@ export type AgentEvent =
       /** 分裂点：父分支中最后一个被新分支继承的 seq */
       forkSeq: number;
       label?: string;
+    }
+  | {
+      type: "branch_summarized";
+      /** 摘要注入的目标分支（切换后的新分支） */
+      branchId: string;
+      /** 被放弃的旧分支 */
+      fromBranchId: string;
+      /** 被摘要的事件范围起点（fork 点之后） */
+      forkSeq: number;
+      summary: string;
+    }
+  | {
+      /** 会话标题（写入事件流，恢复时优先于 index.json 缓存） */
+      type: "session_info";
+      name: string;
     };
 
 export interface SessionBranch {
