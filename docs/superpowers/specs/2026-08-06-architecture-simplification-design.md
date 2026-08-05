@@ -123,3 +123,12 @@ MyAgent（本地编码 agent，TypeScript + Node.js ≥22，CLI + Web 双前端�
 3. Phase A 提交
 4. Phase B 提交
 5. Phase C 提交
+
+## 落地记录（2026-08-06 执行完毕）
+
+- A0 基线 `c921ab3`；Phase A `9e50b15`；Phase B `dc2bfd3`；Phase C `2d66b0a`。全部阶段 `typecheck` + `test` 全绿，Phase C 追加 `build` 通过。
+- 与设计的偏差（均为有意取舍）：
+  - A1 保留被测试直接消费的导出（`branchChain`/`filterRecordsForBranch`/`formatSubagentConclusion`），仅删真正死代码。
+  - A6 的 `设计方案/` 经核实早已在版本控制中，无需动作。
+  - B3 落地时发现 createSession 的显式标题从未进事件流（构造函数直设），补了 `setTitle` 同名放开 + createSession 显式标题写事件流；`RecordedEvent.sessionId` 改为可选（落盘时补齐）。
+  - C2 仅拆分有验证覆盖/纯函数化的部分：`session.ts`(1015→798) 拆出 `session-branch.ts`+`session-approval.ts`，`cli.ts`(820→658) 拆出 `cli-render.ts`，`SessionApp.tsx`(1975→1729) 拆出 `session-display.ts`。`App.tsx`(1443) 与 `styles.css`(3223) 未拆：纯组件/CSS 重排、无测试覆盖且无法视觉验证，收益低于回归风险，留待后续按需处理。
