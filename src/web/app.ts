@@ -27,8 +27,11 @@ import {
 export function createWebApp(
   configService: ConfigService,
   sessionManager?: WebSessionManager,
+  /** 在业务路由之前挂载的中间件（如访问密码认证）；Hono 按注册顺序执行，必须先于路由 */
+  mountBeforeRoutes?: (app: Hono) => void,
 ): Hono {
   const app = new Hono();
+  mountBeforeRoutes?.(app);
   const memoryService = new MemoryService({
     cwd: configService.cwd,
     homeDir: configService.homeDir,

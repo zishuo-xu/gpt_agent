@@ -40,3 +40,55 @@
 ## 结论
 
 10 个生产级复杂场景全部通过。发现并修复 3 个真实缺陷（均为多项目/大厅支持的功能性缺陷），每个缺陷均有浏览器回归验证。核心链路（审批、排队、插队、拒绝纠偏、中止、任务模式、回放、持久化）在真实模型驱动下工作正常。
+
+---
+
+# 补充测试报告（功能差距全覆盖 A-G）
+
+- 日期：2026-08-06（续）
+- 目标：补齐此前识别的能力差距——项目选择器测试、审批超时、多会话并行、CLI 命令、上下文压缩、webhook、访问密码——真实用户模拟验证
+- 环境：隔离 HOME（`/tmp/myagent-gui-test-home`），web @ `0.0.0.0:3000`（密码保护测试），CLI 管道于 `/tmp/myagent-gui-test-workspace`
+
+## 任务结果总览（7/7 通过，发现并修复 1 个认证失效缺陷）
+
+| 任务 | 内容 | 结果 | 关键验证点 |
+| --- | --- | --- | --- |
+| A | 项目选择器行为层测试 | ✅ | `ProjectPicker` 组件化 + 5 个测试（渲染/导航/打开/关闭/错误态），web 测试 18→23 |
+| B | 审批超时自动拒绝 | ✅ | approvalTimeoutMs 8s 实测：审批请求超时自动拒绝 + `notify` 事件 → webhook「审批超时」推送 |
+| C | 多会话并行 | ✅ | 会话 1 sleep 20 运行中，会话 2 独立运行互不阻塞，两会话各自完成 |
+| D | CLI 命令端到端 | ✅ | `/init`（生成 AGENTS.md 1763B）、`/config set`（两次串行写入均持久化）、`/model`、`/compact`、管道 4 命令稳定 |
+| E | 上下文压缩实测 | ✅ | 阈值 50000 触发 3 次「上下文已压缩 · 保留 X%」事件，压缩后继续应答正常 |
+| F | webhook 推送 | ✅ | 本地 receiver 收到「任务完成/任务出错/审批超时」三类推送 |
+| G | 访问密码 | ✅ | 非 localhost 访问：无 cookie 401、错 cookie 401、对 cookie 200；登录页错误密码提示「密码错误」、正确密码进入应用（浏览器实测） |
+
+## 缺陷 #4（本补充轮）：认证中间件注册顺序导致密码保护失效
+
+**现象**：配置 `server.host=0.0.0.0` + `server.password=testpass` 后，无 cookie 访问 `/api/sessions` 仍返回 200，密码保护未生效。
+
+**根因**：`server.ts` 在 `createWebApp()`（内部已注册全部 `/api/*` 业务路由）**之后**执行 `app.use("*", auth)`。Hono 按注册顺序匹配执行链——业务路由先注册先命中，`use("*")` 中间件对已注册的 `/api/*` 路由完全不执行（最小复现确认：中间件日志只有页面请求，无 API 请求）。页面 `/` 因后注册的 `get("*")` 在中间件之后才命中而显示登录页，造成「登录页正常但 API 裸奔」的假象。
+
+**修复**：`createWebApp` 新增 `mountBeforeRoutes` 参数，认证中间件与 `/api/auth` 登录路由在业务路由**之前**注册（`src/web/app.ts`、`src/web/server.ts`）。新增行为层测试「认证中间件经 mountBeforeRoutes 在业务路由前生效」（app.test.ts，覆盖 401/登录页/错 cookie/对 cookie/登录端点）。
+
+**验证**：curl 实测 LAN IP（192.168.31.52:3000）——无 cookie API 401、错 cookie 401、对 cookie 200、错密码登录 401、对密码登录 200；浏览器黑盒实测登录页渲染 → 错密码提示「密码错误」→ 正确密码进入应用主界面（会话列表可见）。修复后回归：core 204 + web 23 测试全绿、typecheck ✅、build ✅。
+
+## 缺陷 #5（本补充轮）：CLI 管道多命令读-改-写竞态与 readline 关闭崩溃
+
+**现象**：管道连续执行 `/config set` 时后者覆盖前者写入；EOF 后异步命令触发 `ERR_USE_AFTER_CLOSE: readline was closed`。
+
+**修复**：`src/cli.ts` 增加 `safePrompt`（closed 标志 + try/catch 包裹）与串行命令链（`commandChain = commandChain.then(...)` 保证斜杠命令顺序执行）。验证：两次 `/config set` 值均正确持久化，4 条命令管道稳定退出。
+
+## 缺陷 #6（本补充轮）：恢复的会话不推送 webhook
+
+**现象**：服务器重启后恢复的会话完成时不发 webhook（`WebhookNotifier` 只在 `createSession` 注入）。
+
+**修复**：`src/core/session-manager.ts` restore 路径同样注入 `WebhookNotifier`。验证：receiver 收到「任务完成」推送。
+
+## 其他发现（配置优先级，非缺陷）
+
+- 项目 `local.jsonc` 的 `server` 段覆盖全局配置（设计行为）——在 gpt_agent 项目下启动 web 时全局的 host/password 被项目配置覆盖。测试通过临时修改项目配置完成验证后已还原。
+- localhost 访问免认证（`needsAuth = !isLocalhost && !!password`）为设计行为；监听 `0.0.0.0` 时 localhost 同样需要认证（统一保护）。
+- `SessionApp.test.tsx` 两个 describe 重复注册 happy-dom 全局（全局单例限制），幂等处理。
+
+## 结论
+
+A-G 全部实现并实测通过。核心发现为缺陷 #4（认证中间件失效）——属高危安全问题（配置了密码但 API 无保护），已修复并有行为层测试锁定。

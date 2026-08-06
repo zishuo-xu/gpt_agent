@@ -193,6 +193,17 @@ export class AgentSessionManager {
         pricing: rolePricing(runtimeConfig.models),
       });
       this.#register(session);
+      // 恢复的会话同样注入 webhook 推送（与 createSession 一致）
+      if (runtimeConfig.notify.webhook) {
+        new WebhookNotifier(
+          (listener) =>
+            session.subscribe((record) => listener(record.event)),
+          {
+            webhookUrl: runtimeConfig.notify.webhook,
+            sessionTitle: session.title,
+          },
+        );
+      }
     }
     await this.flush();
   }

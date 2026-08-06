@@ -378,3 +378,69 @@ test("分支 API 列出分支树并支持切换", async () => {
   );
   assert.equal(missing.status, 404);
 });
+
+test("认证中间件经 mountBeforeRoutes 在业务路由前生效", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-api-"));
+  const service = new ConfigService({
+    cwd: path.join(root, "project"),
+    homeDir: path.join(root, "home"),
+  });
+  const AUTH_COOKIE = "myagent_auth";
+  const authToken = Buffer.from("testpass").toString("base64url");
+  const app = createWebApp(service, undefined, (app) => {
+    app.use("*", async (context, next) => {
+      if (context.req.path === "/api/auth") return await next();
+      const cookie = context.req.header("cookie") ?? "";
+      const match = cookie.match(
+        new RegExp(`(?:^|;\\s*)${AUTH_COOKIE}=([^;]+)`),
+      );
+      if (match?.[1] === authToken) return await next();
+      if (context.req.path.startsWith("/api/")) {
+        return context.json({ error: "未授权", requiresAuth: true }, 401);
+      }
+      return context.html("<h1>login</h1>", 200);
+    });
+    app.post("/api/auth", async (context) => {
+      const body = (await context.req.json()) as { password?: string };
+      if (body.password !== "testpass") {
+        return context.json({ ok: false, error: "密码错误" }, 401);
+      }
+      return context.json({ ok: true });
+    });
+  });
+
+  // 无 cookie：API 401、页面返回登录页
+  const denied = await app.request("/api/sessions");
+  assert.equal(denied.status, 401);
+  const deniedJson = await denied.json();
+  assert.equal(deniedJson.requiresAuth, true);
+  const loginPage = await app.request("/");
+  assert.equal(loginPage.status, 200);
+  assert.match(await loginPage.text(), /<h1>login<\/h1>/);
+
+  // 错误 cookie → 401
+  const badCookie = await app.request("/api/sessions", {
+    headers: { cookie: "myagent_auth=wrong" },
+  });
+  assert.equal(badCookie.status, 401);
+
+  // 正确 cookie → 通过
+  const ok = await app.request("/api/sessions", {
+    headers: { cookie: `myagent_auth=${authToken}` },
+  });
+  assert.equal(ok.status, 200);
+
+  // 登录端点：错误密码 401，正确密码 200
+  const badLogin = await app.request("/api/auth", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password: "bad" }),
+  });
+  assert.equal(badLogin.status, 401);
+  const goodLogin = await app.request("/api/auth", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password: "testpass" }),
+  });
+  assert.equal(goodLogin.status, 200);
+});

@@ -20,6 +20,7 @@ import {
   statusLabel,
   toolResultDiffText,
 } from "./session-display";
+import { ProjectPicker } from "./ProjectPicker";
 
 type ApprovalScope = "once" | "session" | "project" | "global";
 
@@ -1029,97 +1030,16 @@ export function SessionApp() {
               </div>
             )}
             {showProjectPicker && (
-              <div
-                className="project-picker-overlay"
-                onClick={(event) => {
-                  if (event.target === event.currentTarget) {
-                    setShowProjectPicker(false);
-                  }
-                }}
-              >
-                <div className="project-picker">
-                  <div className="project-picker-head">
-                    <h2>打开其他项目</h2>
-                    <button
-                      type="button"
-                      className="project-picker-close"
-                      aria-label="关闭"
-                      onClick={() => setShowProjectPicker(false)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <div className="project-picker-breadcrumbs">
-                    {fsRoots.map((root) => (
-                      <button
-                        key={root.path}
-                        className={
-                          fsPath === root.path ||
-                          fsPath.startsWith(root.path + "/")
-                            ? "active"
-                            : ""
-                        }
-                        onClick={() => void loadFsDirectory(root.path)}
-                      >
-                        {root.name === root.path
-                          ? root.path
-                          : `${root.name}（${root.path}）`}
-                      </button>
-                    ))}
-                    {fsPath
-                      .split("/")
-                      .filter(Boolean)
-                      .map((segment, index, array) => {
-                        const path =
-                          "/" + array.slice(0, index + 1).join("/");
-                        return (
-                          <button
-                            key={path}
-                            className={
-                              path === fsPath ? "active" : ""
-                            }
-                            onClick={() => void loadFsDirectory(path)}
-                          >
-                            {segment}
-                          </button>
-                        );
-                      })}
-                  </div>
-                  <div className="project-picker-path">{fsPath}</div>
-                  {fsError && (
-                    <div className="project-picker-error">{fsError}</div>
-                  )}
-                  <div className="project-picker-list">
-                    {fsEntries.length === 0 ? (
-                      <div className="project-picker-empty">
-                        没有可打开的子目录
-                      </div>
-                    ) : (
-                      fsEntries.map((entry) => (
-                        <button
-                          key={entry.path}
-                          className="project-picker-entry"
-                          onClick={() =>
-                            void loadFsDirectory(entry.path)
-                          }
-                        >
-                          <span>📁</span>
-                          {entry.name}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                  <div className="project-picker-foot">
-                    <button
-                      className="project-picker-open"
-                      disabled={fsOpening || !fsPath}
-                      onClick={() => void confirmOpenProject(fsPath)}
-                    >
-                      {fsOpening ? "打开中…" : "打开此目录"}
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <ProjectPicker
+                roots={fsRoots}
+                path={fsPath}
+                entries={fsEntries}
+                error={fsError}
+                opening={fsOpening}
+                onNavigate={(dir) => void loadFsDirectory(dir)}
+                onOpen={() => void confirmOpenProject(fsPath)}
+                onClose={() => setShowProjectPicker(false)}
+              />
             )}
       </main>
     </div>

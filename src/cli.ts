@@ -84,12 +84,24 @@ async function runCli(): Promise<void> {
   let pendingRun: RunTaskOptions | undefined;
   let closed = false;
 
+  /** readline 关闭后（/exit、管道 EOF 自动关闭）不再 prompt，避免 ERR_USE_AFTER_CLOSE */
+  const safePrompt = (newline = false) => {
+    if (closed) return;
+    try {
+      readline.prompt(newline);
+    } catch {
+      // readline 已被关闭：prompt 抛 ERR_USE_AFTER_CLOSE，忽略即可
+    }
+  };
+  /** 斜杠命令串行执行链（管道连续输入时的顺序保证） */
+  let commandChain: Promise<void> = Promise.resolve();
+
   let unsubscribe = subscribeToSession(session);
 
   readline.on("line", (raw) => {
     const line = raw.trim();
     if (!line) {
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (approvalState.pendingCallId && isApprovalAnswer(line)) {
@@ -99,7 +111,7 @@ async function runCli(): Promise<void> {
         answer,
       );
       if (resolved) approvalState.pendingCallId = "";
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (pendingRun && ["y", "yes", "n", "no"].includes(line.toLowerCase())) {
@@ -108,26 +120,28 @@ async function runCli(): Promise<void> {
       pendingRun = undefined;
       if (confirmed) startRun(task);
       else output.write("已取消无人值守任务。\n");
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line.startsWith("/")) {
-      void handleCommand(line);
+      // 串行执行命令：管道/脚本连续输入多条命令时避免读-改-写竞态
+      //（如连续 /config set 互相覆盖）与 readline 关闭后的 prompt 崩溃
+      commandChain = commandChain.then(() => handleCommand(line));
       return;
     }
     void session.sendInput(line).catch((error) => {
       output.write(
         `\n任务启动失败：${error instanceof Error ? error.message : "未知错误"}\n`,
       );
-      readline.prompt(true);
+      safePrompt(true);
     });
-    readline.prompt();
+    safePrompt();
   });
 
   readline.on("SIGINT", () => {
     if (session.interrupt()) {
       output.write("\n正在中止模型与当前工具…\n");
-      readline.prompt(true);
+      safePrompt(true);
       return;
     }
     void closeCli();
@@ -139,7 +153,7 @@ async function runCli(): Promise<void> {
     if (key.name !== "escape") return;
     if (session.interrupt()) {
       output.write("\nEsc：正在中止模型与当前工具…\n");
-      readline.prompt(true);
+      safePrompt(true);
     }
   };
   input.on("keypress", onKeypress);
@@ -150,7 +164,7 @@ async function runCli(): Promise<void> {
       "  直接输入任务；运行中继续输入会排队；Esc 硬中止。\n" +
       "  输入 /help 查看命令。\n\n",
   );
-  readline.prompt();
+  safePrompt();
 
   async function handleCommand(line: string): Promise<void> {
     if (line === "/exit") {
@@ -184,7 +198,7 @@ async function runCli(): Promise<void> {
           "",
         ].join("\n"),
       );
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line.startsWith("/permission ")) {
@@ -195,7 +209,7 @@ async function runCli(): Promise<void> {
         session.setPermissionMode(mode);
         output.write(`已切换到 ${mode} 档。\n`);
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line === "/run" || line.startsWith("/run ")) {
@@ -221,7 +235,7 @@ async function runCli(): Promise<void> {
           `${error instanceof Error ? error.message : "/run 参数无效"}\n`,
         );
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line.startsWith("/steer ")) {
@@ -240,7 +254,7 @@ async function runCli(): Promise<void> {
         );
         output.write("已插队：当前工具完成后将转向新指令。\n");
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line === "/cost") {
@@ -271,7 +285,7 @@ async function runCli(): Promise<void> {
           `按已配置模型单价估算：¥${summary.totalCostCny.toFixed(4)}。\n`,
         );
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line === "/sessions") {
@@ -283,7 +297,7 @@ async function runCli(): Promise<void> {
             `${summary.totalInputTokens + summary.totalOutputTokens} tokens\n`,
         );
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line.startsWith("/switch ") || line.startsWith("/resume ")) {
@@ -301,7 +315,7 @@ async function runCli(): Promise<void> {
           `已切换到 #${summary.id} · ${summary.title} · ${summary.status}\n`,
         );
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line === "/compact") {
@@ -317,7 +331,7 @@ async function runCli(): Promise<void> {
           `${error instanceof Error ? error.message : "上下文压缩失败"}\n`,
         );
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line === "/tree") {
@@ -354,7 +368,7 @@ async function runCli(): Promise<void> {
       };
       output.write("分支树（⚡=当前分支）：\n");
       renderBranch(null, "");
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line.startsWith("/branch ")) {
@@ -377,7 +391,7 @@ async function runCli(): Promise<void> {
           );
         }
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line.startsWith("/goto ")) {
@@ -392,7 +406,7 @@ async function runCli(): Promise<void> {
           `${error instanceof Error ? error.message : "切换分支失败"}\n`,
         );
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line === "/timeline") {
@@ -401,7 +415,7 @@ async function runCli(): Promise<void> {
           `#${record.seq} ${record.ts.slice(11, 19)} ${summarizeEvent(record.event)}\n`,
         );
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line === "/init") {
@@ -409,14 +423,14 @@ async function runCli(): Promise<void> {
         output.write(
           `\n/init 启动失败：${error instanceof Error ? error.message : "未知错误"}\n`,
         );
-        readline.prompt(true);
+        safePrompt(true);
       });
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line === "/config" || line.startsWith("/config ")) {
       await handleConfigCommand(line);
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line === "/model" || line.startsWith("/model ")) {
@@ -464,7 +478,7 @@ async function runCli(): Promise<void> {
           }
         }
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     if (line.startsWith("/allow") || line.startsWith("/deny")) {
@@ -477,11 +491,11 @@ async function runCli(): Promise<void> {
         );
         approvalState.pendingCallId = "";
       }
-      readline.prompt();
+      safePrompt();
       return;
     }
     output.write(`未知命令：${line}。输入 /help 查看可用命令。\n`);
-    readline.prompt();
+    safePrompt();
   }
 
   async function handleConfigCommand(line: string): Promise<void> {
@@ -548,7 +562,7 @@ async function runCli(): Promise<void> {
       output.write(
         `\n/run 启动失败：${error instanceof Error ? error.message : "未知错误"}\n`,
       );
-      readline.prompt(true);
+      safePrompt(true);
     });
   }
 
@@ -571,7 +585,7 @@ async function runCli(): Promise<void> {
   function subscribeToSession(target: AgentSession): () => void {
     return target.subscribe((record) => {
       renderEvent(record.event);
-      if (!closed) readline.prompt(true);
+      if (!closed) safePrompt(true);
     });
   }
 }

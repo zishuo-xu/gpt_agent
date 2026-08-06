@@ -32,42 +32,51 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
   const port = await findAvailablePort(effectiveHostname, preferredPort);
   const sessionManager = new WebSessionManager(options.cwd, configService);
   await sessionManager.restore();
-  const app = createWebApp(configService, sessionManager);
 
-  // 认证中间件：非 localhost 监听时校验密码
-  if (needsAuth) {
-    const AUTH_COOKIE = "myagent_auth";
-    const authToken = Buffer.from(password).toString("base64url");
+  // 认证中间件：非 localhost 监听时校验密码。
+  // 必须通过 mountBeforeRoutes 在业务路由之前注册——Hono 按注册顺序执行中间件，
+  // 若在 createWebApp 之后 app.use("*")，已注册的 /api/* 路由会先命中而不受保护。
+  const app = createWebApp(
+    configService,
+    sessionManager,
+    needsAuth
+      ? (app) => {
+          const AUTH_COOKIE = "myagent_auth";
+          const authToken = Buffer.from(password).toString("base64url");
 
-    app.use("*", async (context, next) => {
-      // 登录端点不需要认证
-      if (context.req.path === "/api/auth") return await next();
+          app.use("*", async (context, next) => {
+            // 登录端点不需要认证
+            if (context.req.path === "/api/auth") return await next();
 
-      const cookie = context.req.header("cookie") ?? "";
-      const match = cookie.match(new RegExp(`(?:^|;\\s*)${AUTH_COOKIE}=([^;]+)`));
-      if (match?.[1] === authToken) return await next();
+            const cookie = context.req.header("cookie") ?? "";
+            const match = cookie.match(
+              new RegExp(`(?:^|;\\s*)${AUTH_COOKIE}=([^;]+)`),
+            );
+            if (match?.[1] === authToken) return await next();
 
-      // API 请求返回 401
-      if (context.req.path.startsWith("/api/")) {
-        return context.json({ error: "未授权", requiresAuth: true }, 401);
-      }
-      // 页面请求返回登录页
-      return context.html(loginPage(), 200);
-    });
+            // API 请求返回 401
+            if (context.req.path.startsWith("/api/")) {
+              return context.json({ error: "未授权", requiresAuth: true }, 401);
+            }
+            // 页面请求返回登录页
+            return context.html(loginPage(), 200);
+          });
 
-    app.post("/api/auth", async (context) => {
-      const body = (await context.req.json()) as { password?: string };
-      if (body.password !== password) {
-        return context.json({ ok: false, error: "密码错误" }, 401);
-      }
-      const headers = new Headers();
-      headers.append(
-        "set-cookie",
-        `${AUTH_COOKIE}=${authToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${7 * 24 * 3600}`,
-      );
-      return context.json({ ok: true }, { headers });
-    });
-  }
+          app.post("/api/auth", async (context) => {
+            const body = (await context.req.json()) as { password?: string };
+            if (body.password !== password) {
+              return context.json({ ok: false, error: "密码错误" }, 401);
+            }
+            const headers = new Headers();
+            headers.append(
+              "set-cookie",
+              `${AUTH_COOKIE}=${authToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${7 * 24 * 3600}`,
+            );
+            return context.json({ ok: true }, { headers });
+          });
+        }
+      : undefined,
+  );
 
   const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
 

@@ -413,3 +413,126 @@ describe("SessionListSidebar（会话列表交互）", () => {
   });
 });
 
+
+describe("ProjectPicker（打开其他项目选择器）", () => {
+  before(() => {
+    // 同文件其他 describe 可能已注册（全局单例），幂等处理
+    try {
+      GlobalRegistrator.register();
+    } catch {
+      // 已注册：忽略
+    }
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  async function setup(props: {
+    roots?: Array<{ name: string; path: string }>;
+    path?: string;
+    entries?: Array<{ name: string; path: string; isDirectory: boolean }>;
+    error?: string;
+    opening?: boolean;
+  }) {
+    const [{ act }, { createRoot }, { ProjectPicker }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./ProjectPicker"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const calls = { navigate: [] as string[], open: 0, close: 0 };
+    await act(async () => {
+      root.render(
+        <ProjectPicker
+          roots={
+            props.roots ?? [
+              { name: "/Users/x", path: "/Users/x" },
+              { name: "/tmp", path: "/tmp" },
+            ]
+          }
+          path={props.path ?? "/Users/x/proj"}
+          entries={
+            props.entries ?? [
+              { name: "demo", path: "/Users/x/proj/demo", isDirectory: true },
+            ]
+          }
+          error={props.error ?? ""}
+          opening={props.opening ?? false}
+          onNavigate={(dir) => calls.navigate.push(dir)}
+          onOpen={() => {
+            calls.open += 1;
+          }}
+          onClose={() => {
+            calls.close += 1;
+          }}
+        />,
+      );
+    });
+    return { container, root, act, calls };
+  }
+
+  it("渲染标题、根入口、面包屑、目录列表与打开按钮", async () => {
+    const { container, root, act } = await setup({});
+    assert.ok(container.querySelector("h2")?.textContent?.includes("打开其他项目"));
+    const crumbs = container.querySelectorAll(".project-picker-breadcrumbs button");
+    assert.equal(crumbs.length, 5, "两个根入口 + 三段路径面包屑（/Users/x/proj）");
+    const entries = container.querySelectorAll(".project-picker-entry");
+    assert.equal(entries.length, 1);
+    assert.ok(entries[0]?.textContent?.includes("demo"));
+    const openBtn = container.querySelector(".project-picker-open") as HTMLButtonElement;
+    assert.equal(openBtn.textContent, "打开此目录");
+    assert.equal(openBtn.disabled, false);
+    await act(async () => root.unmount());
+  });
+
+  it("点击目录项与根入口触发 onNavigate", async () => {
+    const { container, root, act, calls } = await setup({});
+    await act(async () => {
+      (container.querySelector(".project-picker-entry") as HTMLButtonElement).click();
+    });
+    assert.deepEqual(calls.navigate, ["/Users/x/proj/demo"]);
+    await act(async () => {
+      (container.querySelectorAll(".project-picker-breadcrumbs button")[0] as HTMLButtonElement).click();
+    });
+    assert.deepEqual(calls.navigate, ["/Users/x/proj/demo", "/Users/x"]);
+    await act(async () => root.unmount());
+  });
+
+  it("点击「打开此目录」触发 onOpen；opening 时禁用并显示打开中", async () => {
+    const { container, root, act, calls } = await setup({});
+    await act(async () => {
+      (container.querySelector(".project-picker-open") as HTMLButtonElement).click();
+    });
+    assert.equal(calls.open, 1);
+    await act(async () => root.unmount());
+
+    const { container: c2, root: r2, act: a2 } = await setup({ opening: true });
+    const openBtn = c2.querySelector(".project-picker-open") as HTMLButtonElement;
+    assert.equal(openBtn.disabled, true);
+    assert.ok(openBtn.textContent?.includes("打开中"));
+    await a2(async () => r2.unmount());
+  });
+
+  it("关闭按钮与遮罩点击触发 onClose", async () => {
+    const { container, root, act, calls } = await setup({});
+    await act(async () => {
+      (container.querySelector(".project-picker-close") as HTMLButtonElement).click();
+    });
+    assert.equal(calls.close, 1);
+    await act(async () => {
+      (container.querySelector(".project-picker-overlay") as HTMLDivElement).click();
+    });
+    assert.equal(calls.close, 2);
+    await act(async () => root.unmount());
+  });
+
+  it("错误信息与空目录提示渲染", async () => {
+    const { container, root, act } = await setup({
+      error: "无法读取目录列表",
+      entries: [],
+    });
+    assert.ok(container.querySelector(".project-picker-error")?.textContent?.includes("无法读取目录列表"));
+    assert.ok(container.querySelector(".project-picker-empty")?.textContent?.includes("没有可打开的子目录"));
+    await act(async () => root.unmount());
+  });
+});
