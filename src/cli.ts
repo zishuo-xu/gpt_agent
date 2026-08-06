@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import path, { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createInterface,
@@ -48,16 +48,88 @@ const pkg: { version: string } = JSON.parse(
 );
 const VERSION: string = pkg.version;
 
+/** --port <n>：Web 端口覆盖（测试与多实例场景用） */
+const webPortArg = process.argv.indexOf("--port");
+const webPort =
+  webPortArg >= 0 ? Number(process.argv[webPortArg + 1]) : undefined;
+
 if (process.argv.includes("--version") || process.argv.includes("-v")) {
   console.log(VERSION);
   process.exit(0);
 }
 
-if (process.argv.includes("--web")) {
+// 守护进程模式：--daemon 让 Web 服务器脱离终端常驻（detach + pid 文件 + 日志重定向）；
+// --daemon-stop 按 pid 文件停止。
+if (process.argv.includes("--web") && process.argv.includes("--daemon")) {
+  await startDaemonWeb();
+} else if (process.argv.includes("--web") && process.argv.includes("--daemon-stop")) {
+  await stopDaemonWeb();
+} else if (process.argv.includes("--web")) {
   const { startWebServer } = await import("./web/server.js");
-  await startWebServer({ cwd: process.cwd() });
+  await startWebServer({
+    cwd: process.cwd(),
+    ...(webPort ? { port: webPort } : {}),
+  });
 } else {
   await runCli();
+}
+
+/**
+ * 守护进程化：spawn 自身（--web）detached 运行，stdout/stderr 重定向到
+ * <stateDir>/web.log，pid 写入 <stateDir>/web.pid。父进程立即退出。
+ */
+async function startDaemonWeb(): Promise<void> {
+  const { spawn } = await import("node:child_process");
+  const { mkdir } = await import("node:fs/promises");
+  const os = await import("node:os");
+  const stateRoot = path.join(os.homedir(), ".myagent");
+  const daemonDir = path.join(stateRoot, "daemon");
+  await mkdir(daemonDir, { recursive: true });
+  const logPath = path.join(daemonDir, "web.log");
+  const pidPath = path.join(daemonDir, "web.pid");
+
+  const logFd = await import("node:fs").then((fs) =>
+    fs.openSync(logPath, "a"),
+  );
+  const child = spawn(
+    process.execPath,
+    [
+      // 复用当前进程的加载器（tsx 的 preflight/import 钩子在 execArgv）与入口参数，
+      // 仅剔除 --daemon：构建后（dist/cli.js）execArgv 为空，参数即 [cli.js, --web]
+      ...process.execArgv,
+      ...process.argv.slice(1).filter((arg) => arg !== "--daemon"),
+    ],
+    {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      env: process.env,
+    },
+  );
+  child.unref();
+  await import("node:fs/promises").then(({ writeFile }) =>
+    writeFile(pidPath, String(child.pid) + "\n"),
+  );
+  console.log(`MyAgent Web 已作为守护进程启动（pid ${child.pid}）`);
+  console.log(`  日志：${logPath}`);
+  console.log(`  停止：myagent --web --daemon-stop`);
+}
+
+async function stopDaemonWeb(): Promise<void> {
+  const os = await import("node:os");
+  const pidPath = path.join(os.homedir(), ".myagent", "daemon", "web.pid");
+  const { readFile, unlink } = await import("node:fs/promises");
+  try {
+    const pid = Number((await readFile(pidPath, "utf8")).trim());
+    if (!Number.isInteger(pid) || pid <= 0) throw new Error("pid 无效");
+    process.kill(pid, "SIGTERM");
+    await unlink(pidPath).catch(() => undefined);
+    console.log(`已向守护进程 ${pid} 发送停止信号。`);
+  } catch (error) {
+    console.log(
+      `守护进程未在运行或已停止：${error instanceof Error ? error.message : "未知错误"}`,
+    );
+  }
 }
 
 async function runCli(): Promise<void> {
@@ -186,11 +258,13 @@ async function runCli(): Promise<void> {
           "/cost                              查看当前 token 统计",
           "/sessions                          查看全部会话",
           "/switch <id>                       切换/恢复会话",
+          "/resume                            续跑当前会话中断的任务（进程重启后）",
           "/compact                           立即压缩当前会话上下文",
           "/tree                              查看会话分支树",
           "/branch <seq> [label]              从指定事件 seq 分裂新分支",
           "/goto <branchId>                    回溯切换到已有分支",
           "/timeline                          列出最近事件（查看分支点 seq）",
+          "/label <seq> <名称>                给事件打书签；/labels 查看；/unlabel <seq> 移除",
           "/init                              只读扫描并生成 AGENTS.md 草稿",
           "/config [global|project]           查看生效配置摘要或指定作用域配置",
           "/config set <key> <value> [global|project] 修改配置项",
@@ -305,8 +379,48 @@ async function runCli(): Promise<void> {
       safePrompt();
       return;
     }
-    if (line.startsWith("/switch ") || line.startsWith("/resume ")) {
-      const id = line.slice(line.indexOf(" ") + 1).trim();
+    if (line === "/resume" || line.startsWith("/resume ")) {
+      const rest = line.slice("/resume".length).trim();
+      if (!rest) {
+        // 无参数：续跑当前会话崩溃中断的任务
+        const interrupted = session.interruptedTask();
+        if (!interrupted) {
+          output.write("当前会话没有中断的任务可续跑。\n");
+        } else if (session.isProcessing()) {
+          output.write("当前会话已有任务在运行。\n");
+        } else {
+          output.write(
+            `正在续跑中断任务 #${interrupted.taskId}：${interrupted.description}\n`,
+          );
+          void session.resumeTask().catch((error) => {
+            output.write(
+              `\n续跑失败：${error instanceof Error ? error.message : "未知错误"}\n`,
+            );
+            safePrompt(true);
+          });
+        }
+        safePrompt();
+        return;
+      }
+      // 带参数：切换会话（兼容旧语义 /resume <id>）
+      const target = manager.get(rest);
+      if (!target) {
+        output.write(`未找到会话 #${rest}。\n`);
+      } else {
+        unsubscribe();
+        session = target;
+        approvalState.pendingCallId = "";
+        unsubscribe = subscribeToSession(session);
+        const summary = session.summary();
+        output.write(
+          `已切换到 #${summary.id} · ${summary.title} · ${summary.status}\n`,
+        );
+      }
+      safePrompt();
+      return;
+    }
+    if (line.startsWith("/switch ")) {
+      const id = line.slice("/switch ".length).trim();
       const target = manager.get(id);
       if (!target) {
         output.write(`未找到会话 #${id}。\n`);
@@ -419,6 +533,47 @@ async function runCli(): Promise<void> {
         output.write(
           `#${record.seq} ${record.ts.slice(11, 19)} ${summarizeEvent(record.event)}\n`,
         );
+      }
+      safePrompt();
+      return;
+    }
+    if (line === "/labels") {
+      const bookmarks = session.bookmarks();
+      if (bookmarks.length === 0) {
+        output.write("暂无书签（/label <seq> <名称> 添加）。\n");
+      } else {
+        for (const bookmark of bookmarks) {
+          output.write(`#${bookmark.seq} ${bookmark.name}\n`);
+        }
+      }
+      safePrompt();
+      return;
+    }
+    if (line.startsWith("/label ")) {
+      const rest = line.slice("/label ".length).trim();
+      const match = rest.match(/^(\d+)\s+(.+)$/);
+      if (!match) {
+        output.write("用法：/label <seq> <名称>\n");
+      } else {
+        try {
+          session.addBookmark(Number(match[1]), match[2]!);
+          output.write(`已标记书签 #${match[1]}「${match[2]}」。\n`);
+        } catch (error) {
+          output.write(
+            `${error instanceof Error ? error.message : "标记失败"}\n`,
+          );
+        }
+      }
+      safePrompt();
+      return;
+    }
+    if (line.startsWith("/unlabel ")) {
+      const seq = Number(line.slice("/unlabel ".length).trim());
+      if (!Number.isInteger(seq) || seq <= 0) {
+        output.write("用法：/unlabel <seq>\n");
+      } else {
+        session.removeBookmark(seq);
+        output.write(`已移除 #${seq} 的书签。\n`);
       }
       safePrompt();
       return;

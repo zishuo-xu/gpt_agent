@@ -468,6 +468,7 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
         typeof config.notify?.webhook === "string"
           ? config.notify.webhook
           : "",
+      desktop: config.notify?.desktop === true,
     },
     behavior: {
       showCacheMissNotices:
@@ -529,7 +530,8 @@ function mergeSecrets(
       incoming.server ?? existing.server,
     ),
     notify: structuredClone(
-      incoming.notify ?? existing.notify ?? { webhook: "" },
+      incoming.notify ??
+        existing.notify ?? { webhook: "", desktop: false },
     ),
     behavior: structuredClone(
       incoming.behavior ??

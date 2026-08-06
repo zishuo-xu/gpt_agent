@@ -1,0 +1,232 @@
+/* ========== 记忆面板 ========== */
+
+.memory-main {
+  display: flex;
+  width: calc(100vw - 232px);
+  height: 100vh;
+  min-height: 0;
+  max-width: none;
+  flex-direction: column;
+  padding: 34px 44px 28px;
+  overflow: hidden;
+}
+
+.memory-workspace {
+  display: grid;
+  grid-template-columns: 235px minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+  border: 1px solid #2b3441;
+  border-radius: 11px;
+  background: #141b24;
+  overflow: hidden;
+}
+
+.memory-list {
+  padding: 15px 10px;
+  border-right: 1px solid #2b3441;
+  background: #111720;
+}
+
+.memory-list button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 3px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #929dac;
+  cursor: pointer;
+  text-align: left;
+}
+
+.memory-list button:hover,
+.memory-list button.selected {
+  border-color: #354153;
+  background: #1c2531;
+  color: #e3e7ed;
+}
+
+.memory-list button.selected {
+  box-shadow: inset 3px 0 0 #668ff3;
+}
+
+/* 四类记忆文档色彩标识 */
+.memory-list .doc-icon {
+  transition: color 150ms ease;
+}
+
+.memory-list .doc-preferences .doc-icon {
+  color: #a78bfa;
+}
+
+.memory-list .doc-conventions .doc-icon {
+  color: #72a3ff;
+}
+
+.memory-list .doc-pitfalls .doc-icon {
+  color: #e57373;
+}
+
+.memory-list .doc-decisions .doc-icon {
+  color: #4cc38a;
+}
+
+.memory-list strong,
+.memory-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-list strong {
+  font-size: 11px;
+}
+
+.memory-list small {
+  margin-top: 3px;
+  color: #647082;
+  font-size: 9px;
+}
+
+.memory-editor {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(260px, 1fr) auto;
+  padding: 22px 24px;
+  overflow-y: auto;
+}
+
+.memory-editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.memory-editor-header h2 {
+  margin: 0 0 5px;
+  font-size: 15px;
+}
+
+.memory-editor-header code {
+  color: #687587;
+  font: 9px var(--mono);
+}
+
+.memory-clear-button {
+  padding: 6px 10px;
+  border: 1px solid #55383e;
+  border-radius: 6px;
+  background: transparent;
+  color: #bd7e87;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.memory-clear-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.memory-textarea {
+  min-height: 300px;
+  padding: 16px;
+  resize: none;
+  border-color: #2d3846;
+  background: #0d131b;
+  color: #d5dbe5;
+  font: 11px/1.75 var(--mono);
+}
+
+/* 空文档占位提示（虚线框） */
+.memory-textarea:placeholder-shown {
+  border-style: dashed;
+  border-color: #37445a;
+}
+
+.memory-timeline {
+  margin-top: 20px;
+  padding-top: 17px;
+  border-top: 1px solid #293340;
+}
+
+.memory-timeline h3 {
+  margin: 0 0 12px;
+  color: #707c8d;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.memory-timeline > p {
+  padding: 14px 16px;
+  border: 1px dashed #303b4a;
+  border-radius: 8px;
+  color: #5f6b7c;
+  font-size: 10px;
+  text-align: center;
+}
+
+.timeline-entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: 130px minmax(100px, 180px) minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0 8px 14px;
+  border-left: 1px solid #303b4a;
+  color: #8f9aaa;
+  font-size: 10px;
+}
+
+/* 时间线节点圆点 */
+.timeline-entry::before {
+  position: absolute;
+  top: 13px;
+  left: -4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4c6fc4;
+  box-shadow: 0 0 0 3px rgba(76, 111, 196, 0.15);
+  content: "";
+}
+
+.timeline-entry time {
+  color: #667385;
+}
+
+.timeline-entry strong {
+  overflow: hidden;
+  color: #b7c0cc;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .session-workspace.with-rail {
+    grid-template-columns: minmax(0, 1fr) 248px;
+  }
+
+  .sessions-main {
+    padding-right: 28px;
+    padding-left: 28px;
+  }
+}
+
+/* 尊重系统的减弱动态效果设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

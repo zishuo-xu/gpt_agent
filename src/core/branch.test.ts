@@ -263,6 +263,75 @@ test("conversationFrom：tool_call/tool_result 配对且结果归属分支链", 
   });
 });
 
+test("conversationFrom：崩溃残留的孤儿 tool_call 补中断说明（无配对 tool_result）", () => {
+  const call = {
+    id: "call-9",
+    tool: "Bash",
+    target: "sleep 120",
+    args: { command: "sleep 120" },
+  };
+  const records = [
+    event(1, { type: "user", text: "跑个长命令" }),
+    event(2, { type: "tool_call", call }),
+    // 无 tool_result：进程在工具执行中被 kill，事件流以此结尾
+  ];
+  const messages = conversationFrom(records);
+  assert.equal(messages.length, 3);
+  assert.deepEqual(messages[1], {
+    role: "assistant",
+    content: "",
+    toolCalls: [call],
+  });
+  const interrupted = messages[2] as ConversationMessage;
+  assert.equal(interrupted.role, "tool");
+  assert.equal(interrupted.toolCallId, "call-9");
+  assert.equal(interrupted.toolName, "Bash");
+  assert.match(interrupted.content, /中断/);
+  assert.equal(interrupted.isError, false);
+});
+
+test("conversationFrom：孤儿 tool_call 之前配对的工具不受影响", () => {
+  const readCall = {
+    id: "call-r",
+    tool: "Read",
+    target: "/tmp/a.txt",
+    args: {},
+  };
+  const bashCall = {
+    id: "call-b",
+    tool: "Bash",
+    target: "sleep 120",
+    args: { command: "sleep 120" },
+  };
+  const records = [
+    event(1, { type: "user", text: "先读再跑" }),
+    event(2, { type: "tool_call", call: readCall }),
+    event(3, {
+      type: "tool_result",
+      callId: "call-r",
+      summary: "内容",
+      output: "file body",
+    }),
+    event(4, { type: "tool_call", call: bashCall }),
+    // 崩溃残留
+  ];
+  const messages = conversationFrom(records);
+  assert.equal(messages.length, 5);
+  // 配对的 Read 正常渲染 tool 消息
+  assert.deepEqual(messages[2], {
+    role: "tool",
+    toolCallId: "call-r",
+    toolName: "Read",
+    target: "/tmp/a.txt",
+    content: "内容\nfile body",
+    isError: false,
+  });
+  // 孤儿 Bash 补中断说明
+  assert.equal(messages[4]?.role, "tool");
+  assert.equal(messages[4]?.toolCallId, "call-b");
+  assert.match(messages[4]?.content ?? "", /中断/);
+});
+
 class ScriptedClient implements ModelClient {
   readonly requests: CompletionRequest[] = [];
   readonly #responses: ModelResponse[];

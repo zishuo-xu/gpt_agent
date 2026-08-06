@@ -1,0 +1,615 @@
+/* ========== 设置页：供应商工作区 ========== */
+
+.provider-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.compact-heading {
+  margin: 0;
+  padding: 18px 22px;
+  border-bottom: 1px solid #29313e;
+}
+
+.provider-workspace {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.provider-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  border-right: 1px solid #29313e;
+  background: #111720;
+}
+
+.provider-group-label {
+  margin: 0 9px 10px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.provider-nav-list {
+  display: grid;
+  gap: 5px;
+}
+
+.provider-nav-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 8px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 46px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: #a2acbb;
+  text-align: left;
+  cursor: pointer;
+}
+
+.provider-nav-item:hover {
+  background: #19212c;
+}
+
+.provider-nav-item.selected {
+  border-color: #394454;
+  background: #1d2531;
+  box-shadow: inset 3px 0 0 #668ff3;
+  color: #f0f3f8;
+}
+
+.provider-cube,
+.model-icon {
+  color: #9aa8bc;
+  font-size: 15px;
+}
+
+.provider-nav-item strong,
+.provider-nav-item small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-nav-item strong {
+  font-size: 13px;
+}
+
+.provider-nav-item small {
+  margin-top: 2px;
+  color: #667384;
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.provider-nav-item i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #606a78;
+}
+
+.provider-nav-item i.enabled {
+  background: #41c675;
+  box-shadow: 0 0 0 3px rgba(65, 198, 117, 0.1);
+}
+
+.add-provider-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #c8cfda;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.add-provider-button:hover {
+  background: #19212c;
+}
+
+.add-provider-button span {
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.provider-editor {
+  min-width: 0;
+  padding: 20px 24px 22px;
+  background: #151b24;
+}
+
+.provider-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.provider-name-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.provider-name-input {
+  width: auto;
+  max-width: 340px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #f1f3f7;
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+}
+
+.provider-name-input:focus {
+  box-shadow: none;
+}
+
+.editable-hint {
+  color: #5d6879;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.provider-id-label {
+  display: block;
+  margin-top: 5px;
+  color: #657181;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.provider-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.enable-button,
+.delete-provider-button {
+  padding: 7px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.enable-button {
+  border: 1px solid #46505e;
+  background: transparent;
+  color: #8995a6;
+}
+
+.enable-button.on {
+  border-color: #2b8a52;
+  background: #2eb966;
+  color: #07160d;
+}
+
+.delete-provider-button {
+  border: 1px solid #4a3338;
+  background: transparent;
+  color: #a66f79;
+}
+
+.delete-provider-button:hover:not(:disabled) {
+  border-color: #83505a;
+  color: #e697a5;
+}
+
+.delete-provider-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.provider-fields {
+  display: grid;
+  max-width: 780px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 13px 12px;
+}
+
+.secret-field {
+  position: relative;
+}
+
+.secret-field input {
+  padding-right: 58px;
+}
+
+.secret-field button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: #1a2230;
+  color: #7f8b9d;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+/* ========== 设置页：模型列表 ========== */
+
+.model-list-section {
+  max-width: 780px;
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid #29313e;
+}
+
+.model-list-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.model-list-heading h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.model-list-heading p {
+  margin: 5px 0 0;
+  color: #6f7b8c;
+  font-size: 10px;
+}
+
+.model-list-heading > span {
+  padding: 3px 7px;
+  border: 1px solid #303a49;
+  border-radius: 11px;
+  color: #7c899a;
+  font-size: 10px;
+}
+
+.model-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.model-row-wrap {
+  border: 1px solid #2d3745;
+  border-radius: 8px;
+  background: #10161e;
+  overflow: hidden;
+}
+
+.model-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.model-row input {
+  height: 32px;
+  border-color: transparent;
+  background: #151c26;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.model-row input:focus {
+  border-color: #5369b7;
+}
+
+.model-test-button,
+.model-delete-button,
+.add-model-button {
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.model-test-button {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #3c4e6d;
+  background: #1b2941;
+  color: #a9c0ff;
+}
+
+.model-test-button:hover:not(:disabled) {
+  background: #243554;
+}
+
+.model-delete-button {
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid #49353b;
+  background: transparent;
+  color: #9f7179;
+}
+
+.model-test-button:disabled,
+.model-delete-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.model-test-result {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid;
+  font-size: 10px;
+}
+
+.model-test-result.success {
+  border-color: #285d3d;
+  background: #11271a;
+  color: #84dca3;
+}
+
+.model-test-result.warning {
+  border-color: #665326;
+  background: #2b2412;
+  color: #e0bf6d;
+}
+
+.model-test-result.failure {
+  border-color: #673738;
+  background: #2d1819;
+  color: #e9959a;
+}
+
+.model-test-result code {
+  color: #7c899a;
+  font-family: var(--mono);
+}
+
+.test-result-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.add-model-button {
+  margin-top: 8px;
+  padding: 7px 12px;
+  border: 1px solid #354052;
+  background: #202833;
+  color: #c8d0dc;
+}
+
+.add-model-button:hover {
+  background: #293443;
+}
+
+/* ========== 设置页：角色模型 ========== */
+
+.role-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.role-card {
+  position: relative;
+  padding: 17px;
+  border: 1px solid #293341;
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: var(--card-inset);
+  overflow: hidden;
+  transition: border-color 150ms ease;
+}
+
+.role-card:hover {
+  border-color: #37465c;
+}
+
+.role-card::after {
+  position: absolute;
+  top: -40px;
+  right: -34px;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: rgba(100, 116, 255, 0.08);
+  content: "";
+}
+
+.role-code {
+  color: #88a8ff;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.role-card h3 {
+  margin: 9px 0 4px;
+  font-size: 14px;
+}
+
+.role-card p {
+  min-height: 36px;
+  margin: 0 0 15px;
+  color: #707c8d;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.role-card label + label {
+  margin-top: 10px;
+}
+
+.role-advanced {
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid #293340;
+}
+
+.role-advanced > summary {
+  color: #7c8ba1;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.pricing-grid label {
+  min-width: 0;
+  font-size: 8px;
+}
+
+.pricing-grid input {
+  height: 32px;
+  min-width: 0;
+  font-size: 10px;
+}
+
+.fallback-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.fallback-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 0.8fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+}
+
+.fallback-row > span {
+  color: #687587;
+  font-size: 9px;
+}
+
+.fallback-row select {
+  min-width: 0;
+  height: 31px;
+  padding: 0 18px 0 5px;
+  background-position: right 5px center;
+  font-size: 9px;
+}
+
+.fallback-row button,
+.add-fallback-button {
+  padding: 6px 7px;
+  border: 1px solid #3b4656;
+  border-radius: 5px;
+  background: #1a222e;
+  color: #909cad;
+  cursor: pointer;
+  font-size: 8px;
+}
+
+.add-fallback-button {
+  justify-self: start;
+}
+
+/* ========== 设置页：权限 / 上下文 / 扩展 ========== */
+
+.behavior-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.permission-rule-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 17px;
+  padding-top: 15px;
+  border-top: 1px solid #293340;
+}
+
+.permission-rule-row {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.permission-rule-row select,
+.permission-rule-row input {
+  height: 34px;
+  font: 10px var(--mono);
+}
+
+.permission-rule-row button {
+  padding: 0 10px;
+  border: 1px solid #51363c;
+  border-radius: 6px;
+  background: transparent;
+  color: #b57983;
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.schema-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 24px;
+}
+
+.schema-field {
+  display: grid;
+  gap: 8px;
+}
+
+.schema-field > span {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.schema-field em {
+  margin-left: 8px;
+  color: var(--st-done);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.schema-field small {
+  min-height: 32px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.schema-field input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #668ff3;
+}
+

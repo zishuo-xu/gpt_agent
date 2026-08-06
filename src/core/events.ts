@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { mkdir, appendFile, readFile } from "node:fs/promises";
 import path from "node:path";
+import { readJsonl } from "../utils/fs.js";
 import type { AgentEvent, RecordedEvent } from "./types.js";
 import type { ToolCall } from "./types.js";
 import { ROOT_BRANCH } from "./branch.js";
@@ -57,11 +58,8 @@ export class SessionStore {
   async readAll(): Promise<RecordedEvent[]> {
     await this.flush();
     try {
-      const content = await readFile(this.#filePath, "utf8");
-      return content
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as RecordedEvent);
+      const { records } = await readJsonl<RecordedEvent>(this.#filePath);
+      return records;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
@@ -77,11 +75,8 @@ export class SessionStore {
 
   async readAllWithoutFlush(): Promise<RecordedEvent[]> {
     try {
-      const content = await readFile(this.#filePath, "utf8");
-      return content
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as RecordedEvent);
+      const { records } = await readJsonl<RecordedEvent>(this.#filePath);
+      return records;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
@@ -152,11 +147,8 @@ export class TraceStore {
 
   async #readAllWithoutFlush(): Promise<AgentTurnTrace[]> {
     try {
-      const content = await readFile(this.#filePath, "utf8");
-      return content
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as AgentTurnTrace);
+      const { records } = await readJsonl<AgentTurnTrace>(this.#filePath);
+      return records;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;

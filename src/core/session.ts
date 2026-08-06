@@ -20,6 +20,8 @@ import {
 } from "./permissions.js";
 import {
   TaskBox,
+  serializeTaskOptions,
+  taskOptionsFromSerialized,
   type RunTaskOptions,
 } from "./run-task.js";
 import { TaskRunner } from "./task-runner.js";
@@ -99,6 +101,16 @@ export class AgentSession {
   #taskBox: TaskBox | undefined;
   #taskStopReason: "deadline" | "budget" | undefined;
   #taskHardStopped = false;
+  /** 恢复时检测到的中断任务（run_started 无配对 run_finished；进程崩溃残留） */
+  readonly #interruptedTask:
+    | {
+        taskId: string;
+        description: string;
+        options?: NonNullable<
+          Extract<AgentEvent, { type: "run_started" }>["taskOptions"]
+        >;
+      }
+    | undefined;
 
   constructor(options: {
     id: string;
@@ -225,6 +237,21 @@ export class AgentSession {
     );
     this.#store.attach(this.#bus, () => this.#branchOps.currentBranchId());
     this.#bus.subscribe((event) => this.#record(event));
+    // 初始权限模式入事件流：恢复时 lastPermissionMode 才能还原初始模式
+    // （否则崩溃续跑会从 trust/strict 降级为配置默认，任务权限上下文丢失）
+    if (
+      options.mode !== "normal" &&
+      !options.restoredEvents?.some(
+        (record) => record.event.type === "permission_mode_changed",
+      )
+    ) {
+      this.#bus.emit({
+        type: "permission_mode_changed",
+        mode: options.mode,
+      });
+    }
+    // 恢复时检测中断任务：最近的 run_started 无配对 run_finished（进程崩溃残留）
+    this.#interruptedTask = interruptedTaskFrom(options.restoredEvents);
     if (options.compactModelClient) {
       this.#model.configureCompaction({
         client: options.compactModelClient,
@@ -333,6 +360,12 @@ export class AgentSession {
     if (firstMessage) {
       summary.firstMessage = firstMessage;
     }
+    if (this.#interruptedTask) {
+      summary.interruptedTask = {
+        taskId: this.#interruptedTask.taskId,
+        description: this.#interruptedTask.description,
+      };
+    }
     return summary;
   }
 
@@ -357,6 +390,33 @@ export class AgentSession {
       throw new Error("会话运行中，请在当前轮结束后分支");
     }
     return this.#branchOps.fork(this.#events, forkSeq, label);
+  }
+
+  /** 添加书签：标记指定事件 seq（可重复标记同一 seq 以改名） */
+  addBookmark(seq: number, name: string): void {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("书签名称不能为空");
+    const target = this.#events.find((record) => record.seq === seq);
+    if (!target) throw new Error(`事件 #${seq} 不存在`);
+    this.#bus.emit({ type: "label", seq, name: trimmed });
+  }
+
+  /** 移除指定 seq 的书签（无则忽略） */
+  removeBookmark(seq: number): void {
+    this.#bus.emit({ type: "label", seq, name: "" });
+  }
+
+  /** 全部书签（按 seq 升序；空名称表示已移除） */
+  bookmarks(): Array<{ seq: number; name: string }> {
+    const bySeq = new Map<number, string>();
+    for (const record of this.#events) {
+      if (record.event.type !== "label") continue;
+      if (record.event.name) bySeq.set(record.event.seq, record.event.name);
+      else bySeq.delete(record.event.seq);
+    }
+    return [...bySeq.entries()]
+      .map(([seq, name]) => ({ seq, name }))
+      .sort((a, b) => a.seq - b.seq);
   }
 
   /** 回溯切换到已存在的分支（不建新节点）；后续消息写入目标分支 */
@@ -525,7 +585,10 @@ export class AgentSession {
     }
   }
 
-  async runTask(options: RunTaskOptions): Promise<void> {
+  async runTask(
+    options: RunTaskOptions,
+    resumeTaskId?: string,
+  ): Promise<void> {
     if (this.#processing || this.#taskBox) {
       throw new Error("当前会话已有任务在运行");
     }
@@ -536,7 +599,12 @@ export class AgentSession {
     }
     const previousMode = this.#permissions.mode;
     const previousRules = this.#permissions.rules();
-    const taskBox = new TaskBox(options, this.#totalCostCny);
+    // 续跑沿用原 taskId（事件流配对 run_finished）；新任务生成新 id
+    const taskBox = new TaskBox(
+      options,
+      this.#totalCostCny,
+      resumeTaskId,
+    );
     this.#taskBox = taskBox;
     this.#taskStopReason = undefined;
     this.#taskHardStopped = false;
@@ -545,17 +613,21 @@ export class AgentSession {
       ...previousRules,
       ...options.hardRules,
     ]);
-    this.#bus.emit({
-      type: "run_started",
-      taskId: taskBox.id,
-      description: options.description,
-      permissionMode: this.#permissions.mode,
-      ...(options.deadline ? { deadline: options.deadline } : {}),
-      ...(options.budgetCny === undefined
-        ? {}
-        : { budgetCny: options.budgetCny }),
-      hardRules: structuredClone(options.hardRules),
-    });
+    // 续跑时事件流已存在原 run_started（含原 taskOptions），不再重复发
+    if (!resumeTaskId) {
+      this.#bus.emit({
+        type: "run_started",
+        taskId: taskBox.id,
+        description: options.description,
+        permissionMode: this.#permissions.mode,
+        ...(options.deadline ? { deadline: options.deadline } : {}),
+        ...(options.budgetCny === undefined
+          ? {}
+          : { budgetCny: options.budgetCny }),
+        hardRules: structuredClone(options.hardRules),
+        taskOptions: serializeTaskOptions(options),
+      });
+    }
     let status: "completed" | "interrupted" | "failed" = "completed";
     let reason:
       | "done"
@@ -565,8 +637,12 @@ export class AgentSession {
       | "interrupted" = "done";
     try {
       await this.sendInput(
-        taskBox.prompt(),
-        `/run ${options.description}`,
+        resumeTaskId
+          ? resumePrompt(taskBox, this.#totalCostCny)
+          : taskBox.prompt(),
+        resumeTaskId
+          ? `/resume ${options.description}`
+          : `/run ${options.description}`,
       );
       if (this.#taskStopReason) {
         status = this.#taskHardStopped
@@ -644,6 +720,41 @@ export class AgentSession {
             : "无人值守任务启动失败",
       });
     });
+  }
+
+  /** 崩溃中断的任务信息（restore 后存在时 Web/CLI 展示「续跑」入口） */
+  interruptedTask(): {
+    taskId: string;
+    description: string;
+  } | undefined {
+    if (!this.#interruptedTask) return undefined;
+    return {
+      taskId: this.#interruptedTask.taskId,
+      description: this.#interruptedTask.description,
+    };
+  }
+
+  /**
+   * 续跑崩溃中断的任务：用 run_started 事件里持久化的完整任务选项重建
+   * TaskBox（沿用原 taskId 与 deadline/budget 语义），注入续跑指令继续执行。
+   */
+  async resumeTask(): Promise<void> {
+    if (!this.#interruptedTask) {
+      throw new Error("当前会话没有中断的任务可续跑");
+    }
+    if (this.#processing || this.#taskBox) {
+      throw new Error("当前会话已有任务在运行");
+    }
+    const serialized = this.#interruptedTask.options;
+    if (!serialized) {
+      throw new Error(
+        "该中断任务缺少完整选项（旧版本事件流），无法续跑；请重新发起任务",
+      );
+    }
+    await this.runTask(
+      taskOptionsFromSerialized(serialized),
+      this.#interruptedTask.taskId,
+    );
   }
 
   async initializeProject(): Promise<void> {
@@ -795,4 +906,61 @@ function firstUserText(
   const text = record.event.text.replace(/\s+/g, " ").trim();
   if (!text) return undefined;
   return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+}
+
+/**
+ * 从事件流检测中断任务：最近的 run_started 若无同 taskId 的 run_finished
+ * 跟随（进程崩溃残留），返回该任务信息与持久化的完整选项。
+ */
+function interruptedTaskFrom(
+  records: readonly RecordedEvent[] | undefined,
+):
+  | {
+      taskId: string;
+      description: string;
+      options?: NonNullable<
+        Extract<AgentEvent, { type: "run_started" }>["taskOptions"]
+      >;
+    }
+  | undefined {
+  if (!records) return undefined;
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const event = records[index]?.event;
+    if (event?.type !== "run_started") continue;
+    const finished = records
+      .slice(index + 1)
+      .some(
+        (record) =>
+          record.event.type === "run_finished" &&
+          record.event.taskId === event.taskId,
+      );
+    if (!finished) {
+      return {
+        taskId: event.taskId,
+        description: event.description,
+        ...(event.taskOptions ? { options: event.taskOptions } : {}),
+      };
+    }
+  }
+  return undefined;
+}
+
+/** 续跑指令：不重复完整任务 prompt（原 prompt 已在事件流历史），只注入恢复说明 */
+function resumePrompt(taskBox: TaskBox, totalCostCny: number): string {
+  return [
+    `[任务续跑 #${taskBox.id}]`,
+    `之前的无人值守任务因进程重启而中断，现在继续。`,
+    `任务：${taskBox.options.description}`,
+    taskBox.options.goal
+      ? `机器验收目标：${taskBox.options.goal}`
+      : "机器验收目标：未指定；完成合理验证后自然停止。",
+    taskBox.options.budgetCny === undefined
+      ? ""
+      : `本任务剩余预算：¥${Math.max(0, taskBox.options.budgetCny - totalCostCny).toFixed(2)}`,
+    "",
+    "先评估已完成的进度（读取文件或检查 git 状态确认），再继续未完成的部分。",
+    "持续工作直至目标完成或任务盒要求收尾；收尾固定包含改动与验证总结、todo 快照、值得写入记忆的稳定事实。",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

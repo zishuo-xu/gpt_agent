@@ -146,6 +146,9 @@ export function conversationFromRaw(
   }
   const messages: ConversationMessage[] = [];
   const calls = new Map<string, ToolCall>();
+  // 崩溃残留的孤儿 tool_call（无配对 tool_result/permission_denied）：
+  // 记录其 assistant 消息索引，收尾补中断说明，避免发给模型时 tool_calls 缺配套 tool 消息
+  const orphanIndexes = new Map<string, number>();
   for (const { event } of records) {
     if (event.type === "branch_switch") continue;
     if (event.type === "user") {
@@ -161,6 +164,7 @@ export function conversationFromRaw(
       });
     } else if (event.type === "tool_call") {
       calls.set(event.call.id, event.call);
+      orphanIndexes.set(event.call.id, messages.length);
       messages.push({
         role: "assistant",
         content: "",
@@ -169,6 +173,7 @@ export function conversationFromRaw(
     } else if (event.type === "tool_result") {
       const call = calls.get(event.callId);
       if (!call) continue;
+      orphanIndexes.delete(event.callId);
       messages.push({
         role: "tool",
         toolCallId: event.callId,
@@ -181,6 +186,7 @@ export function conversationFromRaw(
         isError: event.isError ?? Boolean(event.aborted),
       });
     } else if (event.type === "permission_denied") {
+      orphanIndexes.delete(event.call.id);
       messages.push({
         role: "tool",
         toolCallId: event.call.id,
@@ -198,6 +204,23 @@ export function conversationFromRaw(
           event.summary,
       });
     }
+  }
+  // 崩溃中断的 tool_call：在其后补一条中断说明 tool 消息（倒序插入避免索引偏移）
+  const orphans = [...orphanIndexes.entries()].sort(
+    (a, b) => b[1] - a[1],
+  );
+  for (const [callId, index] of orphans) {
+    const call = calls.get(callId);
+    if (!call) continue;
+    messages.splice(index + 1, 0, {
+      role: "tool",
+      toolCallId: callId,
+      toolName: call.tool,
+      target: call.target,
+      content:
+        "工具调用因进程崩溃中断，未获得结果。如需继续，请重新调用该工具。",
+      isError: false,
+    });
   }
   return messages;
 }

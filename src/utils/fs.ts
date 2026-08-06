@@ -22,6 +22,31 @@ export async function readOptional(
   }
 }
 
+export interface ReadJsonlResult<T> {
+  records: T[];
+  /** 被跳过的坏行数（追加写中断残留半行、手动编辑损坏等） */
+  skipped: number;
+}
+
+/**
+ * 容错读取 JSONL：逐行 parse，坏行跳过（不抛错）。
+ * 事件流是追加写，进程崩溃可能留下半行——坏一行不能毁掉整个会话历史。
+ */
+export async function readJsonl<T>(filePath: string): Promise<ReadJsonlResult<T>> {
+  const content = await readFile(filePath, "utf8");
+  let skipped = 0;
+  const records: T[] = [];
+  for (const line of content.split("\n")) {
+    if (!line) continue;
+    try {
+      records.push(JSON.parse(line) as T);
+    } catch {
+      skipped += 1;
+    }
+  }
+  return { records, skipped };
+}
+
 export interface AtomicWriteOptions {
   /** 新文件权限位（默认 0o600） */
   mode?: number;

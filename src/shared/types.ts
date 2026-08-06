@@ -45,6 +45,11 @@ export interface SessionSummary {
   kind: "interactive" | "run";
   /** 首条用户消息文本（Web 会话搜索用）；截断至 80 字符 */
   firstMessage?: string;
+  /** 崩溃中断的任务（进程重启后存在；Web 展示「续跑」入口） */
+  interruptedTask?: {
+    taskId: string;
+    description: string;
+  };
 }
 
 export type MemoryDocumentId =

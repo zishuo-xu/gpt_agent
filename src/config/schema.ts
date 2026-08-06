@@ -49,6 +49,8 @@ export interface ServerConfig {
 
 export interface NotifyConfig {
   webhook: string;
+  /** 桌面系统通知（macOS 通知中心）；任务完成/出错/审批超时时弹出 */
+  desktop: boolean;
 }
 
 export interface BehaviorConfig {
@@ -142,6 +144,14 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     hot: true,
   },
   {
+    key: "notify.desktop",
+    type: "boolean",
+    title: "桌面通知",
+    description:
+      "任务完成 / 出错 / 审批超时弹出 macOS 通知中心提示（无需浏览器常驻）。默认关闭。",
+    hot: true,
+  },
+  {
     key: "behavior.showCacheMissNotices",
     type: "boolean",
     title: "缓存 miss 提示",
@@ -202,6 +212,7 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
   },
   notify: {
     webhook: "",
+    desktop: false,
   },
   behavior: {
     showCacheMissNotices: false,

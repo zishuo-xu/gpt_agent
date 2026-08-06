@@ -9,6 +9,7 @@ import {
 } from "./sleep.js";
 import {
   atomicWriteFile,
+  readJsonl,
   readOptional,
 } from "./fs.js";
 import { escapeRegExp } from "./regexp.js";
@@ -86,6 +87,33 @@ test("abortableSleep：中止立即 reject AbortError；预中止直接 reject",
   pre.abort();
   await assert.rejects(abortableSleep(10_000, pre.signal), (error: unknown) => error.name === "AbortError");
   assert.equal(abortError().name, "AbortError");
+});
+
+test("readJsonl：坏行跳过不抛错，统计跳过数", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "myagent-utils-"));
+  const file = path.join(dir, "events.jsonl");
+  const good1 = { seq: 1, text: "第一行" };
+  const good2 = { seq: 3, text: "第三行" };
+  await writeFile(
+    file,
+    [
+      JSON.stringify(good1),
+      '{"seq": 2, "text": "半行残', // 崩溃残留：JSON 不完整
+      JSON.stringify(good2),
+      "", // 空行忽略
+      "not-json-at-all", // 完全损坏
+    ].join("\n") + "\n",
+  );
+  const { records, skipped } = await readJsonl<{ seq: number; text: string }>(
+    file,
+  );
+  assert.deepEqual(records, [good1, good2]);
+  assert.equal(skipped, 2);
+  // 尾部半行（追加写中断）同样只跳过，不抛错
+  await writeFile(file, JSON.stringify(good1) + "\n" + '{"seq": 2');
+  const tail = await readJsonl<{ seq: number }>(file);
+  assert.equal(tail.records.length, 1);
+  assert.equal(tail.skipped, 1);
 });
 
 test("escapeRegExp：转义元字符，* 保留为量词（通配语义由 globToRegExp 上层处理）", () => {

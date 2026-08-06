@@ -18,11 +18,20 @@ import {
   buildDisplayItems,
   type DisplayItem,
   statusLabel,
-  toolResultDiffText,
 } from "./session-display";
+import {
+  DiffOrOutput,
+  ItemCard,
+  RichText,
+  StatusTag,
+  formatDuration,
+  formatTime,
+  formatTokens,
+  renderInline,
+  statusMeta,
+  type ApprovalScope,
+} from "./session-render";
 import { ProjectPicker } from "./ProjectPicker";
-
-type ApprovalScope = "once" | "session" | "project" | "global";
 
 interface ProjectEntry {
   key: string;
@@ -49,17 +58,6 @@ interface RunBoundsPreview {
   semanticBounds: string[];
 }
 
-const statusMeta: Record<
-  SessionStatus,
-  { label: string; tone: string }
-> = {
-  idle: { label: "待开始", tone: "neutral" },
-  running: { label: "运行中", tone: "running" },
-  waiting_permission: { label: "等待审批", tone: "waiting" },
-  done: { label: "已完成", tone: "done" },
-  error: { label: "出错", tone: "error" },
-  interrupted: { label: "已中止", tone: "neutral" },
-};
 
 export function SessionApp() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -75,6 +73,9 @@ export function SessionApp() {
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [branches, setBranches] = useState<SessionBranch[]>([]);
   const [currentBranchId, setCurrentBranchId] = useState("main");
+  const [bookmarks, setBookmarks] = useState<
+    Array<{ seq: number; name: string }>
+  >([]);
   const [message, setMessage] = useState("");
   const [permissionMode, setPermissionMode] =
     useState<PermissionMode>("normal");
@@ -178,6 +179,36 @@ export function SessionApp() {
     const payload = await response.json();
     setBranches((payload.branches ?? []) as SessionBranch[]);
     setCurrentBranchId(payload.currentBranchId ?? "main");
+  }
+
+  async function refreshBookmarks() {
+    if (!selectedId) {
+      setBookmarks([]);
+      return;
+    }
+    const response = await fetch(
+      projectUrl(`/api/sessions/${selectedId}/bookmarks`),
+    );
+    if (!response.ok) return;
+    const payload = await response.json();
+    setBookmarks((payload.bookmarks ?? []) as Array<{
+      seq: number;
+      name: string;
+    }>);
+  }
+
+  /** 打书签：name 空串移除；成功后刷新列表 */
+  async function toggleBookmark(seq: number, name: string) {
+    if (!selectedId) return;
+    const response = await fetch(
+      projectUrl(`/api/sessions/${selectedId}/bookmarks`),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seq, name }),
+      },
+    );
+    if (response.ok) await refreshBookmarks();
   }
 
   /** 回溯切换分支：事件流会推送 branch_switch，树随 SSE 自动刷新 */
@@ -368,6 +399,7 @@ export function SessionApp() {
     setResolvedPermissions(new Set());
     seenSeqs.current = new Set();
     void refreshBranches();
+    void refreshBookmarks();
     const source = new EventSource(
       projectUrl(`/api/sessions/${selectedId}/stream`),
     );
@@ -534,6 +566,18 @@ export function SessionApp() {
     await refreshSessions();
   }
 
+  async function resumeInterrupted() {
+    const response = await fetch(
+      projectUrl(`/api/sessions/${selectedId}/resume`),
+      { method: "POST" },
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      setError(payload.error ?? "续跑失败");
+    }
+    await refreshSessions();
+  }
+
   useEffect(() => {
     if (!selectedId || !busy) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -603,11 +647,34 @@ export function SessionApp() {
                     ■ 中止任务
                   </button>
                 )}
+                {selected.interruptedTask && !busy && (
+                  <button
+                    className="resume-button"
+                    onClick={() => void resumeInterrupted()}
+                    title={`续跑中断任务：${selected.interruptedTask.description}`}
+                  >
+                    ↻ 续跑中断任务
+                  </button>
+                )}
                 <button
                   className="secondary-button"
                   onClick={startNewSession}
                 >
                   ＋ 新会话
+                </button>
+                <button
+                  className="detail-toggle"
+                  onClick={() => {
+                    const anchor = document.createElement("a");
+                    anchor.href = projectUrl(
+                      `/api/sessions/${selected.id}/export`,
+                    );
+                    anchor.download = `myagent-${selected.id}.html`;
+                    anchor.click();
+                  }}
+                  title="导出会话为 HTML（可分享/归档）"
+                >
+                  导出
                 </button>
                 <button
                   className="detail-toggle"
@@ -678,6 +745,28 @@ export function SessionApp() {
                       data-seq={item.seq}
                       key={item.seq}
                     >
+                      {item.kind === "message" &&
+                        item.author === "user" && (
+                          <button
+                            className="stream-bookmark"
+                            title="打书签（长会话导航用）"
+                            aria-label={`打书签 #${item.seq}`}
+                            onClick={() => {
+                              const name = window.prompt(
+                                `书签名称（#${item.seq}）：`,
+                                item.text.slice(0, 20),
+                              );
+                              if (name !== null) {
+                                void toggleBookmark(
+                                  item.seq,
+                                  name.trim(),
+                                );
+                              }
+                            }}
+                          >
+                            ★
+                          </button>
+                        )}
                       <ItemCard
                         item={item}
                         showCacheMissNotices={showCacheMissNotices}
@@ -760,6 +849,41 @@ export function SessionApp() {
                             {turn.text}
                           </span>
                           <time>{formatTime(turn.ts)}</time>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </RailCard>
+                <RailCard title="书签">
+                  {bookmarks.length === 0 ? (
+                    <p className="rail-empty">
+                      在对话中右键/长按消息可打书签；CLI /label 亦可。
+                    </p>
+                  ) : (
+                    <div className="chain-list">
+                      {bookmarks.map((bookmark) => (
+                        <button
+                          className="chain-item bookmark-item"
+                          key={bookmark.seq}
+                          onClick={() => scrollToSeq(bookmark.seq)}
+                          title={bookmark.name}
+                        >
+                          <span className="chain-index">
+                            #{bookmark.seq}
+                          </span>
+                          <span className="chain-text">
+                            {bookmark.name}
+                          </span>
+                          <time
+                            role="button"
+                            aria-label={`移除书签 ${bookmark.name}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void toggleBookmark(bookmark.seq, "");
+                            }}
+                          >
+                            ✕
+                          </time>
                         </button>
                       ))}
                     </div>
@@ -1118,15 +1242,6 @@ export function SessionListSidebar(props: {
   );
 }
 
-function StatusTag(props: { status: SessionStatus }) {
-  const meta = statusMeta[props.status];
-  return (
-    <span className={`session-tag ${meta.tone}`}>
-      <i className="tag-dot" />
-      {meta.label}
-    </span>
-  );
-}
 
 function Composer(props: {
   message: string;
@@ -1248,377 +1363,6 @@ function RunBoundsConfirmation(props: {
   );
 }
 
-function ItemCard(props: {
-  item: DisplayItem;
-  /** 缓存 miss 提示开关（behavior.showCacheMissNotices；默认关） */
-  showCacheMissNotices: boolean;
-  locallyResolved: Set<string>;
-  feedback: string;
-  onFeedback: (callId: string, value: string) => void;
-  onPermission: (
-    callId: string,
-    granted: boolean,
-    scope?: ApprovalScope,
-    feedback?: string,
-  ) => Promise<void>;
-}) {
-  const { item, showCacheMissNotices } = props;
-
-  if (item.kind === "message") {
-    return (
-      <article
-        className={`web-message ${
-          item.author === "user" ? "user-message" : "assistant-message"
-        }${item.queued ? " queued-message" : ""}`}
-      >
-        <span className="message-author">
-          {item.author === "user" ? "你" : "MyAgent"} · {formatTime(item.ts)}
-          {item.queued && (
-            <em>
-              {item.started
-                ? "已处理"
-                : item.steer
-                  ? "已插队"
-                  : "已排队"}
-            </em>
-          )}
-        </span>
-        <RichText text={item.text} />
-      </article>
-    );
-  }
-
-  if (item.kind === "tool") {
-    const { call, result } = item;
-    const toolStateClass = !result
-      ? "tool-running"
-      : result.type === "permission_denied"
-        ? "tool-denied"
-        : result.isError
-          ? "tool-error"
-          : "tool-ok";
-    return (
-      <details className={`web-tool-card ${toolStateClass}`}>
-        <summary>
-          <span className="tool-chevron">›</span>
-          <span className="tool-badge">
-            {String(call.tool).toLowerCase()}
-          </span>
-          <code>{call.target}</code>
-          <span className="tool-state">
-            {!result
-              ? "运行中"
-              : result.type === "permission_denied"
-                ? "已拒绝"
-                : result.isError
-                  ? "失败"
-                  : "完成"}
-          </span>
-        </summary>
-        <div className="tool-detail">
-          {call.purpose && <p>目的：{call.purpose}</p>}
-          {result?.summary && <p>{result.summary}</p>}
-          {result?.reason && <p>{result.reason}</p>}
-          {result?.details &&
-            typeof result.details === "object" && (
-              <div className="tool-details-grid">
-                {Object.entries(
-                  result.details as Record<string, unknown>,
-                ).map(([key, value]) => {
-                  // diff 单独渲染为高亮块，不进 details 网格
-                  if (key === "diff") return null;
-                  // Bash 退出码着色（0 绿/非 0 红），耗时转可读格式
-                  const toneClass =
-                    key === "code" && typeof value === "number"
-                      ? value === 0
-                        ? " detail-ok"
-                        : " detail-error"
-                      : key === "durationMs" || key === "signal"
-                        ? " detail-meta"
-                        : "";
-                  const display =
-                    key === "durationMs" && typeof value === "number"
-                      ? formatDuration(value)
-                      : typeof value === "object" && value !== null
-                        ? JSON.stringify(value)
-                        : String(value);
-                  return (
-                    <span
-                      className={`tool-details-item${toneClass}`}
-                      key={key}
-                    >
-                      <b>{key}</b>
-                      {display}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          {(() => {
-            // P0-3 后 Edit/Write diff 在 details.diff（不进模型上下文），渲染优先取它；
-            // 旧 trace 的 tool_result 无 details.diff 时回退 output
-            const text = toolResultDiffText(result);
-            return text === undefined ? null : (
-              <DiffOrOutput
-                text={text}
-                forceDiff={
-                  call.tool === "Edit" ||
-                  call.tool === "Write" ||
-                  call.tool === "MultiEdit"
-                }
-              />
-            );
-          })()}
-          {result?.output &&
-            typeof result.output === "object" && (
-              <pre className="tool-output">
-                {JSON.stringify(result.output, null, 2)}
-              </pre>
-            )}
-        </div>
-      </details>
-    );
-  }
-
-  if (item.kind === "approval") {
-    const { event } = item;
-    const callId = String(event.call.id);
-    const resolved =
-      item.resolvedByEvent || props.locallyResolved.has(callId);
-    return (
-      <section
-        className={`web-approval-card ${resolved ? "resolved" : ""}`}
-      >
-        <div className="approval-heading">
-          <strong>⚠ 审批请求</strong>
-          <span>
-            {event.call.tool} · {event.call.target}
-          </span>
-          {resolved && (
-            <span className="approval-resolved-tag">已处理</span>
-          )}
-        </div>
-        <p>{event.risk}</p>
-        <DiffOrOutput text={String(event.detail || event.call.target)} />
-        {!resolved && (
-          <>
-            <div className="approval-actions">
-              <button
-                className="approve-button"
-                onClick={() =>
-                  void props.onPermission(callId, true, "once")
-                }
-              >
-                仅这一次
-              </button>
-              <button
-                onClick={() =>
-                  void props.onPermission(callId, true, "session")
-                }
-              >
-                本次会话允许
-              </button>
-              <button
-                onClick={() =>
-                  void props.onPermission(callId, true, "project")
-                }
-              >
-                本项目允许
-              </button>
-              <button
-                onClick={() =>
-                  void props.onPermission(callId, true, "global")
-                }
-              >
-                全局允许
-              </button>
-              <button
-                className="reject-button"
-                onClick={() => void props.onPermission(callId, false)}
-              >
-                拒绝
-              </button>
-            </div>
-            <div className="approval-feedback">
-              <input
-                value={props.feedback}
-                onChange={(changeEvent) =>
-                  props.onFeedback(callId, changeEvent.target.value)
-                }
-                placeholder="拒绝并留言，例如：别用 npm，用 pnpm"
-              />
-              <button
-                disabled={!props.feedback.trim()}
-                onClick={() =>
-                  void props.onPermission(
-                    callId,
-                    false,
-                    "once",
-                    props.feedback,
-                  )
-                }
-              >
-                拒绝并留言
-              </button>
-            </div>
-          </>
-        )}
-      </section>
-    );
-  }
-
-  if (item.kind === "subtask") {
-    const { start, end } = item;
-    return (
-      <details className="subtask-card">
-        <summary>
-          ◇ <strong>{start.description}</strong>
-          <span>
-            子代理 explore ·{" "}
-            {end
-              ? `${end.toolCalls} 次工具调用 · ${formatTokens(
-                  end.inputTokens + end.outputTokens,
-                )} tokens · ${statusLabel(end.status)}`
-              : "运行中"}
-          </span>
-        </summary>
-        {end?.summary && (
-          <div className="subtask-body">
-            <RichText text={String(end.summary)} />
-          </div>
-        )}
-      </details>
-    );
-  }
-
-  if (item.kind === "cost") {
-    const { event } = item;
-    const cached = Number(event.cached ?? 0);
-    const input = Number(event.input ?? 0);
-    const cacheRate = input > 0 ? Math.round((cached / input) * 100) : 0;
-    // 缓存浪费度量（参照 Pi 的 cache-stats）：区分合法失效（压缩）与异常失效
-    const missed = Number(event.missedTokens ?? 0);
-    const missedCostCny = Number(event.missedCostCny ?? 0);
-    // 显示门控：压缩重置属合法信息始终提示；其余 miss 提示需开启开关且超过显示阈值
-    const showMiss =
-      missed > 0 &&
-      (event.missedReason === "compaction" ||
-        (showCacheMissNotices &&
-          (missed >= 20_000 || missedCostCny >= 0.1)));
-    const missedCostLabel =
-      showMiss && missedCostCny > 0
-        ? `（多花 ¥${missedCostCny.toFixed(4)}）`
-        : "";
-    const missedLabel =
-      !showMiss
-        ? ""
-        : event.missedReason === "compaction"
-          ? " · 缓存已重置（压缩）"
-          : event.missedReason === "model_switch"
-            ? ` · 缓存失效 ${formatTokens(missed)}（模型切换）${missedCostLabel}`
-            : event.missedReason === "idle"
-              ? ` · 缓存过期 ${formatTokens(missed)}（空闲超时）${missedCostLabel}`
-              : ` · 缓存未命中浪费 ${formatTokens(missed)}${missedCostLabel}`;
-    return (
-      <div className="web-cost-line">
-        本轮 {formatTokens(event.input)} in / {formatTokens(event.output)}{" "}
-        out · 缓存命中 {cacheRate}% · 累计 {formatTokens(event.totalTokens)}
-        {missedLabel}
-        {event.totalCostCny
-          ? `（≈¥${Number(event.totalCostCny).toFixed(4)}）`
-          : ""}
-      </div>
-    );
-  }
-
-  return <SystemLine tone={item.tone}>{item.text}</SystemLine>;
-}
-
-function RichText(props: { text: string }) {
-  const lines = props.text.split(/\r?\n/);
-  return (
-    <div className="rich-text">
-      {lines.map((line, index) => {
-        const trimmed = line.trim();
-        if (!trimmed) return <br key={index} />;
-        const isList = /^[-*]\s+/.test(trimmed);
-        return (
-          <p className={isList ? "rich-list-line" : ""} key={index}>
-            {isList ? "• " : ""}
-            {renderInline(
-              isList ? trimmed.replace(/^[-*]\s+/, "") : line,
-            )}
-          </p>
-        );
-      })}
-    </div>
-  );
-}
-
-function renderInline(text: string): ReactNode[] {
-  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
-  return tokens.map((token, index) => {
-    if (token.startsWith("`") && token.endsWith("`")) {
-      return <code key={index}>{token.slice(1, -1)}</code>;
-    }
-    if (token.startsWith("**") && token.endsWith("**")) {
-      return <strong key={index}>{token.slice(2, -2)}</strong>;
-    }
-    return <Fragment key={index}>{token}</Fragment>;
-  });
-}
-
-function DiffOrOutput(props: { text: string; forceDiff?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  const lines = props.text.split(/\r?\n/);
-  // 同时存在 +/- 行（或带 diff 头）才按 diff 渲染，避免缩进文本误判；
-  // 编辑类工具（Edit/Write/MultiEdit）输出强制按 diff 着色（纯新增文件只有 + 行）
-  const hasMarker = lines.some(
-    (line) => line.startsWith("@@") || line.startsWith("diff --git"),
-  );
-  const hasAdd = lines.some((line) => line.startsWith("+"));
-  const hasRemove = lines.some((line) => line.startsWith("-"));
-  const isDiff =
-    props.forceDiff === true || hasMarker || (hasAdd && hasRemove);
-  // 长输出按需展开：默认只展示前 60 行，避免大段输出拖慢回放渲染
-  const collapseThreshold = 60;
-  const collapsed = !expanded && lines.length > collapseThreshold;
-  const visibleLines = collapsed
-    ? lines.slice(0, collapseThreshold)
-    : lines;
-  return (
-    <>
-      <pre className={isDiff ? "diff-output" : "tool-output"}>
-        {visibleLines.map((line, index) => (
-          <span
-            className={
-              line.startsWith("@@") || line.startsWith("diff --git")
-                ? "diff-hunk"
-                : line.startsWith("+")
-                  ? "diff-add"
-                  : line.startsWith("-")
-                    ? "diff-remove"
-                    : "diff-context"
-            }
-            key={index}
-          >
-            {line}
-            {"\n"}
-          </span>
-        ))}
-      </pre>
-      {collapsed && (
-        <button
-          className="output-expand-toggle"
-          onClick={() => setExpanded(true)}
-        >
-          展开剩余 {lines.length - collapseThreshold} 行
-        </button>
-      )}
-    </>
-  );
-}
-
 function RailCard(props: {
   title: string;
   children: ReactNode;
@@ -1702,41 +1446,5 @@ function KeyValue(props: {
       <strong>{props.value}</strong>
     </div>
   );
-}
-
-function SystemLine(props: {
-  children: ReactNode;
-  tone?: string;
-}) {
-  return (
-    <div
-      className={`web-system-line ${
-        props.tone ? `${props.tone}-line` : ""
-      }`}
-    >
-      {props.children}
-    </div>
-  );
-}
-
-function formatTokens(value: number): string {
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(1)}m`;
-  }
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(value);
-}
-
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
-function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms)) return String(ms);
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms)}ms`;
 }
 

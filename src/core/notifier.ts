@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import type { AgentEvent } from "./types.js";
 
 /**
@@ -114,4 +115,93 @@ function buildPayload(
     };
   }
   return { title, body };
+}
+
+/**
+ * macOS 桌面通知（通知中心）：订阅会话事件流，在任务完成/出错/审批超时
+ * 时弹出系统通知——无需浏览器常驻。非 macOS 平台自动跳过。
+ * 限速与 webhook 一致（同会话每小时 2 条），避免刷屏。
+ */
+export class DesktopNotifier {
+  readonly #enabled: boolean;
+  readonly #sessionTitle: string;
+  readonly #unsubscribe: () => void;
+  readonly #notifyFn: (title: string, body: string) => void;
+  #rateWindow: RateWindow = { start: Date.now(), count: 0 };
+
+  constructor(
+    subscribe: (listener: (event: AgentEvent) => void) => () => void,
+    options: {
+      enabled: boolean;
+      sessionTitle: string;
+      platform?: NodeJS.Platform;
+      /** 注入通知执行器（测试用）；缺省走 osascript */
+      notify?: (title: string, body: string) => void;
+    },
+  ) {
+    this.#enabled =
+      options.enabled && (options.platform ?? process.platform) === "darwin";
+    this.#sessionTitle = options.sessionTitle;
+    this.#notifyFn =
+      options.notify ?? ((title, body) => osascriptNotify(title, body));
+    this.#unsubscribe = this.#enabled
+      ? subscribe((event) => this.#onEvent(event))
+      : () => undefined;
+  }
+
+  dispose(): void {
+    this.#unsubscribe();
+  }
+
+  #onEvent(event: AgentEvent): void {
+    if (event.type === "done") {
+      this.#push("任务完成", `会话「${this.#sessionTitle}」已完成。`);
+    } else if (event.type === "error") {
+      this.#push("任务出错", `会话「${this.#sessionTitle}」出错：${event.message}`);
+    } else if (
+      event.type === "notify" &&
+      (event.level === "error" || event.level === "warn")
+    ) {
+      this.#push(
+        event.level === "error" ? "任务出错" : "审批超时",
+        `会话「${this.#sessionTitle}」：${event.message}`,
+      );
+    }
+  }
+
+  #push(title: string, body: string): void {
+    if (!this.#allowPush()) return;
+    try {
+      this.#notifyFn(title, body);
+    } catch {
+      // 通知失败不影响主流程
+    }
+  }
+
+  #allowPush(): boolean {
+    const now = Date.now();
+    const window = this.#rateWindow;
+    if (now - window.start >= RATE_WINDOW_MS) {
+      this.#rateWindow = { start: now, count: 0 };
+    }
+    if (this.#rateWindow.count >= PUSH_PER_HOUR) return false;
+    this.#rateWindow.count += 1;
+    return true;
+  }
+}
+
+/** 经 osascript 调起 macOS 通知中心（异步 spawn，失败静默） */
+function osascriptNotify(title: string, body: string): void {
+  const script =
+    `display notification ${shellQuote(body)} with title ${shellQuote(`MyAgent · ${title}`)}`;
+  const child = spawn("osascript", ["-e", script], {
+    stdio: "ignore",
+    detached: true,
+  });
+  child.unref();
+}
+
+/** AppleScript 字符串转义（单引号包裹 + 内部转义） */
+function shellQuote(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }

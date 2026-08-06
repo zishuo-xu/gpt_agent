@@ -1,18 +1,17 @@
 import { randomUUID } from "node:crypto";
 import {
   readdir,
-  readFile,
   unlink,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { atomicWriteFile } from "../utils/fs.js";
+import { atomicWriteFile, readJsonl } from "../utils/fs.js";
 import type { ConfigService } from "../config/service.js";
 import type {
   ModelProviderConfig,
   ModelRole,
 } from "../config/schema.js";
-import { WebhookNotifier } from "./notifier.js";
+import { DesktopNotifier, WebhookNotifier } from "./notifier.js";
 import { ConversationAgentModel } from "./agent-model.js";
 import { ConfiguredModelClient } from "../model/client.js";
 import { FallbackModelClient } from "../model/fallback-client.js";
@@ -193,13 +192,23 @@ export class AgentSessionManager {
         pricing: rolePricing(runtimeConfig.models),
       });
       this.#register(session);
-      // 恢复的会话同样注入 webhook 推送（与 createSession 一致）
+      // 恢复的会话同样注入推送（与 createSession 一致）：webhook + macOS 桌面通知
       if (runtimeConfig.notify.webhook) {
         new WebhookNotifier(
           (listener) =>
             session.subscribe((record) => listener(record.event)),
           {
             webhookUrl: runtimeConfig.notify.webhook,
+            sessionTitle: session.title,
+          },
+        );
+      }
+      if (runtimeConfig.notify.desktop === true) {
+        new DesktopNotifier(
+          (listener) =>
+            session.subscribe((record) => listener(record.event)),
+          {
+            enabled: true,
             sessionTitle: session.title,
           },
         );
@@ -257,13 +266,24 @@ export class AgentSessionManager {
       // 显式标题写入事件流（恢复的唯一来源；默认「新会话」/消息推导标题可在恢复时重算）
       session.setTitle(options.title.trim());
     }
-    // 外部 webhook 推送（配置了 notify.webhook 时）：任务完成/出错/审批超时
+    // 外部推送（配置了 notify.* 时）：任务完成/出错/审批超时
+    // webhook 推送到外部网关；desktop 弹 macOS 通知中心
     if (runtimeConfig.notify.webhook) {
       new WebhookNotifier(
         (listener) =>
           session.subscribe((record) => listener(record.event)),
         {
           webhookUrl: runtimeConfig.notify.webhook,
+          sessionTitle: session.title,
+        },
+      );
+    }
+    if (runtimeConfig.notify.desktop === true) {
+      new DesktopNotifier(
+        (listener) =>
+          session.subscribe((record) => listener(record.event)),
+        {
+          enabled: true,
           sessionTitle: session.title,
         },
       );
@@ -448,11 +468,9 @@ function failingModelClient(message: string): ModelClient {
 }
 
 async function readRecordedEvents(filePath: string): Promise<RecordedEvent[]> {
-  const content = await readFile(filePath, "utf8");
-  return content
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as RecordedEvent);
+  // 容错读取：坏行（崩溃残留半行等）跳过，不毁掉整个会话历史
+  const { records } = await readJsonl<RecordedEvent>(filePath);
+  return records;
 }
 
 function lastPermissionMode(

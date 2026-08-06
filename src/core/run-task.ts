@@ -25,7 +25,7 @@ export interface TaskBoxDecision {
 }
 
 export class TaskBox {
-  readonly id = randomUUID().slice(0, 8);
+  readonly id: string;
   readonly options: RunTaskOptions;
   readonly #startCostCny: number;
   readonly #deadlineMs: number | undefined;
@@ -34,7 +34,9 @@ export class TaskBox {
   constructor(
     options: RunTaskOptions,
     startCostCny: number,
+    id?: string,
   ) {
+    this.id = id ?? randomUUID().slice(0, 8);
     this.options = options;
     this.#startCostCny = startCostCny;
     this.#deadlineMs = options.deadline
@@ -259,6 +261,61 @@ export function compileBounds(
     );
   return { hardRules, semanticBounds };
 }
+
+/** 把 RunTaskOptions 序列化为可入事件流的形态（run_started 事件持久化用） */
+export function serializeTaskOptions(
+  options: RunTaskOptions,
+): NonNullable<AgentEventRunStarted["taskOptions"]> {
+  return {
+    description: options.description,
+    ...(options.goal ? { goal: options.goal } : {}),
+    ...(options.bounds ? { bounds: options.bounds } : {}),
+    ...(options.until ? { until: options.until } : {}),
+    ...(options.deadline ? { deadline: options.deadline } : {}),
+    ...(options.budgetCny === undefined
+      ? {}
+      : { budgetCny: options.budgetCny }),
+    ...(options.permission ? { permission: options.permission } : {}),
+    hardRules: structuredClone(options.hardRules),
+    semanticBounds: [...options.semanticBounds],
+  };
+}
+
+/** 从 run_started 事件的 taskOptions 反序列化（崩溃恢复续跑用） */
+export function taskOptionsFromSerialized(
+  taskOptions: NonNullable<AgentEventRunStarted["taskOptions"]>,
+): RunTaskOptions {
+  return {
+    description: taskOptions.description,
+    ...(taskOptions.goal ? { goal: taskOptions.goal } : {}),
+    ...(taskOptions.bounds ? { bounds: taskOptions.bounds } : {}),
+    ...(taskOptions.until ? { until: taskOptions.until } : {}),
+    ...(taskOptions.deadline ? { deadline: taskOptions.deadline } : {}),
+    ...(taskOptions.budgetCny === undefined
+      ? {}
+      : { budgetCny: taskOptions.budgetCny }),
+    ...(taskOptions.permission
+      ? { permission: taskOptions.permission }
+      : {}),
+    hardRules: structuredClone(taskOptions.hardRules),
+    semanticBounds: [...taskOptions.semanticBounds],
+  };
+}
+
+type AgentEventRunStarted = {
+  type: "run_started";
+  taskOptions?: {
+    description: string;
+    goal?: string;
+    bounds?: string;
+    until?: string;
+    deadline?: string;
+    budgetCny?: number;
+    permission?: PermissionMode;
+    hardRules: PermissionRule[];
+    semanticBounds: string[];
+  };
+};
 
 function parseDeadline(value: string, now: Date): string {
   if (/^\d{1,2}:\d{2}$/.test(value)) {

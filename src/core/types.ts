@@ -81,6 +81,18 @@ export type AgentEvent =
       deadline?: string;
       budgetCny?: number;
       hardRules: PermissionRule[];
+      /** 完整任务选项（崩溃恢复续跑用；旧事件可能缺失） */
+      taskOptions?: {
+        description: string;
+        goal?: string;
+        bounds?: string;
+        until?: string;
+        deadline?: string;
+        budgetCny?: number;
+        permission?: PermissionMode;
+        hardRules: PermissionRule[];
+        semanticBounds: string[];
+      };
     }
   | {
       type: "wrapup_warning";
@@ -163,6 +175,12 @@ export type AgentEvent =
   | {
       /** 会话标题（写入事件流，恢复时优先于 index.json 缓存） */
       type: "session_info";
+      name: string;
+    }
+  | {
+      /** 书签：标记某条事件 seq，长会话导航用（参照 Pi 的 label entry） */
+      type: "label";
+      seq: number;
       name: string;
     };
 
