@@ -12,11 +12,10 @@ import { ConfigService, type ConfigScope } from "./config/service.js";
 import {
   getConfigValue,
   setConfigValue,
-} from "./config/config-path.js";
+} from "./shared/config-path.js";
 import {
   toPublicConfig,
   type ModelRole,
-  type MyAgentConfig,
 } from "./config/schema.js";
 import { AgentSessionManager } from "./core/session-manager.js";
 import { AgentSession } from "./core/session.js";
@@ -26,6 +25,13 @@ import {
   type ApprovalState,
 } from "./cli-render.js";
 import {
+  coerceConfigValue,
+  formatEffectiveConfig,
+  isApprovalAnswer,
+  parseApprovalAnswer,
+  parseConfigSetLine,
+} from "./cli-utils.js";
+import {
   parseRunCommand,
   type RunTaskOptions,
 } from "./core/run-task.js";
@@ -33,7 +39,6 @@ import type {
   AgentEvent,
   ApprovalAnswer,
   PermissionMode,
-  PermissionRule,
   SessionBranch,
 } from "./core/types.js";
 
@@ -518,23 +523,9 @@ async function runCli(): Promise<void> {
         return;
       }
       if (rest.startsWith("set ")) {
-        const body = rest.slice("set ".length).trim();
-        const spaceIndex = body.indexOf(" ");
-        if (spaceIndex < 0) {
-          output.write("用法：/config set <key> <value> [global|project]\n");
-          return;
-        }
-        const keyPath = body.slice(0, spaceIndex);
-        let value = body.slice(spaceIndex + 1).trim();
-        let scope: ConfigScope = "project";
-        const lastToken = value.split(/\s+/).at(-1) ?? "";
-        if (
-          (lastToken === "global" || lastToken === "project") &&
-          value.length > lastToken.length
-        ) {
-          scope = lastToken;
-          value = value.slice(0, value.length - lastToken.length).trimEnd();
-        }
+        const { keyPath, value, scope } = parseConfigSetLine(
+          rest.slice("set ".length).trim(),
+        );
         const config = await configService.read(scope);
         // 顶层键存在性守卫（防手误键被静默创建写脏配置）；嵌套路径自动创建
         if (!(keyPath.split(".")[0]! in config)) {
@@ -588,85 +579,4 @@ async function runCli(): Promise<void> {
       if (!closed) safePrompt(true);
     });
   }
-}
-
-function formatEffectiveConfig(config: MyAgentConfig): string {
-  const counts: Record<PermissionRule["effect"], number> = {
-    allow: 0,
-    ask: 0,
-    deny: 0,
-  };
-  for (const rule of config.permissions.rules) counts[rule.effect]++;
-  const modelRoles = (["main", "cheap", "explore"] as ModelRole[])
-    .map(
-      (role) =>
-        `${role}=${config.models[role].providerId}/${config.models[role].model}`,
-    )
-    .join(" · ");
-  return (
-    [
-      `权限档：${config.permissions.mode} · 审批超时 ${config.permissions.approvalTimeoutMs}ms`,
-      `权限规则：allow ${counts.allow} / ask ${counts.ask} / deny ${counts.deny}`,
-      `角色模型：${modelRoles}`,
-      `上下文：压缩阈值 ${config.context.compactAtEstimatedTokens} tokens · 保留最近 ${config.context.keepRecentTokens} tokens`,
-      `Web：host ${config.server.host}${config.server.password ? " · 已设访问密码" : ""}`,
-    ].join("\n") + "\n"
-  );
-}
-
-/** 按当前值的类型把 CLI 原始字符串强转为配置值（数字/布尔/字符串） */
-function coerceConfigValue(current: unknown, rawValue: string): unknown {
-  if (typeof current === "number") {
-    const value = Number(rawValue);
-    if (!Number.isFinite(value)) {
-      throw new Error(`配置项需要数字，收到：${rawValue}`);
-    }
-    return value;
-  }
-  if (typeof current === "boolean") {
-    const normalized = rawValue.toLowerCase();
-    if (!["true", "false"].includes(normalized)) {
-      throw new Error(`配置项需要 true/false，收到：${rawValue}`);
-    }
-    return normalized === "true";
-  }
-  return rawValue;
-}
-
-function isApprovalAnswer(value: string): boolean {
-  const normalized = value.toLowerCase();
-  return (
-    ["y", "yes", "n", "no"].includes(normalized) ||
-    normalized === "/allow" ||
-    normalized.startsWith("/allow ") ||
-    normalized === "/deny" ||
-    normalized.startsWith("/deny ")
-  );
-}
-
-function parseApprovalAnswer(value: string): ApprovalAnswer {
-  const normalized = value.trim();
-  const lower = normalized.toLowerCase();
-  if (lower === "y" || lower === "yes" || lower === "/allow") {
-    return { granted: true, scope: "once" };
-  }
-  if (lower.startsWith("/allow ")) {
-    const requested = lower.slice("/allow ".length).trim();
-    const scope: NonNullable<ApprovalAnswer["scope"]> = [
-      "once",
-      "session",
-      "project",
-      "global",
-    ].includes(requested)
-      ? (requested as NonNullable<ApprovalAnswer["scope"]>)
-      : "once";
-    return { granted: true, scope };
-  }
-  const feedback = lower.startsWith("/deny ")
-    ? normalized.slice("/deny ".length).trim()
-    : "";
-  return {
-    granted: false,
-    ...(feedback ? { feedback } : {}),
-  };
 }

@@ -41,9 +41,9 @@ export interface CompletionRequest {
   system: string;
   messages: ConversationMessage[];
   signal: AbortSignal;
-  /** 本次请求注入的工具集；缺省时由客户端决定（全量编码工具）。
+  /** 本次请求注入的工具集（调用方显式提供；不传即无工具调用能力）。
       同一模型会话内必须固定，否则破坏 prompt cache 前缀。 */
-  tools?: ToolDefinition[];
+  tools: ToolDefinition[];
   /** 缓存写入策略（参照 Pi cacheRetention）：摘要等一次性辅助请求用 "none"
       省略 cache_control，避免污染主会话缓存前缀。缺省 "default"（正常写缓存）。 */
   cacheRetention?: "default" | "none";

@@ -12,6 +12,7 @@ import type {
 import type { ToolExecutor } from "../tools/executor.js";
 import { ModelHttpError } from "../model/client.js";
 import { classifyModelError } from "../model/error-policy.js";
+import { TOOL_NAMES } from "../shared/tool-names.js";
 import { usageCostCny } from "../utils/cost.js";
 import { abortableSleep } from "../utils/sleep.js";
 
@@ -771,7 +772,8 @@ function isTruncatedStopReason(reason: string | undefined): boolean {
 }
 
 function riskFor(call: ToolCall): string {
-  if (call.tool === "Bash") {
+  if (call.tool === TOOL_NAMES[8]) {
+    // Bash
     const command = (call.args as { command?: string }).command ?? call.target;
     if (/^(npm|pnpm|yarn) (install|add|remove|rm)\b/.test(command)) {
       return "将修改依赖清单与 lock 文件";
@@ -795,6 +797,6 @@ function riskFor(call: ToolCall): string {
     if (/^(pkill|kill)\b/.test(command)) return "将终止进程";
     return "命令副作用未知；中止不能撤销已经发生的副作用";
   }
-  if (call.tool === "Write") return "将新建或完整覆盖文件";
+  if (call.tool === TOOL_NAMES[7]) return "将新建或完整覆盖文件"; // Write
   return "将修改文件；执行前可查看精确 diff";
 }

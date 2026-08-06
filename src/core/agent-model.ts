@@ -17,6 +17,7 @@ import type { ModelUsage } from "../model/types.js";
 import {
   toolDefinitionsFor,
 } from "../tools/tool-definitions.js";
+import { TOOL_NAMES } from "../shared/tool-names.js";
 import type { ToolName } from "./types.js";
 
 const PROMPT_HEADER = `You are MyAgent, a local coding agent operating in the user's current project.
@@ -44,9 +45,12 @@ export function buildSystemPrompt(
   toolNames: readonly ToolName[] | undefined,
 ): string {
   const tools = toolNames;
+  // 从单一目录取工具名（as const 保证字面量类型，改目录时编译器同步约束）
   const hasGrepGlob =
-    tools === undefined || tools.includes("Grep") || tools.includes("Glob");
-  const hasTodo = tools === undefined || tools.includes("TodoWrite");
+    tools === undefined ||
+    tools.includes(TOOL_NAMES[1]) || // Grep
+    tools.includes(TOOL_NAMES[2]); // Glob
+  const hasTodo = tools === undefined || tools.includes(TOOL_NAMES[3]); // TodoWrite
   const paragraphs = [PROMPT_HEADER];
   if (hasGrepGlob && hasTodo) {
     paragraphs.push(PROMPT_NAVIGATION);
@@ -55,11 +59,13 @@ export function buildSystemPrompt(
   } else if (hasTodo) {
     paragraphs.push(PROMPT_TODO_ONLY);
   }
-  if (tools === undefined || tools.includes("Task")) {
+  if (tools === undefined || tools.includes(TOOL_NAMES[4])) {
+    // Task
     paragraphs.push(PROMPT_TASK);
   }
   paragraphs.push(PROMPT_MEMORY, PROMPT_RESPECT);
-  if (tools === undefined || tools.includes("Bash")) {
+  if (tools === undefined || tools.includes(TOOL_NAMES[8])) {
+    // Bash
     paragraphs.push(PROMPT_BASH);
   }
   return paragraphs.join("\n\n");

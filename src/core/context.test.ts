@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ConversationMessage } from "../model/types.js";
+import { escapeRegExp } from "../utils/regexp.js";
 import { ContextManager, applySoftForgetting } from "./context.js";
 
 test("ContextManager 注入 AGENTS、记忆；Todo 作为独立消息注入", async () => {
@@ -214,10 +215,6 @@ test("静态段会话内固定：运行中修改记忆文件不改变 system 前
 
   assert.equal(first.system, second.system, "system 前缀必须保持字节级稳定");
 });
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 test("软遗忘只替换最近三轮之前的工具结果并给出恢复指引", () => {
   const messages: ConversationMessage[] = [];

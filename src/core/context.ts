@@ -5,6 +5,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { readOptional } from "../utils/fs.js";
+import { TOOL_NAMES } from "../shared/tool-names.js";
 import type { ConversationMessage } from "../model/types.js";
 import { RepoMap } from "./repo-map.js";
 import type { TodoItem } from "./types.js";
@@ -65,9 +66,9 @@ export class ContextManager {
       const hasExploration = messages.some(
         (m) =>
           m.role === "tool" &&
-          (m.toolName === "Grep" ||
-            m.toolName === "Glob" ||
-            m.toolName === "Task"),
+          (m.toolName === TOOL_NAMES[1] || // Grep
+            m.toolName === TOOL_NAMES[2] || // Glob
+            m.toolName === TOOL_NAMES[4]), // Task
       );
       if (hasExploration) {
         this.#repoMap = new RepoMap(this.#cwd);

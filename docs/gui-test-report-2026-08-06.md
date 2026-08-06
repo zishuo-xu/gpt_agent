@@ -92,3 +92,42 @@
 ## 结论
 
 A-G 全部实现并实测通过。核心发现为缺陷 #4（认证中间件失效）——属高危安全问题（配置了密码但 API 无保护），已修复并有行为层测试锁定。
+
+---
+
+# 补充测试报告（简洁架构残留优化 A-E）
+
+- 日期：2026-08-06（续）
+- 目标：修复评估中识别出的简洁架构残留——大文件拆分、依赖方向、类型副本、测试盲区、字面量归目录
+
+## 优化结果总览（5/5 完成）
+
+| 项 | 内容 | 结果 |
+| --- | --- | --- |
+| A | **App.tsx 拆分**：1415 行 → ~500 行组装层，拆出 `web/src/settings/`（ProviderPanel 250 行 / RoleModelsPanel 230 行 / PermissionsPanel 110 行 / ContextPanel 60 行 / SchemaSections 190 行 / types 共享类型）+ 6 个行为层测试 | ✅ |
+| B | **依赖方向修正**：`CompletionRequest.tools` 改必填，删 client.ts 四处 `?? CODING_TOOL_DEFINITIONS` 运行时回退——model 层不再运行时依赖 tools（编译期约束全部调用方显式注入） | ✅ |
+| C | **config-path 下沉 @shared**：`src/config/config-path.ts` → `src/shared/config-path.ts`，前端经 `@shared/config-path.js` 引用——消除前端对后端源码的运行时 import（Vite 打包不再打入后端文件）；cli.ts 同步改引用 | ✅ |
+| D | **测试盲区补齐**：`cli-utils.test.ts`（7 测试：审批解析 y/yes//allow 范围//deny 留言、config set 解析、类型强转、摘要格式）+ `utils.test.ts`（11 测试：原子写权限保留/AbortError 不落盘/临时文件清理、abortableSleep、escapeRegExp、stringify、usageCostCny、glob）+ `App.test.tsx`（6 测试：四分区渲染/回调/Key 显隐/覆盖提示/规则删除/阈值修改） | ✅ |
+| E | **字面量归目录**：agent-model/context/agent-loop 7 处工具名硬编码改引 `TOOL_NAMES`（as const 编译期守卫）；context.test.ts 本地 escapeRegExp 副本改引 `utils/regexp` | ✅ |
+
+新增测试 24 个：core 204→222、web 23→29（总计 251 全绿）。
+
+## 浏览器实测（模拟用户使用）
+
+| 场景 | 结果 |
+| --- | --- |
+| 设置页渲染：六分区（供应商/角色模型/权限/上下文/复合字段/扩展设置）完整 | ✅ |
+| 编辑「硬压缩触发」90000→80000 → 保存按钮变 dirty → 保存 → 「配置已保存」+ 落盘生效（全局配置验证 80000） | ✅ |
+| 模型连接测试：POST /api/config/test 真实调用 DeepSeek，返回 ok/1134ms | ✅ |
+| 会话监控页正常；新建会话面板正常 | ✅ |
+| 真实任务（只读摘要）：glob → read package.json → read src/App.tsx → 正确总结项目（Vite/tsc 构建链），缓存命中 71% | ✅ |
+| 审批流：Write hello.txt 触发审批卡（diff 预览 + 四级允许 + 拒绝留言）→ 点「仅这一次」→ 文件落盘 | ✅ |
+
+## 验证
+
+`pnpm run typecheck` ✅ · `pnpm test` 251 全绿 ✅ · `pnpm run build` ✅（前端 35→41 模块，拆分生效）。
+
+## 设计文档偏差说明
+
+- C2 原计划 `SessionDetails.tsx` 拆分（SessionApp 主组件）与 styles.css 拆分维持此前决策（无测试覆盖 + 无法视觉验证，收益低于回归风险），本次未做。
+- `web/src/settings/types.ts` 的 Provider/Config 与后端 `schema.ts` 的 `ModelProviderConfig`/`MyAgentConfig` 结构同源但字段不同（前端含 hasApiKey 脱敏字段、后端含注释保留逻辑），维持前端独立类型而非强行合并——合并需后端 toPublicConfig 输出对齐，收益低于改动面。

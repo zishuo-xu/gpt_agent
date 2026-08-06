@@ -1,60 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { SettingsSidebar } from "./SettingsSidebar";
-import { getConfigValue, setConfigValue } from "../../src/config/config-path.js";
 import type {
   ConfigFieldSchema as SchemaField,
   ConnectionTestResult as TestResult,
 } from "@shared/types.js";
-
-type Scope = "global" | "project";
-type Protocol = "anthropic" | "openai-compatible";
-type Role = "main" | "cheap" | "explore";
-
-interface Provider {
-  id: string;
-  name: string;
-  enabled: boolean;
-  protocol: Protocol;
-  baseUrl: string;
-  apiKey: string;
-  hasApiKey: boolean;
-  models: string[];
-}
-
-interface ModelSelection {
-  providerId: string;
-  model: string;
-  pricing?: {
-    inputPerMillionCny: number;
-    outputPerMillionCny: number;
-    cachedInputPerMillionCny: number;
-  };
-  fallbacks?: ModelSelection[];
-}
-
-interface Config {
-  providers: Provider[];
-  models: Record<Role, ModelSelection>;
-  permissions: {
-    mode: "strict" | "normal" | "trust";
-    rules: Array<{
-      effect: "allow" | "ask" | "deny";
-      pattern: string;
-    }>;
-    approvalTimeoutMs: number;
-  };
-  context: {
-    compactAtEstimatedTokens: number;
-    keepRecentTokens: number;
-  };
-  [key: string]: unknown;
-}
-
-const roleMeta: Record<Role, { label: string; hint: string }> = {
-  main: { label: "主循环模型", hint: "复杂推理、编辑与任务执行" },
-  cheap: { label: "压缩摘要", hint: "上下文压缩、会话标题" },
-  explore: { label: "子代理探索", hint: "代码搜索与只读归纳" },
-};
+import type { Config, ModelSelection, Provider, Role, Scope } from "./settings/types";
+import { ProviderPanel } from "./settings/ProviderPanel";
+import { RoleModelsPanel } from "./settings/RoleModelsPanel";
+import { PermissionsPanel } from "./settings/PermissionsPanel";
+import { ContextPanel } from "./settings/ContextPanel";
+import { SchemaDrivenSections } from "./settings/SchemaSections";
 
 export function App() {
   const [scope, setScope] = useState<Scope>("global");
@@ -136,11 +91,6 @@ export function App() {
     [schema],
   );
 
-  const generatedFields = useMemo(
-    () => schema.filter((field) => isScalarType(field.type)),
-    [schema],
-  );
-
   function replaceConfig(recipe: (current: Config) => Config) {
     setNotice(null);
     setDirty(true);
@@ -200,8 +150,7 @@ export function App() {
           models[role] = {
             ...models[role],
             fallbacks: models[role].fallbacks?.filter(
-              (selection) =>
-                selection.providerId !== provider.id,
+              (selection) => selection.providerId !== provider.id,
             ),
           };
         }
@@ -249,8 +198,7 @@ export function App() {
         models[role] = {
           ...models[role],
           fallbacks: models[role].fallbacks?.filter(
-            (selection) =>
-              selection.providerId !== removed?.id,
+            (selection) => selection.providerId !== removed?.id,
           ),
         };
       }
@@ -334,10 +282,7 @@ export function App() {
             ?.map((fallback) =>
               fallback.providerId === provider.id &&
               fallback.model === removedModel
-                ? {
-                    ...fallback,
-                    model: nextModels[0] ?? "",
-                  }
+                ? { ...fallback, model: nextModels[0] ?? "" }
                 : fallback,
             )
             .filter((fallback) => fallback.model),
@@ -583,833 +528,58 @@ export function App() {
           <div className="loading-card">正在读取本机配置…</div>
         ) : (
           <div className="content">
-            <section className="panel provider-panel">
-              <div className="section-heading compact-heading">
-                <div>
-                  <h2>模型供应商</h2>
-                  <p>
-                    {providerDescription ??
-                      "支持 Anthropic 与任意 OpenAI-compatible 第三方端点。"}
-                  </p>
-                </div>
-              </div>
+            <ProviderPanel
+              providers={config.providers}
+              selectedProviderId={selectedProviderId}
+              selectedIndex={selectedIndex}
+              scope={scope}
+              projectKeyOverrides={projectKeyOverrides}
+              revealedKey={revealedKey}
+              saving={saving}
+              testingKey={testingKey}
+              testResults={testResults}
+              onSelectProvider={setSelectedProviderId}
+              onResetRevealedKey={() => setRevealedKey(false)}
+              onToggleRevealedKey={() => setRevealedKey((value) => !value)}
+              onAddProvider={addProvider}
+              onRemoveProvider={removeProvider}
+              onToggleProvider={toggleProvider}
+              onUpdateProvider={updateProvider}
+              onUpdateModel={updateModel}
+              onAddModel={addModel}
+              onRemoveModel={removeModel}
+              onTestConnection={testConnection}
+              providerDescription={providerDescription}
+            />
 
-              <div className="provider-workspace">
-                <aside className="provider-nav">
-                  <p className="provider-group-label">供应商 · 可同时启用多个</p>
-                  <div className="provider-nav-list">
-                    {config.providers.map((provider) => (
-                      <button
-                        className={`provider-nav-item ${
-                          provider.id === selectedProvider?.id ? "selected" : ""
-                        }`}
-                        key={provider.id}
-                        onClick={() => {
-                          setSelectedProviderId(provider.id);
-                          setRevealedKey(false);
-                        }}
-                      >
-                        <span className="provider-cube">◇</span>
-                        <span>
-                          <strong>{provider.name || "未命名供应商"}</strong>
-                          <small>{provider.protocol === "anthropic" ? "Messages" : "Chat Completions"}</small>
-                        </span>
-                        <i className={provider.enabled ? "enabled" : ""} />
-                      </button>
-                    ))}
-                  </div>
-                  <button className="add-provider-button" onClick={addProvider}>
-                    <span>＋</span>添加供应商
-                  </button>
-                </aside>
+            <RoleModelsPanel
+              providers={config.providers}
+              models={config.models}
+              onSelectRoleProvider={selectRoleProvider}
+              onUpdateRole={updateRole}
+              onUpdateRolePricing={updateRolePricing}
+              onAddRoleFallback={addRoleFallback}
+              onUpdateRoleFallback={updateRoleFallback}
+              onRemoveRoleFallback={removeRoleFallback}
+            />
 
-                {selectedProvider && selectedIndex >= 0 && (
-                  <section className="provider-editor">
-                    <div className="provider-editor-header">
-                      <div>
-                        <div className="provider-name-line">
-                          <input
-                            className="provider-name-input"
-                            value={selectedProvider.name}
-                            onChange={(event) =>
-                              updateProvider(selectedIndex, {
-                                name: event.target.value,
-                              })
-                            }
-                            aria-label="供应商名称"
-                          />
-                          <span className="editable-hint">✎ 可编辑名称</span>
-                        </div>
-                        <span className="provider-id-label">{selectedProvider.id}</span>
-                      </div>
-                      <div className="provider-editor-actions">
-                        <button
-                          className={`enable-button ${
-                            selectedProvider.enabled ? "on" : ""
-                          }`}
-                          onClick={() => toggleProvider(selectedIndex)}
-                        >
-                          {selectedProvider.enabled
-                            ? "供应商已启用"
-                            : "供应商已禁用"}
-                        </button>
-                        <button
-                          className="delete-provider-button"
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `确认删除供应商「${
-                                  selectedProvider.name ||
-                                  selectedProvider.id
-                                }」？相关角色会切换到其他供应商。`,
-                              )
-                            ) {
-                              removeProvider(selectedIndex);
-                            }
-                          }}
-                          disabled={config.providers.length === 1}
-                        >
-                          删除供应商
-                        </button>
-                      </div>
-                    </div>
+            <PermissionsPanel
+              permissions={config.permissions}
+              description={schema.find((field) => field.key === "permissions")?.description}
+              onUpdatePermission={updatePermission}
+              onUpdateRule={updateRule}
+            />
 
-                    <div className="provider-fields">
-                      <label>
-                        Base URL
-                        <input
-                          value={selectedProvider.baseUrl}
-                          onChange={(event) =>
-                            updateProvider(selectedIndex, {
-                              baseUrl: event.target.value,
-                            })
-                          }
-                          placeholder="https://api.example.com/v1"
-                        />
-                      </label>
-                      <label>
-                        API 格式
-                        <select
-                          value={selectedProvider.protocol}
-                          onChange={(event) =>
-                            updateProvider(selectedIndex, {
-                              protocol: event.target.value as Protocol,
-                            })
-                          }
-                        >
-                          <option value="openai-compatible">
-                            Chat Completions (/chat/completions)
-                          </option>
-                          <option value="anthropic">
-                            Anthropic Messages (/messages)
-                          </option>
-                        </select>
-                      </label>
-                      <label>
-                        API Key
-                        <div className="secret-field">
-                          <input
-                            type={revealedKey ? "text" : "password"}
-                            value={selectedProvider.apiKey}
-                            onChange={(event) =>
-                              updateProvider(selectedIndex, {
-                                apiKey: event.target.value,
-                              })
-                            }
-                            placeholder={
-                              selectedProvider.hasApiKey
-                                ? "已保存；留空保持原值"
-                                : "输入 API Key"
-                            }
-                            autoComplete="off"
-                          />
-                          <button
-                            onClick={() => setRevealedKey((value) => !value)}
-                            aria-label={revealedKey ? "隐藏 API Key" : "显示 API Key"}
-                          >
-                            {revealedKey ? "隐藏" : "显示"}
-                          </button>
-                        </div>
-                        {scope === "global" &&
-                          projectKeyOverrides?.providers.some(
-                            (override) => override.id === selectedProvider.id,
-                          ) && (
-                            <p className="key-override-hint">
-                              ⚠ 当前项目（{projectKeyOverrides.cwd}）的
-                              local.jsonc 中该渠道已配置非空 API Key，会覆盖此全局 Key；
-                              如需全局 Key 生效，请清空项目 Key。
-                            </p>
-                          )}
-                      </label>
-                      <label>
-                        供应商 ID
-                        <input
-                          value={selectedProvider.id}
-                          onChange={(event) =>
-                            updateProvider(selectedIndex, { id: event.target.value })
-                          }
-                        />
-                      </label>
-                    </div>
+            <ContextPanel
+              context={config.context}
+              description={schema.find((field) => field.key === "context")?.description}
+              onChange={replaceConfig}
+            />
 
-                    <div className="model-list-section">
-                      <div className="model-list-heading">
-                        <div>
-                          <h3>模型列表</h3>
-                          <p>
-                            列表内模型均可用，可同时被不同角色选择；每个模型独立测试。
-                          </p>
-                        </div>
-                        <span>{selectedProvider.models.length} 个模型</span>
-                      </div>
-
-                      <div className="model-rows">
-                        {selectedProvider.models.map((model, modelIndex) => {
-                          const resultKey = `${selectedProvider.id}:${model}`;
-                          const result = testResults[resultKey];
-                          return (
-                            <div className="model-row-wrap" key={modelIndex}>
-                              <div className="model-row">
-                                <span className="model-icon">◇</span>
-                                <input
-                                  value={model}
-                                  onChange={(event) =>
-                                    updateModel(
-                                      selectedIndex,
-                                      modelIndex,
-                                      event.target.value,
-                                    )
-                                  }
-                                  aria-label={`模型 ${modelIndex + 1}`}
-                                />
-                                <button
-                                  className="model-test-button"
-                                  onClick={() =>
-                                    void testConnection(selectedProvider, model)
-                                  }
-                                  disabled={
-                                    saving ||
-                                    testingKey !== null ||
-                                    !model.trim()
-                                  }
-                                >
-                                  {testingKey === resultKey ? "测试中…" : "测试连接"}
-                                </button>
-                                <button
-                                  className="model-delete-button"
-                                  onClick={() =>
-                                    removeModel(selectedIndex, modelIndex)
-                                  }
-                                  disabled={selectedProvider.models.length === 1}
-                                >
-                                  删除
-                                </button>
-                              </div>
-                              {result && (
-                                <div
-                                  className={`model-test-result ${
-                                    result.ok
-                                      ? "success"
-                                      : result.reachable
-                                        ? "warning"
-                                        : "failure"
-                                  }`}
-                                >
-                                  <span className="test-result-dot" />
-                                  <strong>
-                                    {result.ok
-                                      ? "连接正常"
-                                      : result.reachable
-                                        ? "服务可达"
-                                        : "连接失败"}
-                                  </strong>
-                                  <span>{result.message}</span>
-                                  <code>{result.latencyMs}ms</code>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <button
-                        className="add-model-button"
-                        onClick={() => addModel(selectedIndex)}
-                      >
-                        ＋ 添加模型
-                      </button>
-                    </div>
-                  </section>
-                )}
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="section-heading">
-                <div>
-                  <h2>角色模型</h2>
-                  <p>
-                    每个角色选择一个模型，三个角色可以使用同一模型或不同模型。
-                  </p>
-                </div>
-              </div>
-              <div className="role-grid">
-                {(Object.keys(roleMeta) as Role[]).map((role) => {
-                  const selection = config.models[role];
-                  const provider = config.providers.find(
-                    (item) => item.id === selection.providerId,
-                  );
-                  return (
-                    <div className="role-card" key={role}>
-                      <span className="role-code">{role}</span>
-                      <h3>{roleMeta[role].label}</h3>
-                      <p>{roleMeta[role].hint}</p>
-                      <label>
-                        供应商
-                        <select
-                          value={selection.providerId}
-                          onChange={(event) =>
-                            selectRoleProvider(role, event.target.value)
-                          }
-                        >
-                          {config.providers
-                            .filter((item) => item.enabled)
-                            .map((item) => (
-                              <option value={item.id} key={item.id}>
-                                {item.name}
-                              </option>
-                            ))}
-                        </select>
-                      </label>
-                      <label>
-                        模型
-                        <select
-                          value={selection.model}
-                          onChange={(event) =>
-                            updateRole(role, { model: event.target.value })
-                          }
-                        >
-                          {(provider?.models ?? []).map((model) => (
-                            <option value={model} key={model}>
-                              {model}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <details className="role-advanced">
-                        <summary>费用与 fallback</summary>
-                        <div className="pricing-grid">
-                          <label>
-                            输入 ¥/百万 tokens
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={
-                                selection.pricing
-                                  ?.inputPerMillionCny ?? 0
-                              }
-                              onChange={(event) =>
-                                updateRolePricing(
-                                  role,
-                                  "inputPerMillionCny",
-                                  event.target.value,
-                                )
-                              }
-                            />
-                          </label>
-                          <label>
-                            输出 ¥/百万 tokens
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={
-                                selection.pricing
-                                  ?.outputPerMillionCny ?? 0
-                              }
-                              onChange={(event) =>
-                                updateRolePricing(
-                                  role,
-                                  "outputPerMillionCny",
-                                  event.target.value,
-                                )
-                              }
-                            />
-                          </label>
-                          <label>
-                            缓存 ¥/百万 tokens
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={
-                                selection.pricing
-                                  ?.cachedInputPerMillionCny ?? 0
-                              }
-                              onChange={(event) =>
-                                updateRolePricing(
-                                  role,
-                                  "cachedInputPerMillionCny",
-                                  event.target.value,
-                                )
-                              }
-                            />
-                          </label>
-                        </div>
-                        <div className="fallback-list">
-                          {(selection.fallbacks ?? []).map(
-                            (fallback, fallbackIndex) => {
-                              const fallbackProvider =
-                                config.providers.find(
-                                  (item) =>
-                                    item.id ===
-                                    fallback.providerId,
-                                );
-                              return (
-                                <div
-                                  className="fallback-row"
-                                  key={fallbackIndex}
-                                >
-                                  <span>
-                                    {fallbackIndex + 1}
-                                  </span>
-                                  <select
-                                    value={fallback.providerId}
-                                    onChange={(event) => {
-                                      const nextProvider =
-                                        config.providers.find(
-                                          (item) =>
-                                            item.id ===
-                                            event.target.value,
-                                        );
-                                      updateRoleFallback(
-                                        role,
-                                        fallbackIndex,
-                                        {
-                                          providerId:
-                                            event.target.value,
-                                          model:
-                                            nextProvider
-                                              ?.models[0] ?? "",
-                                        },
-                                      );
-                                    }}
-                                  >
-                                    {config.providers
-                                      .filter(
-                                        (item) => item.enabled,
-                                      )
-                                      .map((item) => (
-                                        <option
-                                          value={item.id}
-                                          key={item.id}
-                                        >
-                                          {item.name}
-                                        </option>
-                                      ))}
-                                  </select>
-                                  <select
-                                    value={fallback.model}
-                                    onChange={(event) =>
-                                      updateRoleFallback(
-                                        role,
-                                        fallbackIndex,
-                                        {
-                                          model:
-                                            event.target.value,
-                                        },
-                                      )
-                                    }
-                                  >
-                                    {(
-                                      fallbackProvider?.models ?? []
-                                    ).map((model) => (
-                                      <option
-                                        value={model}
-                                        key={model}
-                                      >
-                                        {model}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <button
-                                    onClick={() =>
-                                      removeRoleFallback(
-                                        role,
-                                        fallbackIndex,
-                                      )
-                                    }
-                                  >
-                                    删除
-                                  </button>
-                                </div>
-                              );
-                            },
-                          )}
-                          <button
-                            className="add-fallback-button"
-                            onClick={() => addRoleFallback(role)}
-                          >
-                            ＋ 添加备用模型
-                          </button>
-                        </div>
-                      </details>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="section-heading">
-                <div>
-                  <h2>权限与审批</h2>
-                  <p>
-                    {schema.find(
-                      (field) => field.key === "permissions",
-                    )?.description ??
-                      "会话默认档位、规则与审批超时。"}
-                  </p>
-                </div>
-              </div>
-              <div className="behavior-grid">
-                <label>
-                  默认权限档
-                  <select
-                    value={config.permissions.mode}
-                    onChange={(event) =>
-                      updatePermission({
-                        mode: event.target
-                          .value as Config["permissions"]["mode"],
-                      })
-                    }
-                  >
-                    <option value="strict">strict</option>
-                    <option value="normal">normal</option>
-                    <option value="trust">trust</option>
-                  </select>
-                </label>
-                <label>
-                  审批超时（秒）
-                  <input
-                    type="number"
-                    min="1"
-                    value={Math.round(
-                      config.permissions.approvalTimeoutMs /
-                        1000,
-                    )}
-                    onChange={(event) =>
-                      updatePermission({
-                        approvalTimeoutMs:
-                          Number(event.target.value) * 1000,
-                      })
-                    }
-                  />
-                </label>
-              </div>
-              <div className="permission-rule-list">
-                {config.permissions.rules.map((rule, index) => (
-                  <div className="permission-rule-row" key={index}>
-                    <select
-                      value={rule.effect}
-                      onChange={(event) =>
-                        updateRule(index, {
-                          effect: event.target
-                            .value as typeof rule.effect,
-                        })
-                      }
-                    >
-                      <option value="allow">allow</option>
-                      <option value="ask">ask</option>
-                      <option value="deny">deny</option>
-                    </select>
-                    <input
-                      value={rule.pattern}
-                      onChange={(event) =>
-                        updateRule(index, {
-                          pattern: event.target.value,
-                        })
-                      }
-                      placeholder="Bash(git commit *)"
-                    />
-                    <button
-                      onClick={() =>
-                        updatePermission({
-                          rules:
-                            config.permissions.rules.filter(
-                              (_, ruleIndex) =>
-                                ruleIndex !== index,
-                            ),
-                        })
-                      }
-                    >
-                      删除
-                    </button>
-                  </div>
-                ))}
-                <button
-                  className="add-model-button"
-                  onClick={() =>
-                    updatePermission({
-                      rules: [
-                        ...config.permissions.rules,
-                        {
-                          effect: "ask",
-                          pattern: "Bash(command *)",
-                        },
-                      ],
-                    })
-                  }
-                >
-                  ＋ 添加规则
-                </button>
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="section-heading">
-                <div>
-                  <h2>上下文</h2>
-                  <p>
-                    {schema.find(
-                      (field) => field.key === "context",
-                    )?.description ??
-                      "硬压缩阈值与保留轮数。"}
-                  </p>
-                </div>
-              </div>
-              <div className="behavior-grid">
-                <label>
-                  硬压缩触发（估算 tokens）
-                  <input
-                    type="number"
-                    min="1000"
-                    value={
-                      config.context
-                        .compactAtEstimatedTokens
-                    }
-                    onChange={(event) =>
-                      replaceConfig((current) => ({
-                        ...current,
-                        context: {
-                          ...current.context,
-                          compactAtEstimatedTokens: Number(
-                            event.target.value,
-                          ),
-                        },
-                      }))
-                    }
-                  />
-                </label>
-                <label>
-                  压缩后保留最近 tokens
-                  <input
-                    type="number"
-                    min="1000"
-                    value={config.context.keepRecentTokens}
-                    onChange={(event) =>
-                      replaceConfig((current) => ({
-                        ...current,
-                        context: {
-                          ...current.context,
-                          keepRecentTokens: Number(
-                            event.target.value,
-                          ),
-                        },
-                      }))
-                    }
-                  />
-                </label>
-              </div>
-            </section>
-
-            {schema
-              .filter((field) => !isScalarType(field.type) && !field.renderer)
-              .map((field) => (
-                <section className="panel" key={field.key}>
-                  <div className="section-heading">
-                    <div>
-                      <h2>
-                        {field.title}
-                        {field.hot && <em>即时生效</em>}
-                      </h2>
-                      <p>{field.description}</p>
-                    </div>
-                  </div>
-                  <ObjectFieldEditor
-                    value={config[field.key]}
-                    onChange={(value) =>
-                      replaceConfig((current) => ({
-                        ...current,
-                        [field.key]: value,
-                      }))
-                    }
-                  />
-                </section>
-              ))}
-
-            {generatedFields.length > 0 && (
-              <section className="panel">
-                <div className="section-heading">
-                  <div>
-                    <h2>扩展设置</h2>
-                    <p>
-                      以下字段由 Config Schema 自动生成，无需修改前端代码。
-                    </p>
-                  </div>
-                </div>
-                <div className="schema-field-grid">
-                  {generatedFields.map((field) => {
-                    // dotted 键（server.host 等）读写嵌套 section，避免被后端静默丢弃
-                    const value =
-                      getConfigValue(config, field.key) ??
-                      field.default ??
-                      "";
-                    return (
-                      <label className="schema-field" key={field.key}>
-                        <span>
-                          {field.title}
-                          {field.hot && <em>即时生效</em>}
-                        </span>
-                        <small>{field.description}</small>
-                        {field.type === "boolean" ? (
-                          <input
-                            type="checkbox"
-                            checked={value === true}
-                            onChange={(event) =>
-                              replaceConfig((current) =>
-                                setConfigValue(
-                                  current,
-                                  field.key,
-                                  event.target.checked,
-                                ),
-                              )
-                            }
-                          />
-                        ) : field.type === "select" ? (
-                          <select
-                            value={String(value)}
-                            onChange={(event) =>
-                              replaceConfig((current) =>
-                                setConfigValue(
-                                  current,
-                                  field.key,
-                                  event.target.value,
-                                ),
-                              )
-                            }
-                          >
-                            {(field.options ?? []).map((option) => (
-                              <option value={option.value} key={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            type={field.type === "number" ? "number" : "text"}
-                            value={String(value)}
-                            min={field.min}
-                            max={field.max}
-                            step={field.step}
-                            onChange={(event) =>
-                              replaceConfig((current) =>
-                                setConfigValue(
-                                  current,
-                                  field.key,
-                                  field.type === "number"
-                                    ? Number(event.target.value)
-                                    : event.target.value,
-                                ),
-                              )
-                            }
-                          />
-                        )}
-                      </label>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
+            <SchemaDrivenSections schema={schema} config={config} onChange={replaceConfig} />
           </div>
         )}
       </main>
-    </div>
-  );
-}
-
-const SCALAR_TYPES = ["string", "number", "boolean", "select"];
-
-function isScalarType(type: string): boolean {
-  return SCALAR_TYPES.includes(type);
-}
-
-/**
- * 通用对象字段编辑器：schema 驱动的回退渲染器。
- * 新增复合配置项（未指定专用 renderer）时零前端改动即可显示并编辑其子字段。
- */
-function ObjectFieldEditor(props: {
-  value: unknown;
-  onChange: (value: Record<string, unknown>) => void;
-}) {
-  const record =
-    props.value && typeof props.value === "object" && !Array.isArray(props.value)
-      ? (props.value as Record<string, unknown>)
-      : {};
-  const keys = Object.keys(record);
-  if (keys.length === 0) {
-    return <p className="schema-field-note">该配置暂无子字段。</p>;
-  }
-  return (
-    <div className="schema-field-grid">
-      {keys.map((key) => {
-        const value = record[key];
-        const update = (next: unknown) =>
-          props.onChange({ ...record, [key]: next });
-        if (typeof value === "boolean") {
-          return (
-            <label className="schema-field" key={key}>
-              <span>{key}</span>
-              <input
-                type="checkbox"
-                checked={value}
-                onChange={(event) => update(event.target.checked)}
-              />
-            </label>
-          );
-        }
-        if (typeof value === "number") {
-          return (
-            <label className="schema-field" key={key}>
-              <span>{key}</span>
-              <input
-                type="number"
-                value={String(value)}
-                onChange={(event) => update(Number(event.target.value))}
-              />
-            </label>
-          );
-        }
-        if (typeof value === "string") {
-          return (
-            <label className="schema-field" key={key}>
-              <span>{key}</span>
-              <input
-                type="text"
-                value={value}
-                onChange={(event) => update(event.target.value)}
-              />
-            </label>
-          );
-        }
-        // 嵌套对象/数组等复杂结构：只读展示
-        return (
-          <label className="schema-field" key={key}>
-            <span>{key}</span>
-            <small>复杂结构，请在配置文件或对应功能区编辑。</small>
-          </label>
-        );
-      })}
     </div>
   );
 }

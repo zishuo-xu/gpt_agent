@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import type { ModelProviderConfig } from "../config/schema.js";
 import type { ToolCall, ToolName } from "../core/types.js";
 import { isToolName } from "../shared/tool-names.js";
-import { CODING_TOOL_DEFINITIONS } from "../tools/tool-definitions.js";
 import type {
   CompletionRequest,
   ConversationMessage,
@@ -66,7 +65,7 @@ export class ConfiguredModelClient implements ModelClient {
   }
 
   async #completeOpenAi(request: CompletionRequest): Promise<ModelResponse> {
-    const tools = request.tools ?? CODING_TOOL_DEFINITIONS;
+    const tools = request.tools;
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "chat/completions"),
       {
@@ -125,7 +124,7 @@ export class ConfiguredModelClient implements ModelClient {
   }
 
   async #completeAnthropic(request: CompletionRequest): Promise<ModelResponse> {
-    const tools = request.tools ?? CODING_TOOL_DEFINITIONS;
+    const tools = request.tools;
     // 参照 Pi cacheRetention："none" 时省略 cache_control，不写缓存（摘要等一次性请求）
     const cacheControl =
       request.cacheRetention === "none"
@@ -197,7 +196,7 @@ export class ConfiguredModelClient implements ModelClient {
   }
 
   async *#streamOpenAi(request: CompletionRequest): AsyncIterable<StreamChunk> {
-    const tools = request.tools ?? CODING_TOOL_DEFINITIONS;
+    const tools = request.tools;
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "chat/completions"),
       {
@@ -287,7 +286,7 @@ export class ConfiguredModelClient implements ModelClient {
   }
 
   async *#streamAnthropic(request: CompletionRequest): AsyncIterable<StreamChunk> {
-    const tools = request.tools ?? CODING_TOOL_DEFINITIONS;
+    const tools = request.tools;
     const cacheControl =
       request.cacheRetention === "none"
         ? undefined

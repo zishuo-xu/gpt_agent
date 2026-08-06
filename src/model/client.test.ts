@@ -7,6 +7,9 @@ import {
   toolDefinitionsFor,
 } from "../tools/tool-definitions.js";
 
+/** 测试缺省全量工具集（client 层已不再提供默认值，调用方显式传入） */
+const ALL_TOOLS = toolDefinitionsFor();
+
 function provider(
   protocol: ModelProviderConfig["protocol"],
 ): ModelProviderConfig {
@@ -65,6 +68,7 @@ test("OpenAI-compatible 响应转换为统一工具调用", async () => {
     system: "system",
     messages: [{ role: "user", content: "检查代码" }],
     signal: new AbortController().signal,
+    tools: ALL_TOOLS,
   });
   assert.equal(result.text, "我先读取文件。");
   assert.deepEqual(result.toolCalls[0], {
@@ -120,6 +124,7 @@ test("OpenAI-compatible 响应解析 finish_reason 为 stopReason", async () => 
     system: "system",
     messages: [{ role: "user", content: "检查代码" }],
     signal: new AbortController().signal,
+    tools: ALL_TOOLS,
   });
   assert.equal(result.text, "内容被输出长度截断");
   assert.equal(result.stopReason, "length");
@@ -144,6 +149,7 @@ test("Anthropic 响应解析 stop_reason 为 stopReason", async () => {
     system: "system",
     messages: [{ role: "user", content: "检查代码" }],
     signal: new AbortController().signal,
+    tools: ALL_TOOLS,
   });
   assert.equal(result.text, "内容被截断");
   assert.equal(result.stopReason, "max_tokens");
@@ -168,6 +174,7 @@ test("cacheRetention=none 时 Anthropic 请求省略 cache_control（摘要不�
   const base = {
     system: "system",
     messages: [{ role: "user", content: "检查代码" }],
+    tools: ALL_TOOLS,
     signal: new AbortController().signal,
   };
 
@@ -247,6 +254,7 @@ test("Anthropic tool_use 与 tool_result 正确往返", async () => {
       },
     ],
     signal: new AbortController().signal,
+    tools: ALL_TOOLS,
   });
 
   assert.equal(result.toolCalls[0]?.tool, "Edit");
@@ -320,6 +328,7 @@ test("模型参数原样透传，客户端不做键名转换（校验交给工�
       },
     ],
     signal: new AbortController().signal,
+    tools: ALL_TOOLS,
   });
 
   // 入参原样透传（camelCase 键合法性由工具层 schema 校验拒绝，客户端不转换）
@@ -468,6 +477,7 @@ test("OpenAI 流式响应逐段推送 text_delta 并累积分片工具调用", a
     system: "system",
     messages: [{ role: "user", content: "读文件" }],
     signal: new AbortController().signal,
+    tools: ALL_TOOLS,
   })) {
     if (chunk.type === "text_delta") {
       chunks.push(chunk.text);
@@ -562,6 +572,7 @@ test("Anthropic 流式响应解析 content_block 事件并累积 input_json_delt
     system: "system",
     messages: [{ role: "user", content: "改文件" }],
     signal: new AbortController().signal,
+    tools: ALL_TOOLS,
   })) {
     if (chunk.type === "text_delta") {
       chunks.push(chunk.text);
