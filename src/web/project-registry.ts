@@ -114,6 +114,18 @@ export class ProjectRegistry {
     return path.join(os.tmpdir(), "myagent-lobby");
   }
 
+  /**
+   * 注册外部已创建的默认项目实例（server.ts 启动主 manager 时调用）：
+   * 主实例与 registry 缓存共享同一写锁，避免同项目双实例并发 restore 撞锁。
+   */
+  seed(
+    cwd: string,
+    configService: ConfigService,
+    sessionManager: WebSessionManager,
+  ): void {
+    this.#cache.set(cwd, { configService, sessionManager });
+  }
+
   /** 大厅项目（只读不写），始终可用。 */
   async getLobby(): Promise<ProjectResources> {
     const cwd = this.lobbyCwd();
@@ -168,5 +180,16 @@ export class ProjectRegistry {
     const found = projects.find((entry) => entry.key === key);
     const cwd = found?.cwd ?? this.#defaultCwd;
     return { cwd, resources: await this.getByCwd(cwd) };
+  }
+
+  /** 释放全部已缓存项目实例的单实例写锁（进程优雅退出路径调用）。 */
+  async disposeAll(): Promise<void> {
+    const managers = [...this.#cache.values()].map(
+      (resources) => resources.sessionManager,
+    );
+    await Promise.all(
+      managers.map((manager) => manager.releaseLock()),
+    );
+    this.#cache.clear();
   }
 }

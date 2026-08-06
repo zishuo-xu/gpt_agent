@@ -58,6 +58,9 @@ if (process.argv.includes("--version") || process.argv.includes("-v")) {
   process.exit(0);
 }
 
+// --force：跳过单实例写锁（同项目多进程并发写会损坏事件流，仅崩溃残留确认后使用）
+const force = process.argv.includes("--force");
+
 // 守护进程模式：--daemon 让 Web 服务器脱离终端常驻（detach + pid 文件 + 日志重定向）；
 // --daemon-stop 按 pid 文件停止。
 if (process.argv.includes("--web") && process.argv.includes("--daemon")) {
@@ -71,7 +74,12 @@ if (process.argv.includes("--web") && process.argv.includes("--daemon")) {
     ...(webPort ? { port: webPort } : {}),
   });
 } else {
-  await runCli();
+  await runCli().catch((error) => {
+    process.stderr.write(
+      `启动失败：${error instanceof Error ? error.message : "未知错误"}\n`,
+    );
+    process.exit(1);
+  });
 }
 
 /**
@@ -88,9 +96,16 @@ async function startDaemonWeb(): Promise<void> {
   const logPath = path.join(daemonDir, "web.log");
   const pidPath = path.join(daemonDir, "web.pid");
 
-  const logFd = await import("node:fs").then((fs) =>
-    fs.openSync(logPath, "a"),
-  );
+  // 日志轮转：web.log 超过 5MB 时改名 web.log.1（保留最近一份），再开新日志
+  const fsSync = await import("node:fs");
+  try {
+    if (fsSync.statSync(logPath).size > 5 * 1024 * 1024) {
+      fsSync.renameSync(logPath, `${logPath}.1`);
+    }
+  } catch {
+    // 日志不存在或轮转失败：继续以追加方式打开
+  }
+  const logFd = fsSync.openSync(logPath, "a");
   const child = spawn(
     process.execPath,
     [
@@ -134,10 +149,15 @@ async function stopDaemonWeb(): Promise<void> {
 
 async function runCli(): Promise<void> {
   const cwd = process.cwd();
+  const { timingMark, timingReport } = await import("./utils/timing.js");
   const configService = new ConfigService({ cwd });
+  // 启动时清理过期超限落盘日志（尽力而为，不阻塞启动）
+  const { cleanupStaleBashLogs } = await import("./tools/bash.js");
+  void cleanupStaleBashLogs();
   // 缓存 miss 提示开关（behavior.showCacheMissNotices，热生效；默认关闭）
   let showCacheMissNotices = false;
   const initialConfig = await configService.readEffective();
+  timingMark("config 加载");
   showCacheMissNotices =
     initialConfig.behavior?.showCacheMissNotices === true;
   configService.onChange((config) => {
@@ -146,12 +166,16 @@ async function runCli(): Promise<void> {
   const manager = new AgentSessionManager({
     cwd,
     configService,
+    ...(force ? { skipLock: true } : {}),
   });
   await manager.restore();
+  timingMark("restore");
   let session = await manager.createSession({
     title: "CLI 会话",
     mode: "normal",
   });
+  timingMark("createSession");
+  process.stderr.write(timingReport());
   const readline = createInterface({
     input,
     output,
@@ -717,11 +741,18 @@ async function runCli(): Promise<void> {
     closed = true;
     session.interrupt();
     await manager.flush();
+    // 释放单实例写锁（正常退出路径；崩溃残留时由下次启动的锁检测兜底）
+    await manager.releaseLock();
     unsubscribe();
     input.off("keypress", onKeypress);
     if (input.isTTY) input.setRawMode(false);
     readline.close();
   }
+
+  // SIGTERM（kill/守护进程停止路径）：走正常关闭链，flush 尾部事件后再退出
+  process.on("SIGTERM", () => {
+    void closeCli().then(() => process.exit(0));
+  });
 
   const renderEvent = createEventRenderer({
     output: (text) => output.write(text),

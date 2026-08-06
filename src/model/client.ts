@@ -150,7 +150,7 @@ export class ConfiguredModelClient implements ModelClient {
             },
           ],
           max_tokens: 4096,
-          messages: toAnthropicMessages(request.messages),
+          messages: toAnthropicMessages(request.messages, cacheControl),
           tools: tools.map((tool, index) => ({
             name: tool.name,
             description: tool.description,
@@ -312,7 +312,7 @@ export class ConfiguredModelClient implements ModelClient {
           ],
           max_tokens: 4096,
           stream: true,
-          messages: toAnthropicMessages(request.messages),
+          messages: toAnthropicMessages(request.messages, cacheControl),
           tools: tools.map((tool, index) => ({
             name: tool.name,
             description: tool.description,
@@ -414,11 +414,26 @@ function toOpenAiMessage(message: ConversationMessage): Record<string, unknown> 
 
 function toAnthropicMessages(
   messages: ConversationMessage[],
+  cacheControl?: { type: "ephemeral" } | undefined,
 ): Array<Record<string, unknown>> {
   const output: Array<Record<string, unknown>> = [];
-  for (const message of messages) {
+  // 消息级缓存断点：第一条（非末尾）user 消息标记后，其之前的前缀整段可缓存
+  // （Anthropic 断点上限 4 个：system + tools + 至多 2 个消息级；此实现只用 1 个）
+  let breakpointPlaced = false;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index] as ConversationMessage;
     if (message.role === "user") {
-      output.push({ role: "user", content: message.content });
+      const isLast = index === messages.length - 1;
+      if (cacheControl && !breakpointPlaced && !isLast) {
+        breakpointPlaced = true;
+        output.push({
+          role: "user",
+          content: message.content,
+          cache_control: cacheControl,
+        });
+      } else {
+        output.push({ role: "user", content: message.content });
+      }
       continue;
     }
     if (message.role === "assistant") {

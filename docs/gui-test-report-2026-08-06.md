@@ -173,3 +173,43 @@ webServer 以隔离 HOME + 测试工作区启动；覆盖：设置页六分区�
 ## 验证
 
 `pnpm run typecheck` ✅ · `pnpm test` 268 全绿（core 239 + web 29）✅ · `pnpm run build` ✅。
+
+# 补充测试报告（S1-S8 系统级优化 + 生产级验证）
+
+日期：2026-08-06。S1-S8 全部落地后的系统级验证轮，含 Playwright E2E 扩展、进程级实测与真实模型浏览器验证。
+
+## 系统级优化落地（S1-S8）
+
+| 项 | 实现 | 验证 |
+| --- | --- | --- |
+| S1 Anthropic 缓存写入控制 | `toAnthropicMessages` 消息级缓存断点：首条（非末尾）user 消息标记 cache_control（Anthropic 断点上限 4：system+tools+1 消息）；`cacheRetention:"none"` 时全省略 | client 12 测试（含新消息断点语义测试） |
+| S2 单实例写锁 | 项目级 `O_EXCL` 锁文件（pid+时间戳）；`restore()`/`createSession()` 入口获取；`releaseLock()` 幂等；CLI `--force` 跳过；锁冲突报错含 pid 与处置提示 | 单测 + 进程级实测（第二个 CLI 报错、--force 跳过） |
+| S3 restore 性能 | 测量驱动：5 千/2 万/5 万事件 restore 30/71/149ms 线性无瓶颈（模型侧由 `next()` 请求前自动压缩兜底上下文）；新增 2 万事件护栏测试（<3s + 状态完整） | restore-perf 测试 |
+| S4 优雅关闭 | CLI：`closeCli` + SIGTERM → flush + releaseLock；Web：SIGINT/SIGTERM → 主 manager flush/releaseLock + `registry.disposeAll()`；ProjectRegistry.seed 主实例 | 进程级实测（daemon-stop 后 pid 文件与锁均清除） |
+| S5 日志轮转 | 守护进程 web.log >5MB 轮转 `web.log.1`（保留一份）；Bash 超限落盘 `myagent-bash-*.log` 启动清理（>7 天，可注入 tmpDir）；会话保留维持 Web 删除接口 | bash 清理单测 + 进程级实测（6MB 日志启动 → .1 生成） |
+| S6 覆盖率门禁 | `pnpm run test:coverage`：`--experimental-test-coverage` + 阈值失败（core lines 85/functions 75/branches 80；web 60/75/60） | 基线 core 91.0%/web 67.5%，阈值通过 |
+| S7 system prompt 体积守护 | 测试断言全量注入估算 < 1000 tokens（Pi 原则）+ 只读裁剪版更小 | agent-model 15 测试 |
+| S8 启动计时 | `MYAGENT_TIMING=1`：config 加载/restore/会话创建分阶段耗时；CLI 与 Web 启动路径接入 | 实测输出 `config 加载: 5ms, restore: 55ms` |
+
+## 生产级验证（Playwright E2E 8/8 全绿，20.5s）
+
+原有 5 测试（设置/会话/真实任务/审批流）+ 新增 3 测试：
+- 用户消息书签：hover 消息卡片（★ 悬停显示）→ ★ 打标（prompt 对话框）→ 书签栏出现 → ✕ 移除
+- 导出会话 HTML：点击导出 → download 事件 → 文件名 `myagent-<id>.html` + 内容含 `MyAgent 会话导出`
+- 续跑按钮显隐：正常会话无「↻ 续跑中断任务」按钮；resume API 返回 409
+
+## 浏览器实测（真实模型用户路径，IAB）
+
+- 会话列表 50 会话加载；历史长会话（修复计算器测试问题）完整渲染：事件流、每轮缓存命中率（96%/99%…）、审批卡（含 60s 审批超时自动拒绝）、pitfalls 记忆写入、书签栏持久化书签（#1 起点 + 移除按钮）、★ 按钮渲染
+- 新建会话面板（项目/大厅 radio + 权限档 + 启动任务）；设置页五分区渲染
+- 首次加载空列表为首帧时序（1.5s 自动刷新补齐），非缺陷
+
+## 本测试轮发现并修复的缺陷（1 个）
+
+| # | 缺陷 | 根因 | 修复 |
+| --- | --- | --- | --- |
+| 9 | E2E 全量请求 500（Internal Server Error），会话创建/详情全挂 | S2 锁引入后，server.ts 主 sessionManager 与 ProjectRegistry 默认项目实例是两个独立实例——前端请求带 `?project=` 时 `getByCwd` 为同项目创建第二个 manager，`restore()` 撞主实例锁抛错 | `ProjectRegistry.seed()` 注册主实例（server.ts 启动时调用），resolve 默认项目直接命中缓存；配套 `gracefulShutdown: SIGTERM`（Playwright 结束时走优雅关闭释放锁，不再残留） |
+
+## 验证
+
+`pnpm run typecheck` ✅ · `pnpm test` 275 全绿（core 246 + web 29）✅ · `pnpm run test:coverage` 阈值通过 ✅ · `pnpm run build` ✅ · `pnpm run test:e2e` 8/8 ✅

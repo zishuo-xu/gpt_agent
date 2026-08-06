@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
+  mkdir,
+  open,
+  readFile,
   readdir,
   unlink,
 } from "node:fs/promises";
@@ -41,9 +44,48 @@ export interface AgentSessionManagerOptions {
   configService: ConfigService;
   stateDir?: string;
   homeDir?: string;
+  /** 跳过单实例写锁（--force 语义）：多进程并发写同一项目事件流时数据损坏，非确知无残留不要用 */
+  skipLock?: boolean;
   modelFactory?: (
     messages: ConversationMessage[],
   ) => Promise<ConversationAgentModel> | ConversationAgentModel;
+}
+
+/** 项目级单实例写锁：O_EXCL 独占创建 + pid 记录；崩溃残留时读锁内容报错提示 */
+async function acquireInstanceLock(
+  lockPath: string,
+  skip: boolean,
+): Promise<void> {
+  if (skip) return;
+  try {
+    await mkdir(path.dirname(lockPath), { recursive: true });
+    const handle = await open(lockPath, "wx");
+    try {
+      await handle.writeFile(
+        JSON.stringify({
+          pid: process.pid,
+          startedAt: new Date().toISOString(),
+        }),
+      );
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "EEXIST") throw error;
+    let holder = "";
+    try {
+      const raw = await readFile(lockPath, "utf8");
+      const parsed = JSON.parse(raw) as { pid?: number };
+      if (parsed.pid) holder = `（pid ${parsed.pid}）`;
+    } catch {
+      // 锁内容不可读：视为残留，提示手动处理
+    }
+    throw new Error(
+      `项目已被其他进程占用${holder}：事件流为追加写，多进程并发会损坏数据。` +
+        `若确认该进程已退出（崩溃残留），删除 ${lockPath} 后重试，或加 --force 忽略。`,
+    );
+  }
 }
 
 export class AgentSessionManager {
@@ -57,6 +99,9 @@ export class AgentSessionManager {
     | AgentSessionManagerOptions["modelFactory"]
     | undefined;
   readonly #sessions = new Map<string, AgentSession>();
+  readonly #skipLock: boolean;
+  #lockFile: string | undefined;
+  #lockHeld = false;
 
   constructor(options: AgentSessionManagerOptions) {
     this.#cwd = options.cwd;
@@ -65,6 +110,7 @@ export class AgentSessionManager {
       options.stateDir ?? path.join(os.homedir(), ".myagent");
     this.#homeDir = options.homeDir ?? os.homedir();
     this.#modelFactory = options.modelFactory;
+    this.#skipLock = options.skipLock === true;
     const projectKey = Buffer.from(this.#cwd).toString("base64url");
     this.#projectDir = path.join(
       this.#stateDir,
@@ -82,6 +128,21 @@ export class AgentSessionManager {
       // 重建模型客户端：API Key / 模型 / fallback 等配置变更即时生效
       void this.#refreshModelClients().catch(() => undefined);
     });
+  }
+
+  /** 首次触达项目目录时获取单实例写锁（幂等；restore/createSession 均会走到） */
+  async #acquireLock(): Promise<void> {
+    if (this.#lockHeld || this.#skipLock) return;
+    this.#lockFile = path.join(this.#projectDir, "lock");
+    await acquireInstanceLock(this.#lockFile, this.#skipLock);
+    this.#lockHeld = true;
+  }
+
+  /** 释放写锁（进程正常退出路径调用；幂等） */
+  async releaseLock(): Promise<void> {
+    if (!this.#lockHeld || !this.#lockFile) return;
+    this.#lockHeld = false;
+    await unlink(this.#lockFile).catch(() => undefined);
   }
 
   /** 用最新配置重建三个角色客户端并替换到所有运行中会话 */
@@ -124,6 +185,7 @@ export class AgentSessionManager {
   }
 
   async restore(): Promise<void> {
+    await this.#acquireLock();
     await this.#ensureProjectMetadata();
     let entries: string[];
     try {
@@ -224,6 +286,7 @@ export class AgentSessionManager {
     /** 追加到默认+配置规则之上的权限规则（如大厅模式禁用文件写入） */
     extraPermissionRules?: PermissionRule[];
   } = {}): Promise<AgentSession> {
+    await this.#acquireLock();
     await this.#ensureProjectMetadata();
     const message = options.initialMessage?.trim();
     const runtimeConfig = await this.#configService.readEffective();

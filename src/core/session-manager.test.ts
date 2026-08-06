@@ -135,6 +135,8 @@ test("AgentSessionManager 通过事件流恢复会话并继续上下文", async 
 
   const restoredClient = new ScriptedClient([response("第二轮完成")]);
   let restoredHistory: ConversationMessage[] = [];
+  // 模拟进程正常退出：释放写锁后（重启）再恢复同一项目
+  await manager.releaseLock();
   const restoredManager = new AgentSessionManager({
     cwd,
     stateDir,
@@ -146,6 +148,7 @@ test("AgentSessionManager 通过事件流恢复会话并继续上下文", async 
     },
   });
   await restoredManager.restore();
+  await restoredManager.releaseLock();
 
   const restored = restoredManager.get(session.id);
   assert.ok(restored);
@@ -506,4 +509,58 @@ test("会话标题写入事件流并在恢复时还原", async () => {
     "事件流标题",
     "恢复后标题应来自事件流",
   );
+});
+
+test("单实例写锁：同项目第二个 manager 报错，--force 跳过，释放后可再获取", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-lock-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-lock-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-lock-home-"),
+  );
+  const configService = new ConfigService({ cwd, homeDir });
+  const first = new AgentSessionManager({ cwd, stateDir, homeDir, configService });
+  await first.restore();
+
+  // 锁文件已写入 pid
+  const lockPath = path.join(
+    stateDir,
+    "projects",
+    Buffer.from(cwd).toString("base64url"),
+    "lock",
+  );
+  const lockContent = JSON.parse(
+    await readFile(lockPath, "utf8"),
+  ) as { pid: number };
+  assert.equal(lockContent.pid, process.pid);
+
+  // 第二个 manager 同项目：拒绝（报错含占用提示与锁路径）
+  const second = new AgentSessionManager({ cwd, stateDir, homeDir, configService });
+  await assert.rejects(
+    second.restore(),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes("已被其他进程占用") &&
+      error.message.includes("lock"),
+  );
+
+  // skipLock（--force 语义）跳过
+  const forced = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    skipLock: true,
+  });
+  await forced.restore();
+
+  // 释放后可重新获取
+  await first.releaseLock();
+  const third = new AgentSessionManager({ cwd, stateDir, homeDir, configService });
+  await third.restore();
+  await third.releaseLock();
+
+  // 释放后锁文件已删除
+  await assert.rejects(readFile(lockPath, "utf8"));
 });

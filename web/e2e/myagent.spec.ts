@@ -142,3 +142,79 @@ test.describe("审批流", () => {
     });
   });
 });
+
+test.describe("新功能：书签 / 导出 / 续跑按钮", () => {
+  async function startSession(page: import("@playwright/test").Page) {
+    await page.goto("/");
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "＋ 新会话" })
+      .click();
+    const input = page.getByPlaceholder(
+      "例如：检查这个项目，修复当前失败的测试",
+    );
+    await input.fill("回复 OK，不要使用工具。");
+    await page.getByRole("button", { name: "启动任务" }).click();
+    // 用户消息立即渲染（★ 按钮随 user 消息出现，无需等任务完成）
+    await expect(
+      page.locator("button.stream-bookmark").first(),
+    ).toBeVisible({ timeout: 30_000 });
+  }
+
+  test("用户消息书签：打标 → 书签栏出现 → 移除", async ({ page }) => {
+    await startSession(page);
+    // ★ 绝对定位在消息容器左侧（left:-28px），悬停消息卡片才显示；
+    // 真实用户路径为 hover 后点击，点击需 force（元素在容器边界外）
+    const bookmark = page.locator("button.stream-bookmark").first();
+    await page.locator(".stream-item").first().hover();
+    await expect(bookmark).toBeVisible();
+    page.once("dialog", (dialog) => void dialog.accept("e2e 书签"));
+    // ★ 绝对定位在消息容器左侧（left:-28px，悬停显示），点击坐标在滚动容器边界外，
+    // 直接派发 DOM 点击事件（React onClick 监听）
+    await bookmark.dispatchEvent("click");
+    // 书签栏出现该书签
+    await expect(
+      page.locator(".bookmark-item", { hasText: "e2e 书签" }),
+    ).toBeVisible({ timeout: 15_000 });
+    // 移除（书签卡片 ✕，role=button 的 time 元素）
+    await page
+      .locator(".bookmark-item", { hasText: "e2e 书签" })
+      .getByRole("button", { name: "移除书签 e2e 书签" })
+      .click();
+    await expect(
+      page.locator(".bookmark-item", { hasText: "e2e 书签" }),
+    ).toHaveCount(0, { timeout: 15_000 });
+  });
+
+  test("导出会话为 HTML：下载文件含事件渲染", async ({ page }) => {
+    await startSession(page);
+    // 等至少一条 assistant 消息（导出内容含事件）
+    await expect(page.getByText("本轮", { exact: false }).first()).toBeVisible(
+      { timeout: 60_000 },
+    );
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "导出" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/^myagent-[0-9a-f]+\.html$/);
+    const filePath = await download.path();
+    const content = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(filePath, "utf8"),
+    );
+    expect(content).toContain("<!DOCTYPE html>");
+    expect(content).toContain("MyAgent 会话导出");
+  });
+
+  test("正常会话不显示续跑按钮，resume API 返回 409", async ({ page, request }) => {
+    await startSession(page);
+    await expect(page.locator("button.resume-button")).toHaveCount(0);
+    // 当前会话无中断任务：resume 应被拒绝
+    const sessions = (await (
+      await request.get("/api/sessions")
+    ).json()) as { sessions: Array<{ id: string }> };
+    const latest = sessions.sessions[0] as { id: string };
+    const resumeResponse = await request.post(
+      `/api/sessions/${latest.id}/resume`,
+    );
+    expect(resumeResponse.status()).toBe(409);
+  });
+});

@@ -25,6 +25,38 @@ const OUTPUT_DRAIN_TIMEOUT_MS = 2_000;
 let spillSequence = 0;
 
 /**
+ * 清理过期超限落盘日志（myagent-bash-*.log）：启动时调用，删除 mtime 超过
+ * retentionDays 的临时产物，防止长期运行的守护进程在 tmp 下累积磁盘占用。
+ * 失败静默（tmp 清理属尽力而为）。
+ */
+export async function cleanupStaleBashLogs(
+  retentionDays = 7,
+  tmpDir = os.tmpdir(),
+): Promise<void> {
+  try {
+    const { readdir, stat, unlink } = await import("node:fs/promises");
+    const cutoff = Date.now() - retentionDays * 24 * 3600 * 1000;
+    const entries = await readdir(tmpDir);
+    await Promise.all(
+      entries
+        .filter((name) => name.startsWith("myagent-bash-"))
+        .map(async (name) => {
+          try {
+            const info = await stat(path.join(tmpDir, name));
+            if (info.mtimeMs < cutoff) {
+              await unlink(path.join(tmpDir, name));
+            }
+          } catch {
+            // 单个文件竞争删除失败不影响其余
+          }
+        }),
+    );
+  } catch {
+    // tmp 目录不可读等异常：静默
+  }
+}
+
+/**
  * 输出超限时把全量 stdout/stderr 落盘（参照 Pi 的 /tmp/pi-bash-*.log）：
  * 模型只见截断版，需要全量时按 summary 里的路径用 Read 查看。
  * 未截断返回 undefined，避免无谓写盘。

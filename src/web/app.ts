@@ -30,7 +30,7 @@ export function createWebApp(
   sessionManager?: WebSessionManager,
   /** 在业务路由之前挂载的中间件（如访问密码认证）；Hono 按注册顺序执行，必须先于路由 */
   mountBeforeRoutes?: (app: Hono) => void,
-): Hono {
+): Hono & { registry: ProjectRegistry } {
   const app = new Hono();
   mountBeforeRoutes?.(app);
   const memoryService = new MemoryService({
@@ -585,7 +585,8 @@ export function createWebApp(
     });
   });
 
-  return app;
+  // 挂载注册表引用：进程优雅退出时释放全部项目写锁（server.ts 信号处理使用）
+  return Object.assign(app, { registry });
 }
 
 function parseScope(value?: string): ConfigScope {

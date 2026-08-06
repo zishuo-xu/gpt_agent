@@ -196,6 +196,72 @@ test("cacheRetention=none 时 Anthropic 请求省略 cache_control（摘要不�
   });
 });
 
+test("Anthropic 消息级缓存断点：首条（非末尾）user 消息标记，前缀可缓存", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    provider("anthropic"),
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "ok" }],
+          usage: { input_tokens: 10, output_tokens: 1 },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+  const base = {
+    system: "system",
+    messages: [
+      { role: "user", content: "第一轮" },
+      { role: "assistant", content: "回答", toolCalls: [] },
+      { role: "user", content: "第二轮" },
+    ],
+    tools: ALL_TOOLS,
+    signal: new AbortController().signal,
+  };
+
+  await client.complete({ ...base });
+  assert.deepEqual(
+    requestBody.messages[0].cache_control,
+    { type: "ephemeral" },
+    "首条 user 消息应带断点",
+  );
+  assert.equal(
+    requestBody.messages[1].cache_control,
+    undefined,
+    "assistant 消息不带断点",
+  );
+  assert.equal(
+    requestBody.messages[2].cache_control,
+    undefined,
+    "末尾 user 消息不带断点（Anthropic 禁止在最后一条消息上放断点）",
+  );
+
+  // 单消息（首条即末尾）不加断点
+  await client.complete({
+    ...base,
+    messages: [{ role: "user", content: "单轮" }],
+  });
+  assert.equal(
+    requestBody.messages[0].cache_control,
+    undefined,
+    "唯一 user 消息是末尾消息，不加断点",
+  );
+
+  // cacheRetention=none 时无消息级断点
+  await client.complete({ ...base, cacheRetention: "none" });
+  for (const message of requestBody.messages) {
+    assert.equal(
+      message.cache_control,
+      undefined,
+      "none 时消息不带 cache_control",
+    );
+  }
+});
+
 test("Anthropic tool_use 与 tool_result 正确往返", async () => {
   let requestBody: Record<string, any> = {};
   const client = new ConfiguredModelClient(

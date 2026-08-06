@@ -19,5 +19,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 60_000,
     cwd: "/tmp/myagent-gui-test-workspace",
+    // SIGTERM 走优雅关闭（flush + 释放单实例写锁），避免 kill 残留锁文件
+    gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
   },
 });

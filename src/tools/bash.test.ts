@@ -221,3 +221,27 @@ test("background 命令立即返回且进程在后台运行", async () => {
     // 进程已自行退出
   }
 });
+
+test("cleanupStaleBashLogs：仅清理超过保留期的 myagent-bash 落盘日志", async () => {
+  const { mkdtemp, writeFile, utimes, readdir } = await import(
+    "node:fs/promises"
+  );
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const dir = await mkdtemp(path.join(os.tmpdir(), "myagent-clean-"));
+  const oldLog = path.join(dir, "myagent-bash-123-0.log");
+  const freshLog = path.join(dir, "myagent-bash-123-1.log");
+  const unrelated = path.join(dir, "other.log");
+  await writeFile(oldLog, "old");
+  await writeFile(freshLog, "fresh");
+  await writeFile(unrelated, "keep");
+  // 旧文件 mtime 拨回 10 天前
+  const tenDaysAgo = new Date(Date.now() - 10 * 24 * 3600 * 1000);
+  await utimes(oldLog, tenDaysAgo, tenDaysAgo);
+
+  const { cleanupStaleBashLogs } = await import("./bash.js");
+  await cleanupStaleBashLogs(7, dir);
+
+  const remaining = (await readdir(dir)).sort();
+  assert.deepEqual(remaining, ["myagent-bash-123-1.log", "other.log"]);
+});

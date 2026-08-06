@@ -239,6 +239,23 @@ test("buildSystemPrompt 默认输出与历史全量指南逐字一致", () => {
   assert.ok(prompt.includes("persist one concise dated entry under .myagent/memory/"));
 });
 
+test("buildSystemPrompt 体积守护：全量注入时估算 < 1000 tokens（Pi 原则）", () => {
+  const prompt = buildSystemPrompt(undefined);
+  // 与估计 message token 同源的口径：JSON 长度 / 4（中文占比高时偏保守）
+  const estimatedTokens = Math.ceil(JSON.stringify(prompt).length / 4);
+  assert.ok(
+    estimatedTokens < 1000,
+    `system prompt 估算 ${estimatedTokens} tokens 应 < 1000（膨胀会稀释上下文预算并破坏缓存前缀收益）`,
+  );
+  // 裁剪版（只读子代理）更小
+  const readOnlyPrompt = buildSystemPrompt(EXPLORE_TOOL_NAMES);
+  assert.ok(
+    Math.ceil(JSON.stringify(readOnlyPrompt).length / 4) <
+      estimatedTokens,
+    "只读裁剪版应小于全量版",
+  );
+});
+
 test("只读子代理工具集：请求只带探索工具，system 裁剪 Task/Bash 指南", async () => {
   const client = new CapturingClient([response("结论：…")]);
   const model = new ConversationAgentModel(

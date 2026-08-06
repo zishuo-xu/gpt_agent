@@ -13,8 +13,13 @@ export interface WebServerOptions {
 }
 
 export async function startWebServer(options: WebServerOptions): Promise<void> {
+  const { timingMark, timingReport } = await import("../utils/timing.js");
   const configService = new ConfigService({ cwd: options.cwd });
+  // 启动时清理过期超限落盘日志（尽力而为，不阻塞启动）
+  const { cleanupStaleBashLogs } = await import("../tools/bash.js");
+  void cleanupStaleBashLogs();
   const config = await configService.readEffective();
+  timingMark("config 加载");
   const serverConfig = config.server ?? { host: "127.0.0.1", password: "" };
   const hostname = options.hostname ?? serverConfig.host ?? "127.0.0.1";
   const isLocalhost = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
@@ -32,10 +37,13 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
   const port = await findAvailablePort(effectiveHostname, preferredPort);
   const sessionManager = new WebSessionManager(options.cwd, configService);
   await sessionManager.restore();
+  timingMark("restore");
 
   // 认证中间件：非 localhost 监听时校验密码。
   // 必须通过 mountBeforeRoutes 在业务路由之前注册——Hono 按注册顺序执行中间件，
   // 若在 createWebApp 之后 app.use("*")，已注册的 /api/* 路由会先命中而不受保护。
+  // 主 manager 与 registry 共享同一项目写锁：注册为默认项目实例，
+  // 避免 resolve 默认项目时创建第二个实例并发 restore 撞锁
   const app = createWebApp(
     configService,
     sessionManager,
@@ -77,6 +85,8 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
         }
       : undefined,
   );
+  // 主实例注册进 registry（共享锁），disposeAll 也会释放主实例的锁
+  app.registry.seed(options.cwd, configService, sessionManager);
 
   const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
 
@@ -87,7 +97,21 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
     process.stdout.write(
       `\n◆ MyAgent Web 已启动\n  http://${info.address}:${info.port}${needsAuth ? "（已启用密码保护）" : ""}\n  按 Ctrl+C 停止。\n\n`,
     );
+    process.stderr.write(timingReport());
   });
+
+  // 优雅关闭：flush 尾部事件（不丢写盘）+ 释放全部项目单实例写锁
+  let shuttingDown = false;
+  const shutdown = async (): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await sessionManager.flush();
+    await sessionManager.releaseLock();
+    await app.registry.disposeAll();
+    process.exit(0);
+  };
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
 }
 
 function loginPage(): string {
