@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -114,10 +115,12 @@ export class ProjectRegistry {
   }
 
   /** 大厅项目（只读不写），始终可用。 */
-  getLobby(): ProjectResources {
+  async getLobby(): Promise<ProjectResources> {
     const cwd = this.lobbyCwd();
     const cached = this.#cache.get(cwd);
     if (cached) return cached;
+    // 大厅 cwd 是专用临时目录：确保存在（工具的工作目录依赖它），只读规则仍阻止写文件
+    mkdirSync(cwd, { recursive: true });
     const configService = new ConfigService({
       cwd,
       homeDir: this.#homeDir,
@@ -126,6 +129,7 @@ export class ProjectRegistry {
       lobby: true,
       stateDir: this.#stateDir,
     });
+    await sessionManager.restore();
     const resources: ProjectResources = { configService, sessionManager };
     this.#cache.set(cwd, resources);
     return resources;
@@ -152,7 +156,10 @@ export class ProjectRegistry {
   }> {
     const key = projectKey?.trim();
     if (key === LOBBY_KEY) {
-      return { cwd: this.lobbyCwd(), resources: this.getLobby() };
+      return {
+        cwd: this.lobbyCwd(),
+        resources: await this.getLobby(),
+      };
     }
     if (!key || key === ProjectRegistry.projectKey(this.#defaultCwd)) {
       return { cwd: this.#defaultCwd, resources: await this.getByCwd(this.#defaultCwd) };
