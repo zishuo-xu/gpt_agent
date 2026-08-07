@@ -34,6 +34,8 @@ const ENTITY_MAP: Record<string, string> = {
   quot: '"',
   apos: "'",
   nbsp: " ",
+  ensp: " ",
+  emsp: " ",
   hellip: "…",
   mdash: "—",
   ndash: "–",
