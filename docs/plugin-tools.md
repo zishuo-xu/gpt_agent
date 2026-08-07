@@ -62,14 +62,38 @@ export default definePluginTool({
 
 - `.myagent/tools/web-fetch.ts`（本仓库已随包提供）：抓取 URL 返回可见文本（HTML/JSON/纯文本自动识别，默认截断 8000 字符，`max_chars` 可调）。
 - `.myagent/tools/web-search.ts`（本仓库已随包提供）：网络搜索，两级策略：
-  - **API 模式（推荐）**：配置 [Tavily](https://tavily.com) key（免费层 1000 次/月）后走结构化搜索，返回 `title/url/content`（页面正文），一次调用即拿到素材，无需再 WebFetch。配置方式（任一）：
-    - 环境变量 `TAVILY_API_KEY`；或
-    - `~/.myagent/plugins.json`（全局）或 `<cwd>/.myagent/plugins.json`（项目，覆盖全局）：
+  - **API 模式（推荐）**：配置 provider 后走结构化搜索，返回 `title/url/content`（页面正文），一次调用即拿到素材，无需再 WebFetch。配置于 `~/.myagent/plugins.json`（全局）或 `<cwd>/.myagent/plugins.json`（项目，覆盖全局；该文件已 gitignore）：
+    - **Tavily**（云服务，免费层 1000 次/月，[tavily.com](https://tavily.com) 注册）：
       ```json
       { "webSearch": { "provider": "tavily", "apiKey": "tvly-..." } }
       ```
-  - **降级模式**：无 key 或 API 失败时自动顺延 HTML 引擎链（bing → duckduckgo → baidu），免配置但依赖页面结构。
+      或环境变量 `TAVILY_API_KEY`。
+    - **SearXNG**（自托管元搜索，无配额限制）：先部署实例（见下），再配置：
+      ```json
+      { "webSearch": { "provider": "searxng", "baseUrl": "http://127.0.0.1:8080", "apiToken": "myagent-search-token" } }
+      ```
+  - **降级模式**：无配置或 API 失败时自动顺延 HTML 引擎链（bing → duckduckgo → baidu），免配置但依赖页面结构。
   - `engine` 参数：`auto`（默认，API 优先 + HTML 降级）/ `html`（强制 HTML 链）/ 指定单引擎。
+
+**SearXNG 部署（Docker）**：
+```bash
+mkdir -p ~/.searxng && cat > ~/.searxng/settings.yml << 'EOF'
+use_default_settings: true
+server:
+  limiter: false          # 本机使用：关闭限流
+  public_instance: false
+  secret_key: "<随机串>"
+  api_token: "<你的 token>"   # JSON API 需要；插件 apiToken 填此值
+search:
+  formats:
+    - html
+    - json                 # 默认不含 json，必须显式放行
+EOF
+docker run -d --name myagent-searxng -p 8080:8080 \
+  -v ~/.searxng:/etc/searxng searxng/searxng:latest
+# 验证：curl "http://127.0.0.1:8080/search?q=test&format=json" -H "Authorization: Bearer <你的 token>"
+```
+注意：SearXNG 默认配置禁止 JSON 格式输出（403），必须通过 `search.formats` 显式放行；未配置 `api_token` 时 JSON 请求可能被限流。
 
 ## 限制
 

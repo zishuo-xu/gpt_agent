@@ -8,16 +8,18 @@ import { htmlToText } from "../../src/tools/html-text.js";
  * WebSearch 示例插件：网络搜索。
  *
  * 两级策略（混合）：
- * 1) API 模式（推荐）：配置 Tavily API key 后走结构化搜索，返回 title/url/content
- *    （页面正文），agent 一次调用即拿到素材，无需再 WebFetch。key 配置：
- *    - 环境变量 TAVILY_API_KEY；或
- *    - ~/.myagent/plugins.json / <cwd>/.myagent/plugins.json（项目覆盖全局）：
- *      { "webSearch": { "provider": "tavily", "apiKey": "tvly-..." } }
- * 2) 降级模式：无 key 或 API 失败时自动顺延 HTML 引擎链
+ * 1) API 模式（推荐）：配置 provider 后走结构化搜索，返回 title/url/content
+ *    （页面正文），agent 一次调用即拿到素材，无需再 WebFetch。配置：
+ *    ~/.myagent/plugins.json / <cwd>/.myagent/plugins.json（项目覆盖全局）：
+ *    - Tavily（云服务，需 key）：{ "webSearch": { "provider": "tavily", "apiKey": "tvly-..." } }
+ *    - SearXNG（自托管元搜索，JSON API）：{ "webSearch": { "provider": "searxng",
+ *      "baseUrl": "http://127.0.0.1:8080", "apiToken": "..." } }
+ *    环境变量 TAVILY_API_KEY 兼容（等价于 tavily provider）。
+ * 2) 降级模式：无配置或 API 失败时自动顺延 HTML 引擎链
  *    （bing → duckduckgo → baidu），免配置但依赖页面结构。
  *
  * 注意：搜索引擎无公开稳定 HTML 接口，降级解析可能随页面结构变化失效；
- * 有 key 时优先 API，可降低单点风险。
+ * 有 provider 时优先 API，可降低单点风险。
  */
 
 export interface SearchResult {
@@ -31,8 +33,10 @@ type EngineName = "bing" | "duckduckgo" | "baidu";
 const ENGINE_ORDER: EngineName[] = ["bing", "duckduckgo", "baidu"];
 
 interface SearchConfig {
-  provider: "tavily";
+  provider: "tavily" | "searxng";
   apiKey: string;
+  baseUrl?: string;
+  apiToken?: string;
 }
 
 /** 读取搜索配置：环境变量优先，其次 plugins.json（项目层覆盖全局层） */
@@ -61,7 +65,20 @@ export async function loadSearchConfig(
   const section = merged.webSearch as
     | Record<string, unknown>
     | undefined;
-  if (section && typeof section.apiKey === "string" && section.apiKey.trim()) {
+  if (!section || typeof section !== "object") return undefined;
+  if (section.provider === "searxng") {
+    if (typeof section.baseUrl === "string" && section.baseUrl.trim()) {
+      return {
+        provider: "searxng",
+        apiKey: "",
+        baseUrl: section.baseUrl.trim(),
+        apiToken:
+          typeof section.apiToken === "string" ? section.apiToken.trim() : "",
+      };
+    }
+    return undefined;
+  }
+  if (typeof section.apiKey === "string" && section.apiKey.trim()) {
     return { provider: "tavily", apiKey: section.apiKey.trim() };
   }
   return undefined;
@@ -81,6 +98,25 @@ export function parseTavilyResponse(payload: unknown): SearchResult[] {
         title: String(item.title ?? "").trim(),
         url: String(item.url ?? "").trim(),
         snippet: String(item.content ?? "").trim(),
+      };
+    })
+    .filter((result) => result.title && result.url);
+}
+
+/** 解析 SearXNG JSON 响应（results: [{ title, url, content, score, engines }]） */
+export function parseSearxngResponse(payload: unknown): SearchResult[] {
+  const results = Array.isArray(
+    (payload as { results?: unknown })?.results,
+  )
+    ? (payload as { results: unknown[] }).results
+    : [];
+  return results
+    .map((raw) => {
+      const item = raw as Record<string, unknown>;
+      return {
+        title: String(item.title ?? "").trim(),
+        url: String(item.url ?? "").trim(),
+        snippet: String(item.content ?? item.snippet ?? "").trim(),
       };
     })
     .filter((result) => result.title && result.url);
@@ -109,6 +145,53 @@ async function searchTavily(
   const results = parseTavilyResponse(await response.json());
   if (results.length === 0) throw new Error("Tavily 未返回结果");
   return results;
+}
+
+async function searchSearxng(
+  query: string,
+  maxResults: number,
+  config: SearchConfig,
+  signal: AbortSignal,
+): Promise<SearchResult[]> {
+  const base = (config.baseUrl ?? "").replace(/\/+$/, "");
+  const url =
+    `${base}/search?q=${encodeURIComponent(query)}` +
+    "&format=json&safesearch=1&language=zh-CN";
+  const headers: Record<string, string> = {
+    // Node fetch 默认不带 UA，SearXNG 上游引擎（google/bing 系）对无 UA
+    // 请求返回空结果集（0 条 vs 17 条），必须显式带浏览器 UA
+    "user-agent": BROWSER_UA,
+  };
+  if (config.apiToken) headers.authorization = `Bearer ${config.apiToken}`;
+  // SearXNG 聚合的上游引擎瞬时波动（常返回 0 条而非报错）：空结果重试一次
+  let lastError = "SearXNG 未返回结果";
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const response = await fetch(url, {
+      signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`SearXNG HTTP ${response.status}`);
+    }
+    const results = parseSearxngResponse(await response.json()).slice(0, maxResults);
+    if (results.length > 0) return results;
+    if (attempt === 1) await abortableSleep(800, signal);
+  }
+  throw new Error(lastError);
+}
+
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(new DOMException("aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
 }
 
 const BROWSER_UA =
@@ -306,16 +389,19 @@ export default definePluginTool({
       : undefined;
     if (config) {
       try {
-        const results = await searchTavily(query, maxResults, config, signal);
+        const results =
+          config.provider === "searxng"
+            ? await searchSearxng(query, maxResults, config, signal)
+            : await searchTavily(query, maxResults, config, signal);
         return {
-          summary: `搜索“${query}”找到 ${results.length} 条结果（tavily）`,
+          summary: `搜索“${query}”找到 ${results.length} 条结果（${config.provider}）`,
           output: formatResults(results),
-          details: { engine: "tavily", query, results },
+          details: { engine: config.provider, query, results },
         };
       } catch (error) {
         // API 失败降级 HTML 链，原因附在最终错误信息中
         console.error(
-          `[web-search] Tavily 失败，降级 HTML：${
+          `[web-search] ${config.provider} 失败，降级 HTML：${
             error instanceof Error ? error.message : "未知错误"
           }`,
         );
@@ -328,9 +414,9 @@ export default definePluginTool({
         : ([engineArg] as EngineName[]);
 
     let lastError = config
-      ? "Tavily 不可用"
+      ? `${config.provider} 不可用`
       : engineArg === "auto" || engineArg === "html"
-        ? "未配置 API key（可在 ~/.myagent/plugins.json 或环境变量 TAVILY_API_KEY 配置）"
+        ? "未配置搜索 API（plugins.json 的 webSearch 段或环境变量 TAVILY_API_KEY）"
         : "";
     for (const engine of order) {
       try {

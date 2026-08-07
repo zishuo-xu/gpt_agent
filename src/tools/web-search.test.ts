@@ -8,6 +8,7 @@ import {
   parseBaiduResults,
   parseBingResults,
   parseDuckDuckGoResults,
+  parseSearxngResponse,
   parseTavilyResponse,
 } from "../../.myagent/tools/web-search.js";
 
@@ -120,6 +121,71 @@ test("loadSearchConfig：环境变量优先，plugins.json 项目层覆盖全局
     assert.equal((await loadSearchConfig(home, project))?.apiKey, "tvly-project");
   } finally {
     delete process.env.TAVILY_API_KEY;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("SearXNG 响应解析：content 字段映射为 snippet，过滤缺 title/url 条目", () => {
+  const results = parseSearxngResponse({
+    query: "test",
+    results: [
+      {
+        template: "default.html",
+        title: "TypeScript 官方文档",
+        content: "TypeScript is JavaScript with syntax for types.",
+        url: "https://www.typescriptlang.org/",
+        score: 1.0,
+        engines: ["google", "bing"],
+      },
+      { title: "缺 URL", content: "x" },
+      { url: "https://example.com/no-title", content: "y" },
+      { title: "snippet 回退", snippet: "旧字段", url: "https://example.com/s" },
+    ],
+  });
+  assert.equal(results.length, 2, "缺 title 或 url 的条目被过滤");
+  assert.equal(results[0]!.title, "TypeScript 官方文档");
+  assert.equal(results[0]!.url, "https://www.typescriptlang.org/");
+  assert.match(results[0]!.snippet, /syntax for types/);
+  assert.equal(results[1]!.snippet, "旧字段", "无 content 时回退 snippet 字段");
+});
+
+test("loadSearchConfig：searxng provider 读取 baseUrl 与 apiToken", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-searchcfg-"));
+  const home = path.join(root, "home");
+  const project = path.join(root, "project");
+  await mkdir(path.join(home, ".myagent"), { recursive: true });
+  await mkdir(path.join(project, ".myagent"), { recursive: true });
+  try {
+    // 全局 tavily + 项目 searxng：项目层覆盖
+    await writeFile(
+      path.join(home, ".myagent", "plugins.json"),
+      JSON.stringify({ webSearch: { provider: "tavily", apiKey: "tvly-global" } }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(project, ".myagent", "plugins.json"),
+      JSON.stringify({
+        webSearch: {
+          provider: "searxng",
+          baseUrl: "http://127.0.0.1:8080/",
+          apiToken: "local-token",
+        },
+      }),
+      "utf8",
+    );
+    const config = await loadSearchConfig(home, project);
+    assert.equal(config?.provider, "searxng");
+    assert.equal(config?.baseUrl, "http://127.0.0.1:8080/");
+    assert.equal(config?.apiToken, "local-token");
+
+    // searxng 缺 baseUrl → 无配置（不误判为 tavily）
+    await writeFile(
+      path.join(project, ".myagent", "plugins.json"),
+      JSON.stringify({ webSearch: { provider: "searxng", apiToken: "x" } }),
+      "utf8",
+    );
+    assert.equal(await loadSearchConfig(home, project), undefined);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
