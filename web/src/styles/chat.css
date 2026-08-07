@@ -878,6 +878,42 @@
   font-size: 13px;
 }
 
+/* 范围建议模板（N4）：一行标签 + 可点击模板按钮 */
+.task-scope-templates {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.task-scope-label {
+  color: #758193;
+  font-size: 12px;
+}
+
+.task-scope-buttons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-scope-button {
+  padding: 5px 12px;
+  border: 1px solid #2a3442;
+  border-radius: 999px;
+  background: #0f131a;
+  color: #9fb0c8;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.task-scope-button:hover {
+  border-color: #5369b7;
+  color: #dfe5ee;
+}
+
 /* ========== 会话页：聊天工作区 ========== */
 
 .session-workspace {

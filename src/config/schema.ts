@@ -60,6 +60,8 @@ export interface BehaviorConfig {
   parallelTools: boolean;
   /** 注入其他项目记忆标题索引；处理敏感项目的用户可关闭 */
   crossProjectMemory: boolean;
+  /** 子代理（Task）单次运行超时（ms）；超时强制结束并返回已收集结果。缺省 15 分钟 */
+  subagentTimeoutMs?: number;
 }
 
 export interface MyAgentConfig {
@@ -178,6 +180,15 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     default: true,
     hot: true,
   },
+  {
+    key: "behavior.subagentTimeoutMs",
+    type: "number",
+    title: "子代理超时（毫秒）",
+    description:
+      "Task 子代理单次运行超时，超时强制结束并返回已收集结果，防止子代理无界探索拖住主任务。缺省 15 分钟（900000）。",
+    default: 900_000,
+    hot: true,
+  },
 ];
 
 export const DEFAULT_CONFIG: MyAgentConfig = {
@@ -220,7 +231,6 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
     crossProjectMemory: true,
   },
 };
-
 export function toPublicConfig(config: MyAgentConfig): PublicMyAgentConfig {
   const { providers, ...rest } = config;
   return {

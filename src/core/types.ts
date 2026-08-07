@@ -72,6 +72,8 @@ export type AgentEvent =
       outputTokens: number;
       cachedTokens: number;
       summary: string;
+      /** 结束原因：子代理超时强制结束时标记 */
+      reason?: "timeout";
     }
   | {
       type: "run_started";

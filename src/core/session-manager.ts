@@ -13,6 +13,7 @@ import type { ConfigService } from "../config/service.js";
 import type {
   ModelProviderConfig,
   ModelRole,
+  RoleModelConfig,
 } from "../config/schema.js";
 import { DesktopNotifier, WebhookNotifier } from "./notifier.js";
 import { ConversationAgentModel } from "./agent-model.js";
@@ -34,6 +35,7 @@ import {
   currentBranchIdFrom,
 } from "./branch.js";
 import type {
+  ModelPricing,
   PermissionMode,
   PermissionRule,
   RecordedEvent,
@@ -251,6 +253,9 @@ export class AgentSessionManager {
           runtimeConfig.context.compactAtEstimatedTokens,
         keepRecentTokens: runtimeConfig.context.keepRecentTokens,
         parallelTools: runtimeConfig.behavior?.parallelTools === true,
+        ...(runtimeConfig.behavior?.subagentTimeoutMs === undefined
+          ? {}
+          : { subagentTimeoutMs: runtimeConfig.behavior.subagentTimeoutMs }),
         pricing: rolePricing(runtimeConfig.models),
       });
       this.#register(session);
@@ -322,6 +327,9 @@ export class AgentSessionManager {
         runtimeConfig.context.compactAtEstimatedTokens,
       keepRecentTokens: runtimeConfig.context.keepRecentTokens,
       parallelTools: runtimeConfig.behavior?.parallelTools === true,
+      ...(runtimeConfig.behavior?.subagentTimeoutMs === undefined
+        ? {}
+        : { subagentTimeoutMs: runtimeConfig.behavior.subagentTimeoutMs }),
       pricing: rolePricing(runtimeConfig.models),
     });
     this.#register(session);
@@ -389,32 +397,7 @@ export class AgentSessionManager {
   ): Promise<ModelClient | undefined> {
     if (this.#modelFactory) return undefined;
     const config = await this.#configService.readEffective();
-    const selection = config.models[role];
-    const targets = [
-      selection,
-      ...(selection.fallbacks ?? []),
-    ];
-    return new FallbackModelClient(
-      targets.map((target) => {
-        const provider = config.providers.find(
-          (candidate) => candidate.id === target.providerId,
-        );
-        const inner = provider
-          ? createConfiguredClient(provider, target.model)
-          : failingModelClient(
-              `${role} 角色引用了不存在的供应商：${target.providerId}`,
-            );
-        return {
-          id: `${target.providerId}/${target.model}`,
-          // 重试已上收到回合级（AgentLoop.#requestTurn，参照 Pi 的 turn 级 auto-retry），
-          // 模型客户端只做协议与 fallback 链，不再请求级重试
-          client: inner,
-          ...(target.pricing
-            ? { pricing: target.pricing }
-            : {}),
-        };
-      }),
-    );
+    return new FallbackModelClient(buildRoleClientChain(role, config));
   }
 
   #register(session: AgentSession): void {
@@ -528,6 +511,44 @@ function failingModelClient(message: string): ModelClient {
       throw new Error(message);
     },
   };
+}
+
+/**
+ * 构建角色模型 fallback 链（[选中模型, ...fallbacks]）。
+ * 供应商缺失/不可用（禁用、缺 Key、模型不在列表）时降级为即抛客户端，
+ * 由 FallbackModelClient 顺延到下一候选；pricing 随目标透传用于成本核算。
+ * 重试已上收到回合级（AgentLoop.#requestTurn），链内客户端不做请求级重试。
+ */
+export function buildRoleClientChain(
+  role: ModelRole,
+  config: {
+    models: Record<ModelRole, RoleModelConfig>;
+    providers: ModelProviderConfig[];
+  },
+): Array<{
+  id: string;
+  client: ModelClient;
+  pricing?: ModelPricing;
+}> {
+  const selection = config.models[role];
+  const targets = [selection, ...(selection.fallbacks ?? [])];
+  return targets.map((target) => {
+    const provider = config.providers.find(
+      (candidate) => candidate.id === target.providerId,
+    );
+    const inner = provider
+      ? createConfiguredClient(provider, target.model)
+      : failingModelClient(
+          `${role} 角色引用了不存在的供应商：${target.providerId}`,
+        );
+    return {
+      id: `${target.providerId}/${target.model}`,
+      client: inner,
+      ...(target.pricing
+        ? { pricing: target.pricing }
+        : {}),
+    };
+  });
 }
 
 async function readRecordedEvents(filePath: string): Promise<RecordedEvent[]> {

@@ -1,3 +1,5 @@
+import { rm } from "node:fs/promises";
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 /**
@@ -6,7 +8,9 @@ import { expect, test } from "@playwright/test";
  * - 会话页：列表、新建面板、会话详情、分支树
  * - 审批与任务：真实任务（只读）+ 写文件审批流
  * 服务器由 playwright webServer 启动（隔离 HOME /tmp/myagent-gui-test-home）。
+ * 工作目录持久化跨运行；涉及文件落盘的用例需先清理旧产物。
  */
+const E2E_WORKSPACE = "/tmp/myagent-gui-test-workspace";
 
 test.describe("设置页", () => {
   test("加载并渲染六分区，编辑扩展字段后保存", async ({ page }) => {
@@ -82,6 +86,17 @@ test.describe("会话页", () => {
     await expect(
       page.getByRole("radio", { name: /在大厅执行/ }),
     ).toBeChecked();
+    // 范围建议模板（N4）：四个按钮渲染，点击填充输入框
+    await expect(
+      page.locator(".task-scope-templates"),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "只读分析" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "修复缺陷" }).click();
+    await expect(
+      page.getByPlaceholder("例如：检查这个项目，修复当前失败的测试"),
+    ).toHaveValue(/先运行相关测试复现失败/);
     // 关闭面板
     await page.getByRole("button", { name: "关闭" }).click();
   });
@@ -118,6 +133,9 @@ test.describe("会话页", () => {
 
 test.describe("审批流", () => {
   test("写文件触发审批卡，批准后文件落盘", async ({ page }) => {
+    // 工作目录跨运行持久化：先清掉上次遗留的同名文件，
+    // 否则模型会发现文件已存在并跳过 Write，审批卡永不出现
+    await rm(path.join(E2E_WORKSPACE, "e2e-proof.txt"), { force: true });
     await page.goto("/");
     await page
       .getByRole("main")

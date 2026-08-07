@@ -11,7 +11,10 @@ import type {
   ModelClient,
   ModelResponse,
 } from "../model/types.js";
-import { AgentSessionManager } from "./session-manager.js";
+import {
+  AgentSessionManager,
+  buildRoleClientChain,
+} from "./session-manager.js";
 import { AgentSession } from "./session.js";
 
 class ScriptedClient implements ModelClient {
@@ -563,4 +566,98 @@ test("单实例写锁：同项目第二个 manager 报错，--force 跳过，释
 
   // 释放后锁文件已删除
   await assert.rejects(readFile(lockPath, "utf8"));
+});
+
+test("buildRoleClientChain：链顺序为 [选中模型, ...fallbacks] 且 pricing 透传", () => {
+  const chain = buildRoleClientChain("main", {
+    models: {
+      main: {
+        providerId: "primary",
+        model: "main-model",
+        pricing: { inputPerMillionCny: 3, outputPerMillionCny: 12 },
+        fallbacks: [
+          {
+            providerId: "backup",
+            model: "backup-model",
+            pricing: { inputPerMillionCny: 1, outputPerMillionCny: 4 },
+          },
+        ],
+      },
+      cheap: { providerId: "primary", model: "cheap-model" },
+      explore: { providerId: "primary", model: "explore-model" },
+    },
+    providers: [
+      {
+        id: "primary",
+        name: "Primary",
+        enabled: true,
+        protocol: "openai-compatible",
+        baseUrl: "https://primary.example.com/v1",
+        apiKey: "key",
+        models: ["main-model", "cheap-model", "explore-model"],
+      },
+      {
+        id: "backup",
+        name: "Backup",
+        enabled: true,
+        protocol: "openai-compatible",
+        baseUrl: "https://backup.example.com/v1",
+        apiKey: "key",
+        models: ["backup-model"],
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    chain.map((item) => item.id),
+    ["primary/main-model", "backup/backup-model"],
+    "主候选在前，fallback 在后",
+  );
+  assert.equal(
+    chain[0]?.pricing?.outputPerMillionCny,
+    12,
+    "主候选 pricing 透传",
+  );
+  assert.equal(
+    chain[1]?.pricing?.inputPerMillionCny,
+    1,
+    "fallback pricing 透传",
+  );
+});
+
+test("buildRoleClientChain：供应商缺失或不可用时降级为即抛客户端", async () => {
+  const chain = buildRoleClientChain("explore", {
+    models: {
+      main: { providerId: "primary", model: "main-model" },
+      cheap: { providerId: "primary", model: "cheap-model" },
+      explore: {
+        providerId: "ghost",
+        model: "ghost-model",
+        fallbacks: [
+          { providerId: "disabled-provider", model: "off-model" },
+        ],
+      },
+    },
+    providers: [
+      {
+        id: "disabled-provider",
+        name: "Disabled",
+        enabled: false,
+        protocol: "openai-compatible",
+        baseUrl: "https://disabled.example.com/v1",
+        apiKey: "key",
+        models: ["off-model"],
+      },
+    ],
+  });
+
+  assert.equal(chain.length, 2);
+  await assert.rejects(
+    chain[0]!.client.complete({ messages: [] }),
+    /explore 角色引用了不存在的供应商：ghost/,
+  );
+  await assert.rejects(
+    chain[1]!.client.complete({ messages: [] }),
+    /已禁用/,
+  );
 });

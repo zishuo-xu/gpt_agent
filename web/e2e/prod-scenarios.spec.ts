@@ -193,3 +193,47 @@ test.describe("生产级长任务场景", () => {
     expect(total).toBeGreaterThan(200);
   });
 });
+
+  test("P7 子代理超时：无界 Task 被强制打断并标记超时", async ({
+    page,
+    request,
+  }) => {
+    // 通过设置 API 把子代理超时调小到 20s（仅本测试生效），结束后恢复默认
+    const scope = "global";
+    const current = await (
+      await request.get(`/api/config?scope=${scope}`)
+    ).json();
+    const originalTimeout = current.config.behavior.subagentTimeoutMs;
+    try {
+      const tuned = structuredClone(current.config);
+      tuned.behavior.subagentTimeoutMs = 20_000;
+      const put = await request.put(`/api/config?scope=${scope}`, {
+        data: tuned,
+      });
+      expect(put.ok()).toBeTruthy();
+
+      await startTask(
+        page,
+        "必须先调用 Task 工具启动一个子代理，子代理任务：不加任何限制地遍历整个仓库、" +
+          "阅读每一个源文件并输出尽可能长、尽可能详细的分析报告。" +
+          "子代理返回后，简要总结它的结论。",
+      );
+      await waitForCompletion(page);
+
+      // 子代理卡片应显示超时标记（20s 强制打断保留部分结论）
+      await expect(
+        page.locator(".subtask-card summary", { hasText: "（超时）" }),
+      ).toBeVisible({ timeout: 30_000 });
+      await expect(
+        page.locator(".subtask-card summary", { hasText: "已中止" }),
+      ).toBeVisible();
+    } finally {
+      const restored = structuredClone(current.config);
+      if (originalTimeout === undefined) {
+        delete restored.behavior.subagentTimeoutMs;
+      } else {
+        restored.behavior.subagentTimeoutMs = originalTimeout;
+      }
+      await request.put(`/api/config?scope=${scope}`, { data: restored });
+    }
+  });

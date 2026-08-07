@@ -536,3 +536,137 @@ describe("ProjectPicker（打开其他项目选择器）", () => {
     await act(async () => root.unmount());
   });
 });
+
+describe("TaskScopeTemplates（新建面板范围建议）", () => {
+  before(() => {
+    // 同文件其他 describe 可能已注册（全局单例），幂等处理
+    try {
+      GlobalRegistrator.register();
+    } catch {
+      // 已注册：忽略
+    }
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  it("渲染 4 个模板按钮，点击填入对应模板文本", async () => {
+    const [{ act }, { createRoot }, { TaskScopeTemplates, TASK_SCOPE_TEMPLATES }] =
+      await Promise.all([
+        import("react"),
+        import("react-dom/client"),
+        import("./SessionApp"),
+      ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const picked: string[] = [];
+    await act(async () => {
+      root.render(
+        <TaskScopeTemplates
+          onPick={(text) => {
+            picked.push(text);
+          }}
+        />,
+      );
+    });
+
+    const buttons = Array.from(
+      container.querySelectorAll("button.task-scope-button"),
+    );
+    assert.deepEqual(
+      buttons.map((button) => button.textContent),
+      TASK_SCOPE_TEMPLATES.map((template) => template.label),
+      "应渲染全部 4 个模板按钮",
+    );
+    assert.equal(
+      container.querySelector(".task-scope-label")?.textContent,
+      "范围建议（点击填入，可再编辑）",
+    );
+
+    // 模拟真实用户点击「修复缺陷」
+    const target = buttons.find(
+      (button) => button.textContent === "修复缺陷",
+    );
+    assert.ok(target, "应找到「修复缺陷」按钮");
+    await act(async () => {
+      target.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    assert.deepEqual(
+      picked,
+      [
+        "先运行相关测试复现失败（<测试文件>），定位并修复实现中的问题。只修改实现文件，不要修改测试文件。",
+      ],
+      "点击后应把模板文本交给上层填入输入框",
+    );
+    await act(async () => root.unmount());
+  });
+});
+
+describe("ItemCard（subtask 卡片）", () => {
+  before(() => {
+    try {
+      GlobalRegistrator.register();
+    } catch {
+      // 已注册：忽略
+    }
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  it("reason=timeout 的子代理卡片显示超时标记与耗时", async () => {
+    const [{ act }, { createRoot }, { ItemCard }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./session-render"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const item = {
+      kind: "subtask",
+      seq: 3,
+      start: {
+        type: "task_start",
+        taskId: "t1",
+        description: "无界探索",
+        ts: "2026-08-01T10:00:00.000Z",
+      },
+      end: {
+        type: "task_end",
+        taskId: "t1",
+        status: "interrupted",
+        reason: "timeout",
+        toolCalls: 2,
+        inputTokens: 100,
+        outputTokens: 50,
+        cachedTokens: 0,
+        summary: "部分结论：文件在 src/a.ts",
+        ts: "2026-08-01T10:15:00.000Z",
+      },
+    };
+    await act(async () => {
+      root.render(
+        <ItemCard
+          item={item as never}
+          showCacheMissNotices={false}
+          locallyResolved={new Set()}
+          feedback=""
+          onFeedback={() => {}}
+          onPermission={async () => {}}
+        />,
+      );
+    });
+
+    const summary = container.querySelector(".subtask-card summary");
+    assert.ok(summary, "应渲染子代理卡片");
+    assert.match(String(summary?.textContent), /无界探索/);
+    assert.match(String(summary?.textContent), /（超时）/);
+    assert.match(String(summary?.textContent), /15\.0 分/);
+    assert.match(String(summary?.textContent), /已中止/);
+    assert.ok(
+      container.querySelector(".subtask-body")?.textContent?.includes("src/a.ts"),
+      "超时保留的部分结论应展示",
+    );
+    await act(async () => root.unmount());
+  });
+});

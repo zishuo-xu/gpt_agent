@@ -35,6 +35,7 @@ test("Web API 暴露 Schema 和脱敏配置", async () => {
       "behavior.showCacheMissNotices",
       "behavior.parallelTools",
       "behavior.crossProjectMemory",
+      "behavior.subagentTimeoutMs",
     ],
   );
 

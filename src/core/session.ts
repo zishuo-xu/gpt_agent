@@ -131,6 +131,8 @@ export class AgentSession {
     compactAtEstimatedTokens?: number;
     keepRecentTokens?: number;
     parallelTools?: boolean;
+    /** 子代理（Task）超时（ms）；缺省 15 分钟（TaskRunner 默认） */
+    subagentTimeoutMs?: number;
     pricing?: Partial<
       Record<"main" | "cheap" | "explore", ModelPricing>
     >;
@@ -223,6 +225,9 @@ export class AgentSession {
             });
           },
           recordTrace: (trace) => this.#traceStore.record(trace),
+          ...(options.subagentTimeoutMs === undefined
+            ? {}
+            : { timeoutMs: options.subagentTimeoutMs }),
         })
       : undefined;
     this.#taskRunner = taskRunner;

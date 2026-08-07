@@ -226,6 +226,9 @@ export function ItemCard(props: {
 
   if (item.kind === "subtask") {
     const { start, end } = item;
+    const durationMs = end
+      ? Date.parse(String(end.ts)) - Date.parse(String(start.ts))
+      : undefined;
     return (
       <details className="subtask-card">
         <summary>
@@ -235,7 +238,11 @@ export function ItemCard(props: {
             {end
               ? `${end.toolCalls} 次工具调用 · ${formatTokens(
                   end.inputTokens + end.outputTokens,
-                )} tokens · ${statusLabel(end.status)}`
+                )} tokens · ${
+                  durationMs !== undefined && Number.isFinite(durationMs)
+                    ? `${formatDuration(durationMs)} · `
+                    : ""
+                }${statusLabel(end.status)}${end.reason === "timeout" ? "（超时）" : ""}`
               : "运行中"}
           </span>
         </summary>
@@ -408,7 +415,10 @@ export function formatTime(value: string): string {
 
 export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms)) return String(ms);
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  const seconds = ms / 1000;
+  if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)} 时`;
+  if (seconds >= 60) return `${(seconds / 60).toFixed(1)} 分`;
+  if (ms >= 1000) return `${seconds.toFixed(1)}s`;
   return `${Math.round(ms)}ms`;
 }
 

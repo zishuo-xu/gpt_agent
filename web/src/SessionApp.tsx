@@ -1142,6 +1142,9 @@ export function SessionApp() {
                     onCancel={() => setRunBoundsPreview(null)}
                   />
                 )}
+                <TaskScopeTemplates
+                  onPick={(text) => setMessage(text)}
+                />
                 <Composer
                   message={message}
                   setMessage={updateMessage}
@@ -1242,6 +1245,48 @@ export function SessionListSidebar(props: {
   );
 }
 
+
+/** 范围建议模板（参照生产测试：有界任务完成率/速度显著优于无界任务） */
+export const TASK_SCOPE_TEMPLATES: Array<{ label: string; text: string }> = [
+  {
+    label: "只读分析",
+    text: "阅读以下文件并分析：<文件列表>。不要修改任何文件，不要运行命令。",
+  },
+  {
+    label: "修复缺陷",
+    text: "先运行相关测试复现失败（<测试文件>），定位并修复实现中的问题。只修改实现文件，不要修改测试文件。",
+  },
+  {
+    label: "实现功能",
+    text: "在 <目录> 实现 <功能>，并补充单元测试。只改动该目录内的文件，不要探索其他目录。",
+  },
+  {
+    label: "写文档",
+    text: "写出 <文档路径>（约 600 字，精炼为主）。只阅读 <文件列表>，不要运行命令，写完立即结束。",
+  },
+];
+
+export function TaskScopeTemplates(props: {
+  onPick: (text: string) => void;
+}) {
+  return (
+    <div className="task-scope-templates">
+      <span className="task-scope-label">范围建议（点击填入，可再编辑）</span>
+      <span className="task-scope-buttons">
+        {TASK_SCOPE_TEMPLATES.map((template) => (
+          <button
+            type="button"
+            key={template.label}
+            className="task-scope-button"
+            onClick={() => props.onPick(template.text)}
+          >
+            {template.label}
+          </button>
+        ))}
+      </span>
+    </div>
+  );
+}
 
 function Composer(props: {
   message: string;

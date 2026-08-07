@@ -475,6 +475,12 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
         config.behavior?.showCacheMissNotices === true,
       parallelTools: config.behavior?.parallelTools === true,
       crossProjectMemory: config.behavior?.crossProjectMemory !== false,
+      // 带点号的 schema 字段在下方标量循环中被跳过（server.* 同例），此处显式归一化
+      subagentTimeoutMs:
+        typeof config.behavior?.subagentTimeoutMs === "number" &&
+        config.behavior.subagentTimeoutMs > 0
+          ? config.behavior.subagentTimeoutMs
+          : 900_000,
     },
   };
   for (const field of CONFIG_SCHEMA) {

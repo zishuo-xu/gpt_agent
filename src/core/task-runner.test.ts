@@ -385,3 +385,45 @@ test("steerLoops 注册表在 run 结束后清空且跨嵌套共享", async () =
   await runPromise;
   assert.equal(steerLoops.size, 0, "结束后应移除");
 });
+
+test("子代理超时软打断：保留已收集结果并标记 reason=timeout", async () => {
+  // 模拟真实客户端行为：请求挂起，收到 abort 信号时拒绝（AbortError）
+  class AbortableHangClient implements ModelClient {
+    async complete(
+      request: CompletionRequest,
+    ): Promise<ModelResponse> {
+      return await new Promise((_resolve, reject) => {
+        request.signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    }
+  }
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const runner = new TaskRunner({
+    cwd: await mkdtemp(path.join(os.tmpdir(), "myagent-task-timeout-")),
+    bus,
+    mode: "normal",
+    client: new AbortableHangClient(),
+    timeoutMs: 300,
+  });
+
+  const result = await runner.run(
+    { description: "无界探索", prompt: "持续检索" },
+    new AbortController().signal,
+  );
+
+  assert.equal(result.aborted, true);
+  assert.equal(result.isError, true);
+  assert.match(String(result.summary), /已超时/);
+  const end = events.find((event) => event.type === "task_end");
+  assert.equal(end?.type, "task_end");
+  if (end?.type === "task_end") {
+    assert.equal(end.status, "interrupted");
+    assert.equal(end.reason, "timeout");
+  }
+});

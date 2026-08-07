@@ -271,3 +271,20 @@ test("未显式配价模型按内置价格表补默认，显式配置优先", as
   const last = await service.read("global");
   assert.equal(last.models.cheap.pricing, undefined);
 });
+
+test("behavior.subagentTimeoutMs 经 read/readEffective 保留且缺省 15 分钟", async () => {
+  const service = await fixture();
+  // 缺省：未显式配置时归一化为 15 分钟
+  const defaults = await service.readEffective();
+  assert.equal(defaults.behavior.subagentTimeoutMs, 900_000);
+
+  // 显式配置：写入后 read 与 readEffective 均保留（此前被 normalizeConfig 丢弃）
+  const config = await service.readPublic("project");
+  config.behavior.subagentTimeoutMs = 120_000;
+  await service.write("project", config);
+
+  const raw = await service.read("project");
+  assert.equal(raw.behavior.subagentTimeoutMs, 120_000);
+  const effective = await service.readEffective();
+  assert.equal(effective.behavior.subagentTimeoutMs, 120_000);
+});

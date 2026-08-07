@@ -41,7 +41,12 @@ export interface TaskRunnerOptions {
   recordTrace?: AgentLoopOptions["recordTrace"];
   /** 活跃子代理循环注册表（跨嵌套层级共享，steer 时逐个软打断） */
   steerLoops?: Set<AgentLoop>;
+  /** 单次运行超时（ms）；超时软打断子代理并返回已收集结果。缺省 15 分钟 */
+  timeoutMs?: number;
 }
+
+/** 子代理默认超时：15 分钟（无界探索会拖住主任务，参照生产测试 P5 观察） */
+export const DEFAULT_SUBAGENT_TIMEOUT_MS = 15 * 60_000;
 
 /** 同时运行的子代理数量上限（设计约定：并发 ≤ 4） */
 const MAX_CONCURRENT_RUNNERS = 4;
@@ -61,6 +66,7 @@ export class TaskRunner {
   readonly #recordTrace: AgentLoopOptions["recordTrace"];
   readonly #approve: ApprovalHandler | undefined;
   readonly #steerLoops: Set<AgentLoop>;
+  readonly #timeoutMs: number;
 
   constructor(options: TaskRunnerOptions) {
     this.#cwd = options.cwd;
@@ -73,6 +79,7 @@ export class TaskRunner {
     this.#reportUsage = options.reportUsage;
     this.#recordTrace = options.recordTrace;
     this.#steerLoops = options.steerLoops ?? new Set();
+    this.#timeoutMs = options.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS;
   }
 
   /** 配置变更后替换子代理模型客户端 */
@@ -176,6 +183,7 @@ export class TaskRunner {
               ? { recordTrace: this.#recordTrace }
               : {}),
             steerLoops: this.#steerLoops,
+            timeoutMs: this.#timeoutMs,
           })
         : undefined;
     const tools = new ToolExecutor(
@@ -222,6 +230,12 @@ export class TaskRunner {
     });
 
     const onAbort = () => loop.interrupt();
+    // 子代理超时：无界探索拖住主任务时强制软打断（保留已收集结果）
+    let timedOut = false;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      loop.interrupt();
+    }, this.#timeoutMs);
     this.#steerLoops.add(loop);
     try {
       signal.addEventListener("abort", onAbort, { once: true });
@@ -241,9 +255,10 @@ export class TaskRunner {
         outputTokens,
         cachedTokens,
         summary,
+        ...(timedOut ? { reason: "timeout" as const } : {}),
       });
       return {
-        summary: `子代理“${args.description}”${status === "completed" ? "完成" : "已中止"}`,
+        summary: `子代理“${args.description}”${status === "completed" ? "完成" : timedOut ? "已超时" : "已中止"}`,
         output: summary,
         aborted: interrupted,
         isError: interrupted,
@@ -268,6 +283,7 @@ export class TaskRunner {
         isError: true,
       };
     } finally {
+      clearTimeout(timeoutTimer);
       activeRunners -= 1;
       this.#steerLoops.delete(loop);
       signal.removeEventListener("abort", onAbort);
