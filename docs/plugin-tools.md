@@ -95,6 +95,33 @@ docker run -d --name myagent-searxng -p 8080:8080 \
 ```
 注意：SearXNG 默认配置禁止 JSON 格式输出（403），必须通过 `search.formats` 显式放行；未配置 `api_token` 时 JSON 请求可能被限流。
 
+## MCP 服务器接入
+
+MyAgent 内置最小 MCP 客户端（无 SDK，按 2025-06-18 规范实现）：配置在 `plugins.json` 的 `mcpServers` 段（两层合并，文件已 gitignore）后，MCP server 的**工具自动注册进插件通道**——权限/审批/UI/统计与普通插件工具一致（工具名 `ServerName_ToolName` 归一化）。
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "env": {}
+    },
+    "remote": {
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer x" },
+      "enabled": false
+    }
+  }
+}
+```
+
+- **stdio**（本机子进程）：`command` + `args` + `env`（如 `npx -y 某server`）；**HTTP**（远端）：`url` + `headers`（认证等）
+- `enabled: false` 关闭单个 server；`timeoutMs` 覆盖单次工具调用超时（默认 60s）
+- server 连接/握手失败跳过并记日志，不阻塞其他 server 与插件；新增/修改配置需重启 server
+- 权限：MCP 工具是插件工具 → normal 档兜底 ask（首次批准后本会话通配放行）
+- 支持：`tools/list`（分页）、`tools/call`（text/image 摘要/structuredContent）；不支持：resources/prompts、OAuth、进度通知、2026-07-28 modern 协议
+
 ## 限制
 
 - 构建产物（`dist/cli.js` 由 tsc 编译、无 tsx loader）下加载 `.ts` 插件会失败；构建产物运行时请使用 `.mjs`（原生 ESM）

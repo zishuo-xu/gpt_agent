@@ -18,6 +18,12 @@ import type {
 import { DesktopNotifier, WebhookNotifier } from "./notifier.js";
 import { pluginToolRegistry } from "../shared/plugin-tool.js";
 import { loadPluginTools } from "../tools/plugin-loader.js";
+import {
+  closeMcpClients,
+  disposeMcpClientsSync,
+  loadMcpServers,
+} from "../tools/mcp-loader.js";
+import type { McpClient } from "../tools/mcp-client.js";
 import { ConversationAgentModel } from "./agent-model.js";
 import { ConfiguredModelClient } from "../model/client.js";
 import { FallbackModelClient } from "../model/fallback-client.js";
@@ -108,6 +114,8 @@ export class AgentSessionManager {
   #lockHeld = false;
   /** 进程级插件加载标记（首个模型构造前填充一次，运行中不刷新） */
   #pluginsLoaded = false;
+  /** 已连接的 MCP server 客户端（关闭/退出时统一清理） */
+  readonly #mcpClients = new Map<string, McpClient>();
 
   constructor(options: AgentSessionManagerOptions) {
     this.#cwd = options.cwd;
@@ -421,6 +429,23 @@ export class AgentSessionManager {
     for (const error of report.errors) {
       console.error(`[plugins] 跳过 ${error.file}：${error.message}`);
     }
+    // MCP server：配置驱动（plugins.json 的 mcpServers 段），工具注册进同一注册表；
+    // 失败 server 跳过不阻塞；异常退出时同步清理子进程
+    const mcpReport = await loadMcpServers(
+      this.#homeDir,
+      this.#cwd,
+      pluginToolRegistry,
+      this.#mcpClients,
+    );
+    for (const error of mcpReport.errors) {
+      console.error(`[plugins] MCP server“${error.name}”加载失败：${error.message}`);
+    }
+    process.once("exit", () => disposeMcpClientsSync(this.#mcpClients));
+  }
+
+  /** 关闭全部 MCP 连接（web server 优雅关闭路径调用） */
+  async closeMcp(): Promise<void> {
+    await closeMcpClients(this.#mcpClients);
   }
 
   #register(session: AgentSession): void {

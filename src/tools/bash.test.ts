@@ -79,7 +79,7 @@ test("Abort 会 kill 子进程并返回已收集的部分输出", async () => {
       signal: controller.signal,
     },
   );
-  setTimeout(() => controller.abort(), 150);
+  setTimeout(() => controller.abort(), 400);
   const result = await running;
   assert.equal(result.aborted, true, "abort 应标记 aborted");
   assert.equal(result.isError, true);
@@ -101,9 +101,10 @@ test("Abort 会 kill 子进程并返回已收集的部分输出", async () => {
 test("Bash 超时也会 kill 子进程并返回已收集的部分输出", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-timeout-"));
   const pidFile = path.join(directory, "child.pid");
+  // 超时需大于 node -e 冷启动时间（负载高时可达 200ms+），否则首行输出来不及产生
   const result = await runBash(
     `${process.execPath} -e "console.log('started'); require('fs').writeFileSync('${pidFile}', String(process.pid)); setInterval(() => {}, 1000)"`,
-    { cwd: directory, timeoutMs: 100 },
+    { cwd: directory, timeoutMs: 300 },
   );
   assert.equal(result.isError, true);
   assert.equal(

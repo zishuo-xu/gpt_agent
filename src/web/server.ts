@@ -100,13 +100,14 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
     process.stderr.write(timingReport());
   });
 
-  // 优雅关闭：flush 尾部事件（不丢写盘）+ 释放全部项目单实例写锁
+  // 优雅关闭：flush 尾部事件（不丢写盘）+ 释放全部项目单实例写锁 + 清理 MCP 子进程
   let shuttingDown = false;
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     await sessionManager.flush();
     await sessionManager.releaseLock();
+    await sessionManager.closeMcp();
     await app.registry.disposeAll();
     process.exit(0);
   };
