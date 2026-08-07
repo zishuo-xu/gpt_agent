@@ -1,12 +1,23 @@
+import { readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { definePluginTool } from "../../src/shared/plugin-tool.js";
 import { htmlToText } from "../../src/tools/html-text.js";
 
 /**
- * WebSearch 示例插件：网络搜索（免 API key）。
- * 多引擎自动 fallback：bing → duckduckgo → baidu（可指定 engine 或 auto）。
- * 搜索发现用：先用 WebSearch 找相关页面，再用 WebFetch 抓详情。
- * 注意：搜索引擎无公开稳定 API，HTML 解析可能随页面结构变化失效；
- * 单引擎反爬/不可达时 auto 会顺延下一引擎，全部失败返回错误。
+ * WebSearch 示例插件：网络搜索。
+ *
+ * 两级策略（混合）：
+ * 1) API 模式（推荐）：配置 Tavily API key 后走结构化搜索，返回 title/url/content
+ *    （页面正文），agent 一次调用即拿到素材，无需再 WebFetch。key 配置：
+ *    - 环境变量 TAVILY_API_KEY；或
+ *    - ~/.myagent/plugins.json / <cwd>/.myagent/plugins.json（项目覆盖全局）：
+ *      { "webSearch": { "provider": "tavily", "apiKey": "tvly-..." } }
+ * 2) 降级模式：无 key 或 API 失败时自动顺延 HTML 引擎链
+ *    （bing → duckduckgo → baidu），免配置但依赖页面结构。
+ *
+ * 注意：搜索引擎无公开稳定 HTML 接口，降级解析可能随页面结构变化失效；
+ * 有 key 时优先 API，可降低单点风险。
  */
 
 export interface SearchResult {
@@ -18,6 +29,87 @@ export interface SearchResult {
 type EngineName = "bing" | "duckduckgo" | "baidu";
 
 const ENGINE_ORDER: EngineName[] = ["bing", "duckduckgo", "baidu"];
+
+interface SearchConfig {
+  provider: "tavily";
+  apiKey: string;
+}
+
+/** 读取搜索配置：环境变量优先，其次 plugins.json（项目层覆盖全局层） */
+export async function loadSearchConfig(
+  homeDir = os.homedir(),
+  cwd = process.cwd(),
+): Promise<SearchConfig | undefined> {
+  const envKey = process.env.TAVILY_API_KEY?.trim();
+  if (envKey) return { provider: "tavily", apiKey: envKey };
+  const layers = [
+    path.join(homeDir, ".myagent", "plugins.json"),
+    path.join(cwd, ".myagent", "plugins.json"),
+  ];
+  let merged: Record<string, unknown> = {};
+  for (const file of layers) {
+    try {
+      const raw = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+      // 浅合并（对象层覆盖），项目层在后
+      merged = { ...merged, ...raw };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.error(`[plugins] 读取 ${file} 失败：${(error as Error).message}`);
+      }
+    }
+  }
+  const section = merged.webSearch as
+    | Record<string, unknown>
+    | undefined;
+  if (section && typeof section.apiKey === "string" && section.apiKey.trim()) {
+    return { provider: "tavily", apiKey: section.apiKey.trim() };
+  }
+  return undefined;
+}
+
+/** 解析 Tavily 响应（results: [{ title, url, content, score, published_date? }]） */
+export function parseTavilyResponse(payload: unknown): SearchResult[] {
+  const results = Array.isArray(
+    (payload as { results?: unknown })?.results,
+  )
+    ? (payload as { results: unknown[] }).results
+    : [];
+  return results
+    .map((raw) => {
+      const item = raw as Record<string, unknown>;
+      return {
+        title: String(item.title ?? "").trim(),
+        url: String(item.url ?? "").trim(),
+        snippet: String(item.content ?? "").trim(),
+      };
+    })
+    .filter((result) => result.title && result.url);
+}
+
+async function searchTavily(
+  query: string,
+  maxResults: number,
+  config: SearchConfig,
+  signal: AbortSignal,
+): Promise<SearchResult[]> {
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      api_key: config.apiKey,
+      query,
+      max_results: maxResults,
+      search_depth: "basic",
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Tavily HTTP ${response.status}`);
+  }
+  const results = parseTavilyResponse(await response.json());
+  if (results.length === 0) throw new Error("Tavily 未返回结果");
+  return results;
+}
 
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
@@ -186,9 +278,11 @@ export default definePluginTool({
       },
       engine: {
         type: "string",
-        enum: ["auto", "bing", "duckduckgo", "baidu"],
+        enum: ["auto", "html", "bing", "duckduckgo", "baidu"],
         description:
-          "Search engine. Defaults to auto (tries bing, then duckduckgo, then baidu).",
+          "auto: Tavily API (if configured) with HTML fallback. " +
+          "html: force HTML engines (bing, then duckduckgo, then baidu). " +
+          "Specific engine names force that engine.",
       },
     },
     required: ["query"],
@@ -205,12 +299,39 @@ export default definePluginTool({
     }
     const maxResults = clampInteger(args.max_results, 1, 10, 5);
     const engineArg = String(args.engine ?? "auto");
+
+    // API 模式：显式指定 html 引擎或 engine 非 auto 时不走 API
+    const config = engineArg === "auto" || engineArg === "html"
+      ? await loadSearchConfig()
+      : undefined;
+    if (config) {
+      try {
+        const results = await searchTavily(query, maxResults, config, signal);
+        return {
+          summary: `搜索“${query}”找到 ${results.length} 条结果（tavily）`,
+          output: formatResults(results),
+          details: { engine: "tavily", query, results },
+        };
+      } catch (error) {
+        // API 失败降级 HTML 链，原因附在最终错误信息中
+        console.error(
+          `[web-search] Tavily 失败，降级 HTML：${
+            error instanceof Error ? error.message : "未知错误"
+          }`,
+        );
+      }
+    }
+
     const order: EngineName[] =
-      engineArg === "auto"
+      engineArg === "auto" || engineArg === "html"
         ? ENGINE_ORDER
         : ([engineArg] as EngineName[]);
 
-    let lastError = "";
+    let lastError = config
+      ? "Tavily 不可用"
+      : engineArg === "auto" || engineArg === "html"
+        ? "未配置 API key（可在 ~/.myagent/plugins.json 或环境变量 TAVILY_API_KEY 配置）"
+        : "";
     for (const engine of order) {
       try {
         const html = await fetchSearch(engine, query, signal);

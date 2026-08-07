@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
+  loadSearchConfig,
   parseBaiduResults,
   parseBingResults,
   parseDuckDuckGoResults,
+  parseTavilyResponse,
 } from "../../.myagent/tools/web-search.js";
 
 test("Bing 解析：b_algo 块提取标题/链接/摘要并解码重定向", () => {
@@ -55,4 +60,66 @@ test("Baidu 解析：c-title 标题 + c-abstract 摘要配对", () => {
   assert.equal(results[0]!.url, "https://baike.baidu.com/item/x");
   assert.equal(results[0]!.snippet, "这是百科摘要内容。");
   assert.equal(results[1]!.snippet, "", "无对应摘要时为空");
+});
+
+test("Tavily 响应解析为 SearchResult（含 content 正文）", () => {
+  const results = parseTavilyResponse({
+    query: "test",
+    results: [
+      {
+        title: "TypeScript 官网",
+        url: "https://www.typescriptlang.org/",
+        content: "TypeScript is JavaScript with syntax for types.",
+        score: 0.98,
+      },
+      { title: "无 URL 条目", content: "x" },
+      { url: "https://example.com/no-title", content: "y" },
+    ],
+  });
+  assert.equal(results.length, 1, "缺 title 或 url 的条目被过滤");
+  assert.equal(results[0]!.title, "TypeScript 官网");
+  assert.equal(results[0]!.url, "https://www.typescriptlang.org/");
+  assert.match(results[0]!.snippet, /syntax for types/);
+});
+
+test("Tavily 空响应与非数组 results 返回空数组", () => {
+  assert.deepEqual(parseTavilyResponse({}), []);
+  assert.deepEqual(parseTavilyResponse({ results: "oops" }), []);
+});
+
+test("loadSearchConfig：环境变量优先，plugins.json 项目层覆盖全局层", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-searchcfg-"));
+  const home = path.join(root, "home");
+  const project = path.join(root, "project");
+  await mkdir(path.join(home, ".myagent"), { recursive: true });
+  await mkdir(path.join(project, ".myagent"), { recursive: true });
+
+  try {
+    // 无任何配置 → undefined
+    assert.equal(await loadSearchConfig(home, project), undefined);
+
+    // 环境变量优先
+    process.env.TAVILY_API_KEY = "tvly-env-key";
+    assert.equal((await loadSearchConfig(home, project))?.apiKey, "tvly-env-key");
+    delete process.env.TAVILY_API_KEY;
+
+    // 全局层配置
+    await writeFile(
+      path.join(home, ".myagent", "plugins.json"),
+      JSON.stringify({ webSearch: { provider: "tavily", apiKey: "tvly-global" } }),
+      "utf8",
+    );
+    assert.equal((await loadSearchConfig(home, project))?.apiKey, "tvly-global");
+
+    // 项目层覆盖全局层
+    await writeFile(
+      path.join(project, ".myagent", "plugins.json"),
+      JSON.stringify({ webSearch: { apiKey: "tvly-project" } }),
+      "utf8",
+    );
+    assert.equal((await loadSearchConfig(home, project))?.apiKey, "tvly-project");
+  } finally {
+    delete process.env.TAVILY_API_KEY;
+    await rm(root, { recursive: true, force: true });
+  }
 });

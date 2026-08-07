@@ -60,7 +60,16 @@ export default definePluginTool({
 
 ## 示例插件
 
-`.myagent/tools/web-fetch.ts`（本仓库已随包提供）：抓取 URL 返回可见文本（HTML/JSON/纯文本自动识别，默认截断 8000 字符，`max_chars` 可调）。
+- `.myagent/tools/web-fetch.ts`（本仓库已随包提供）：抓取 URL 返回可见文本（HTML/JSON/纯文本自动识别，默认截断 8000 字符，`max_chars` 可调）。
+- `.myagent/tools/web-search.ts`（本仓库已随包提供）：网络搜索，两级策略：
+  - **API 模式（推荐）**：配置 [Tavily](https://tavily.com) key（免费层 1000 次/月）后走结构化搜索，返回 `title/url/content`（页面正文），一次调用即拿到素材，无需再 WebFetch。配置方式（任一）：
+    - 环境变量 `TAVILY_API_KEY`；或
+    - `~/.myagent/plugins.json`（全局）或 `<cwd>/.myagent/plugins.json`（项目，覆盖全局）：
+      ```json
+      { "webSearch": { "provider": "tavily", "apiKey": "tvly-..." } }
+      ```
+  - **降级模式**：无 key 或 API 失败时自动顺延 HTML 引擎链（bing → duckduckgo → baidu），免配置但依赖页面结构。
+  - `engine` 参数：`auto`（默认，API 优先 + HTML 降级）/ `html`（强制 HTML 链）/ 指定单引擎。
 
 ## 限制
 
