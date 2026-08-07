@@ -112,3 +112,40 @@ test("插件工具：normal 兜底 ask，allow 规则放行，trust 全放行", 
   const strict = new PermissionEngine("strict", rules);
   assert.equal(strict.judge(pluginCall), "allow", "插件不在 STRICT_GATED，strict 放行");
 });
+
+test("rememberPattern：插件工具通配记忆放行任意 target，去重", () => {
+  const engine = new PermissionEngine("normal", []);
+  const pluginCall = (target: string): ToolCall => ({
+    id: `c-${target}`,
+    tool: "WebFetch",
+    target,
+    args: { url: target },
+  });
+
+  // 插件工具通配记忆前：normal 兜底 ask
+  assert.equal(engine.judge(pluginCall("https://a.com")), "ask");
+  engine.rememberPattern("WebFetch(*)");
+  engine.rememberPattern("WebFetch(*)"); // 去重
+  assert.equal(engine.judge(pluginCall("https://a.com")), "allow");
+  assert.equal(engine.judge(pluginCall("https://b.com/page")), "allow");
+  assert.deepEqual(
+    engine.rules().filter((rule) => rule.pattern === "WebFetch(*)"),
+    [{ effect: "allow", pattern: "WebFetch(*)" }],
+    "重复记忆不追加",
+  );
+});
+
+test("remember：内置工具维持精确签名记忆", () => {
+  const engine = new PermissionEngine("normal", []);
+  engine.remember({ id: "c", tool: "Bash", target: "git status", args: { command: "git status" } });
+  assert.equal(
+    engine.judge({ id: "c2", tool: "Bash", target: "git status", args: {} }),
+    "allow",
+    "同签名放行",
+  );
+  assert.equal(
+    engine.judge({ id: "c3", tool: "Bash", target: "git log", args: {} }),
+    "ask",
+    "不同命令不放行",
+  );
+});

@@ -3,6 +3,7 @@ import {
   callSignature,
   type PermissionEngine,
 } from "./permissions.js";
+import { isToolName } from "../shared/tool-names.js";
 import type {
   ApprovalAnswer,
   PermissionRule,
@@ -72,14 +73,20 @@ export class PermissionWaiter {
         signal.removeEventListener("abort", onAbort);
         this.#pending.delete(call.id);
         if (answer.granted && answer.scope && answer.scope !== "once") {
-          this.#permissions.remember(call);
+          // 插件工具按工具整体记忆（session 级内存通配 ToolName(*)）：
+          // 插件是多 URL/多参数调用场景（搜索/抓取），精确签名会让同会话内
+          // 每次调用都重新审批；内置工具维持精确签名（Bash 单命令语义）
+          const pattern = isToolName(call.tool)
+            ? callSignature(call)
+            : `${call.tool}(*)`;
+          this.#permissions.rememberPattern(pattern);
           if (
             (answer.scope === "project" || answer.scope === "global") &&
             this.#rememberPermission
           ) {
             void this.#rememberPermission(answer.scope, {
               effect: "allow",
-              pattern: callSignature(call),
+              pattern,
             }).catch((error) => {
               this.#bus.emit({
                 type: "error",

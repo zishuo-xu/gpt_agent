@@ -731,3 +731,51 @@ test("已注册的插件工具名通过运行时守卫（openai-compatible 响�
     pluginToolRegistry.clear();
   }
 });
+
+test("插件工具 target 取 query 主参（搜索类工具）", async () => {
+  pluginToolRegistry.register({
+    name: "WebSearch",
+    description: "搜索",
+    inputSchema: { type: "object", properties: { query: { type: "string" } } },
+    async run() {
+      return { summary: "ok" };
+    },
+  });
+  try {
+    const client = new ConfiguredModelClient(
+      provider("openai-compatible"),
+      "test-model",
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call-s",
+                      type: "function",
+                      function: {
+                        name: "WebSearch",
+                        arguments: JSON.stringify({ query: "Rust 2024 edition" }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        ),
+    );
+    const response = await client.complete({
+      system: "",
+      messages: [],
+      tools: ALL_TOOLS,
+    });
+    assert.equal(response.toolCalls[0]?.tool, "WebSearch");
+    assert.equal(response.toolCalls[0]?.target, "Rust 2024 edition");
+  } finally {
+    pluginToolRegistry.clear();
+  }
+});

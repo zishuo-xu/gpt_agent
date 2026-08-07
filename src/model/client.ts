@@ -495,9 +495,9 @@ function targetFor(tool: string, args: Record<string, unknown>): string {
     return `${asArray(args.todos).length} items`;
   }
   if (tool === "Task") return stringValue(args.description);
-  // 插件工具：取常见主参名（url/path/command/target/file_path）的首个非空值，
+  // 插件工具：取常见主参名（url/path/command/target/file_path/pattern/query）的首个非空值，
   // 供权限签名与 UI 展示；缺省空串
-  for (const key of ["url", "path", "command", "target", "file_path", "pattern"]) {
+  for (const key of ["url", "path", "command", "target", "file_path", "pattern", "query"]) {
     const value = stringValue(args[key]);
     if (value) return value;
   }

@@ -72,11 +72,14 @@ export class PermissionEngine {
   }
 
   remember(call: ToolCall): void {
-    const pattern = callSignature(call);
+    this.rememberPattern(callSignature(call));
+  }
+
+  /** 按 pattern 记忆 allow 规则（去重；插件工具 session 级放行使用通配形态） */
+  rememberPattern(pattern: string): void {
     if (
       this.#rules.some(
-        (rule) =>
-          rule.effect === "allow" && rule.pattern === pattern,
+        (rule) => rule.effect === "allow" && rule.pattern === pattern,
       )
     ) {
       return;
