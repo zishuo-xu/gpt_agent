@@ -11,6 +11,7 @@ import path from "node:path";
 import test from "node:test";
 import type { ToolCall } from "../core/types.js";
 import { ToolExecutor } from "./executor.js";
+import { PluginToolRegistry } from "../shared/plugin-tool.js";
 
 function call(
   id: string,
@@ -347,4 +348,43 @@ test("Grep caseInsensitive:false 只匹配精确大小写", async () => {
   const lines = String(result.output).split("\n");
   assert.equal(lines.length, 1, "caseInsensitive:false 应只匹配一行（小写 parse）");
   assert.match(lines[0], /utils\.ts:1:/);
+});
+
+test("插件工具经注册表分发执行，未注册名返回失败结果", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-exec-plugin-"));
+  const registry = new PluginToolRegistry();
+  registry.register({
+    name: "Echo",
+    description: "回显工具",
+    inputSchema: {
+      type: "object",
+      properties: { text: { type: "string" } },
+      required: ["text"],
+    },
+    async run(args, signal) {
+      assert.equal(signal.aborted, false);
+      return {
+        summary: `回显 ${String(args.text)}`,
+        output: `echo:${String(args.text)}`,
+        details: { text: args.text },
+      };
+    },
+  });
+  const executor = new ToolExecutor(cwd, undefined, undefined, undefined, registry);
+  const signal = new AbortController().signal;
+
+  const result = await executor.execute(
+    call("p1", "Echo", "hello", { text: "hello" }),
+    signal,
+  );
+  assert.equal(result.summary, "回显 hello");
+  assert.equal(result.output, "echo:hello");
+  assert.deepEqual(result.details, { text: "hello" });
+
+  const missing = await executor.execute(
+    call("p2", "Ghost", "", { text: "x" }),
+    signal,
+  );
+  assert.equal(missing.isError, true);
+  assert.match(String(missing.output), /未注册/);
 });

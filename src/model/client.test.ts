@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelProviderConfig } from "../config/schema.js";
+import { pluginToolRegistry } from "../shared/plugin-tool.js";
 import { ConfiguredModelClient } from "./client.js";
 import {
   EXPLORE_TOOL_NAMES,
@@ -681,4 +682,52 @@ test("禁用供应商、缺少 Key 和未知模型会在请求前失败", () => 
     () => new ConfiguredModelClient(provider("anthropic"), "missing"),
     /不在供应商/,
   );
+});
+
+test("已注册的插件工具名通过运行时守卫（openai-compatible 响应）", async () => {
+  pluginToolRegistry.register({
+    name: "WebFetch",
+    description: "抓取网页",
+    inputSchema: { type: "object", properties: { url: { type: "string" } } },
+    async run() {
+      return { summary: "ok" };
+    },
+  });
+  try {
+    const client = new ConfiguredModelClient(
+      provider("openai-compatible"),
+      "test-model",
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call-wf",
+                      type: "function",
+                      function: {
+                        name: "WebFetch",
+                        arguments: JSON.stringify({ url: "https://example.com" }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        ),
+    );
+    const response = await client.complete({
+      system: "",
+      messages: [],
+      tools: ALL_TOOLS,
+    });
+    assert.equal(response.toolCalls[0]?.tool, "WebFetch");
+    assert.equal(response.toolCalls[0]?.target, "https://example.com");
+  } finally {
+    pluginToolRegistry.clear();
+  }
 });

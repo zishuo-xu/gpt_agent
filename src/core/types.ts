@@ -25,7 +25,9 @@ export interface ModelPricing {
 
 export interface ToolCall {
   id: string;
-  tool: ToolName;
+  /** 工具名：内置名见 TOOL_NAMES；插件名见 PluginToolRegistry（.myagent/tools/）。
+      开放集合是插件通道的前提——client 运行时守卫按两者联合校验 */
+  tool: string;
   target: string;
   args: unknown;
   purpose?: string;

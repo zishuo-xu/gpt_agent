@@ -38,6 +38,13 @@ test.describe("设置页", () => {
     await expect(
       page.getByRole("heading", { name: "扩展设置" }),
     ).toBeVisible();
+    // 插件工具开关（schema 驱动渲染）
+    await expect(
+      page.getByRole("checkbox", { name: /插件工具/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("checkbox", { name: /插件工具/ }),
+    ).toBeChecked();
     // 作用域切换
     await page.getByRole("button", { name: "当前项目" }).click();
     await expect(

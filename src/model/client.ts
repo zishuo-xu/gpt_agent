@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ModelProviderConfig } from "../config/schema.js";
-import type { ToolCall, ToolName } from "../core/types.js";
+import type { ToolCall } from "../core/types.js";
+import { pluginToolRegistry } from "../shared/plugin-tool.js";
 import { isToolName } from "../shared/tool-names.js";
 import type {
   CompletionRequest,
@@ -472,7 +473,8 @@ function createToolCall(
   name: string,
   args: Record<string, unknown>,
 ): ToolCall {
-  if (!isToolName(name)) {
+  // 运行时守卫：内置名 ∪ 插件注册表名（插件通道开放了工具名集合）
+  if (!isToolName(name) && !pluginToolRegistry.has(name)) {
     throw new Error(`模型请求了未知工具：${name}`);
   }
   return {
@@ -485,7 +487,7 @@ function createToolCall(
   };
 }
 
-function targetFor(tool: ToolName, args: Record<string, unknown>): string {
+function targetFor(tool: string, args: Record<string, unknown>): string {
   if (tool === "Bash") return stringValue(args.command);
   if (tool === "Grep") return stringValue(args.pattern);
   if (tool === "Glob") return stringValue(args.pattern);
@@ -493,7 +495,13 @@ function targetFor(tool: ToolName, args: Record<string, unknown>): string {
     return `${asArray(args.todos).length} items`;
   }
   if (tool === "Task") return stringValue(args.description);
-  return stringValue(args.file_path);
+  // 插件工具：取常见主参名（url/path/command/target/file_path）的首个非空值，
+  // 供权限签名与 UI 展示；缺省空串
+  for (const key of ["url", "path", "command", "target", "file_path", "pattern"]) {
+    const value = stringValue(args[key]);
+    if (value) return value;
+  }
+  return "";
 }
 
 function parseArguments(value: unknown): Record<string, unknown> {

@@ -12,6 +12,10 @@ import { AtomicFileTools } from "./atomic-file.js";
 import { validateToolArgs } from "./args-validate.js";
 import { collectFiles } from "./collect-files.js";
 import { runBash } from "./bash.js";
+import {
+  pluginToolRegistry,
+  type PluginToolRegistry,
+} from "../shared/plugin-tool.js";
 import { TOOL_OUTPUT_LIMITS, truncateToolText } from "./truncate.js";
 
 interface ReadArgs {
@@ -77,17 +81,20 @@ export class ToolExecutor {
   readonly todos: TodoStore;
   readonly #cwd: string;
   readonly #taskHandler: TaskHandler | undefined;
+  readonly #plugins: PluginToolRegistry;
 
   constructor(
     cwd: string,
     files = new AtomicFileTools(),
     todos = new TodoStore(),
     taskHandler?: TaskHandler,
+    plugins: PluginToolRegistry = pluginToolRegistry,
   ) {
     this.#cwd = cwd;
     this.files = files;
     this.todos = todos;
     this.#taskHandler = taskHandler;
+    this.#plugins = plugins;
   }
 
   async execute(
@@ -311,6 +318,14 @@ export class ToolExecutor {
           signal,
           ...(args.background ? { background: true } : {}),
         });
+      }
+      default: {
+        // 插件通道：注册表分发（未知名返回失败结果，不抛）
+        return await this.#plugins.execute(
+          call.tool,
+          (effectiveArgs ?? {}) as Record<string, unknown>,
+          signal,
+        );
       }
     }
   }

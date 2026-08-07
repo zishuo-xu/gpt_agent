@@ -1,4 +1,5 @@
 import type { ToolName } from "../core/types.js";
+import { pluginToolRegistry } from "../shared/plugin-tool.js";
 
 export interface ToolDefinition {
   name: string;
@@ -14,14 +15,23 @@ export const EXPLORE_TOOL_NAMES: readonly ToolName[] = [
   "TodoWrite",
 ];
 
-/** 按名称解析工具定义；未指定时返回全量（main 角色）。
+/** 全量工具 = 内置 + 插件注册表（进程启动时由 loader 填充）。
+    会话内工具集固定约束与内置工具相同。 */
+export function getAllToolDefinitions(): ToolDefinition[] {
+  return [
+    ...CODING_TOOL_DEFINITIONS,
+    ...pluginToolRegistry.definitions(),
+  ];
+}
+
+/** 按名称解析工具定义；未指定时返回全量（main 角色，含插件工具）。
     调用方必须保证同一模型会话内工具集固定，否则会破坏 prompt cache 前缀。 */
 export function toolDefinitionsFor(
   names: readonly ToolName[] | undefined,
 ): ToolDefinition[] {
-  if (!names) return CODING_TOOL_DEFINITIONS;
+  if (!names) return getAllToolDefinitions();
   const byName = new Map(
-    CODING_TOOL_DEFINITIONS.map((tool) => [tool.name, tool]),
+    getAllToolDefinitions().map((tool) => [tool.name, tool]),
   );
   return names
     .map((name) => byName.get(name))

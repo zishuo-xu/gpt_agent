@@ -476,6 +476,7 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
       parallelTools: config.behavior?.parallelTools === true,
       crossProjectMemory: config.behavior?.crossProjectMemory !== false,
       // 带点号的 schema 字段在下方标量循环中被跳过（server.* 同例），此处显式归一化
+      enablePlugins: config.behavior?.enablePlugins !== false,
       subagentTimeoutMs:
         typeof config.behavior?.subagentTimeoutMs === "number" &&
         config.behavior.subagentTimeoutMs > 0

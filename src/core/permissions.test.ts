@@ -88,3 +88,27 @@ test("trust 也拒绝危险删除与宽泛 git 清理命令", () => {
     );
   }
 });
+
+test("插件工具：normal 兜底 ask，allow 规则放行，trust 全放行", () => {
+  const pluginCall: ToolCall = {
+    id: "plugin-1",
+    tool: "WebFetch",
+    target: "https://example.com",
+    args: { url: "https://example.com" },
+  };
+
+  const normal = new PermissionEngine("normal", rules);
+  assert.equal(normal.judge(pluginCall), "ask", "插件工具不在 NORMAL_AUTO，normal 兜底 ask");
+
+  const withRule = new PermissionEngine("normal", [
+    ...rules,
+    { effect: "allow", pattern: "WebFetch(*)" },
+  ]);
+  assert.equal(withRule.judge(pluginCall), "allow", "显式 allow 规则放行");
+
+  const trust = new PermissionEngine("trust", rules);
+  assert.equal(trust.judge(pluginCall), "allow", "trust 全放行");
+
+  const strict = new PermissionEngine("strict", rules);
+  assert.equal(strict.judge(pluginCall), "allow", "插件不在 STRICT_GATED，strict 放行");
+});

@@ -3,19 +3,19 @@ import type {
   PermissionMode,
   PermissionRule,
   ToolCall,
-  ToolName,
 } from "./types.js";
 import { escapeRegExp } from "../utils/regexp.js";
 
 export type PermissionVerdict = PermissionEffect;
 
-const STRICT_GATED = new Set<ToolName>([
+// 工具名集合随插件通道开放（ToolCall.tool: string），划分按字面量比较即可
+const STRICT_GATED = new Set<string>([
   "Edit",
   "MultiEdit",
   "Write",
   "Bash",
 ]);
-const NORMAL_AUTO = new Set<ToolName>([
+const NORMAL_AUTO = new Set<string>([
   "Read",
   "Grep",
   "Glob",

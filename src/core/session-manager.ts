@@ -16,6 +16,8 @@ import type {
   RoleModelConfig,
 } from "../config/schema.js";
 import { DesktopNotifier, WebhookNotifier } from "./notifier.js";
+import { pluginToolRegistry } from "../shared/plugin-tool.js";
+import { loadPluginTools } from "../tools/plugin-loader.js";
 import { ConversationAgentModel } from "./agent-model.js";
 import { ConfiguredModelClient } from "../model/client.js";
 import { FallbackModelClient } from "../model/fallback-client.js";
@@ -104,6 +106,8 @@ export class AgentSessionManager {
   readonly #skipLock: boolean;
   #lockFile: string | undefined;
   #lockHeld = false;
+  /** 进程级插件加载标记（首个模型构造前填充一次，运行中不刷新） */
+  #pluginsLoaded = false;
 
   constructor(options: AgentSessionManagerOptions) {
     this.#cwd = options.cwd;
@@ -378,6 +382,9 @@ export class AgentSessionManager {
     if (this.#modelFactory) {
       return await this.#modelFactory(messages);
     }
+    // 插件注册表在首个模型就绪前填充一次（进程级；会话内工具集保持固定，
+    // 新增插件需重启 server 生效）
+    await this.#ensurePlugins();
     const client = await this.#createRoleClient("main");
     if (!client) throw new Error("main 角色模型不可用");
     return new ConversationAgentModel(
@@ -398,6 +405,22 @@ export class AgentSessionManager {
     if (this.#modelFactory) return undefined;
     const config = await this.#configService.readEffective();
     return new FallbackModelClient(buildRoleClientChain(role, config));
+  }
+
+  /** 进程级插件加载（幂等）：填充全局 PluginToolRegistry；坏文件跳过不阻塞会话 */
+  async #ensurePlugins(): Promise<void> {
+    if (this.#pluginsLoaded) return;
+    this.#pluginsLoaded = true;
+    const runtimeConfig = await this.#configService.readEffective();
+    if (runtimeConfig.behavior.enablePlugins === false) return;
+    const report = await loadPluginTools(
+      this.#homeDir,
+      this.#cwd,
+      pluginToolRegistry,
+    );
+    for (const error of report.errors) {
+      console.error(`[plugins] 跳过 ${error.file}：${error.message}`);
+    }
   }
 
   #register(session: AgentSession): void {

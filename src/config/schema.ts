@@ -60,6 +60,8 @@ export interface BehaviorConfig {
   parallelTools: boolean;
   /** 注入其他项目记忆标题索引；处理敏感项目的用户可关闭 */
   crossProjectMemory: boolean;
+  /** 插件工具通道：加载 ~/.myagent/tools/ 与 .myagent/tools/ 下的自定义工具 */
+  enablePlugins: boolean;
   /** 子代理（Task）单次运行超时（ms）；超时强制结束并返回已收集结果。缺省 15 分钟 */
   subagentTimeoutMs?: number;
 }
@@ -181,6 +183,15 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     hot: true,
   },
   {
+    key: "behavior.enablePlugins",
+    type: "boolean",
+    title: "插件工具",
+    description:
+      "加载 ~/.myagent/tools/ 与 .myagent/tools/ 下的自定义工具插件（每文件一个工具）。插件与 agent 同权限，只安装信任的插件。",
+    default: true,
+    hot: true,
+  },
+  {
     key: "behavior.subagentTimeoutMs",
     type: "number",
     title: "子代理超时（毫秒）",
@@ -229,6 +240,7 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
     showCacheMissNotices: false,
     parallelTools: false,
     crossProjectMemory: true,
+    enablePlugins: true,
   },
 };
 export function toPublicConfig(config: MyAgentConfig): PublicMyAgentConfig {
