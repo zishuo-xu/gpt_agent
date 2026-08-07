@@ -16,6 +16,7 @@
     "test": "tsx --test \"src/**/*.test.ts\" \"tests/**/*.test.ts\" && TSX_TSCONFIG_PATH=web/tsconfig.json tsx --test \"web/src/**/*.test.tsx\"",
     "test:coverage": "tsx --test --experimental-test-coverage --test-coverage-lines=85 --test-coverage-functions=75 --test-coverage-branches=80 \"src/**/*.test.ts\" \"tests/**/*.test.ts\" && TSX_TSCONFIG_PATH=web/tsconfig.json tsx --test --experimental-test-coverage --test-coverage-lines=60 --test-coverage-functions=75 --test-coverage-branches=60 \"web/src/**/*.test.tsx\"",
     "test:e2e": "playwright test --config web/playwright.config.ts",
+    "test:e2e:prod": "playwright test --config web/playwright.prod.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit"
   },
   "engines": {
