@@ -20,8 +20,10 @@ pnpm run build        # 构建（tsc 编译 core + vite 构建 web）
 | `src/core` | agent 主循环、会话管理、事件流、权限引擎、任务运行 |
 | `src/model` | 模型客户端、多模型路由、工具定义、错误恢复 |
 | `src/tools` | 工具实现与执行器（文件原子编辑、Bash 等） |
+| `src/shared` | 插件工具协议与注册表（PluginToolRegistry） |
 | `src/web` | Web 后端（Hono 服务、会话 API） |
 | `web/src` | Web 前端（React + Vite） |
+| `.myagent/tools` | 项目级插件（WebSearch / WebFetch），协议见 docs/plugin-tools.md |
 
 入口在 `src/cli.ts`。
 

@@ -45,6 +45,14 @@ MyAgent 是一个面向长时间自主运行任务的本机编码 Agent：把自
 - **设置页**：供应商 / 角色模型 / 权限规则 / 行为参数 / 服务器（监听地址与访问密码），Schema 驱动自动生成，全局 / 项目双作用域
 - **远程审批**：监听非 localhost + 访问密码，手机浏览器可审批（E2E 验证）
 
+### 插件扩展（.myagent/tools/）
+
+- **插件通道**：`.myagent/tools/*.ts`（项目）或 `~/.myagent/tools/`（全局，项目覆盖）写一个 `definePluginTool` 即接入——注册、模型可见、执行分发、权限审批、UI 渲染全走通用通道，与内置工具无差别；normal 档首次调用审批后同会话通配放行
+- **WebSearch**：网络搜索。searxng 自托管（本机 Docker）→ HTML 引擎链（bing/ddg/baidu）兜底，零第三方 API Key；**深度模式**默认自动抓取前 2 个结果页正文，一次调用即得素材
+- **WebFetch**：反爬增强的页面抓取（浏览器级请求头 / 失败重试 / 可选 cookie）
+- **MCP 接入**：`plugins.json` 的 `mcpServers` 段配置后，MCP server 工具自动注册进插件通道，权限与 UI 与普通插件一致
+- 完整协议、架构链路、SearXNG 部署调优见 `docs/plugin-tools.md`
+
 ### 模型与成本
 
 - 多供应商：Anthropic + 任意 OpenAI 兼容端点（DeepSeek / Kimi / GLM）
@@ -87,6 +95,7 @@ pnpm run web
 - `设计方案/目标与愿景.md` — 长期目标
 - `docs/pi-agent-analysis.md` — 对标 Pi Coding Agent 的调研（特点/爆红原因/借鉴点）
 - `docs/pi-core-analysis.md` — Pi CORE 源码级对照（会话/上下文/工具/事件流实现细节 + 改造优先级）
+- `docs/plugin-tools.md` — 插件工具通道与网络搜索（协议/架构链路/SearXNG 部署调优/运维经验）
 
 ## 项目约定（记忆）
 
