@@ -84,6 +84,14 @@ test.describe("插件面板", () => {
       page.getByRole("heading", { name: /调用统计（\d+）/ }),
     ).toBeVisible();
   });
+
+  test("重新加载按钮触发 reload 并提示成功", async ({ page }) => {
+    await page.goto("/#plugins");
+    const reloadButton = page.getByRole("button", { name: "重新加载" });
+    await expect(reloadButton).toBeVisible();
+    await reloadButton.click();
+    await expect(page.getByText("插件已重新加载（新请求生效）")).toBeVisible();
+  });
 });
 
 test.describe("会话页", () => {

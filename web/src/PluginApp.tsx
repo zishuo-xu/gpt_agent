@@ -22,29 +22,86 @@ interface PluginStatus {
   loaded: PluginLoaded[];
   errors: PluginError[];
   stats: PluginStats[];
+  disabled: string[];
 }
 
-/** 插件面板：加载清单 / 加载错误 / 调用统计（可观测性） */
+/** 插件面板：加载清单 / 加载错误 / 调用统计 + 热重载与启停（可观测性 + 管理） */
 export function PluginApp() {
   const [status, setStatus] = useState<PluginStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [reloading, setReloading] = useState(false);
+  const [notice, setNotice] = useState<{
+    tone: "ok" | "error";
+    text: string;
+  } | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/plugins");
+      if (!response.ok) throw new Error("读取插件状态失败");
+      setStatus((await response.json()) as PluginStatus);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "读取插件状态失败");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     document.title = "插件 · MyAgent";
-    void fetch("/api/plugins")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("读取插件状态失败");
-        return response.json() as Promise<PluginStatus>;
-      })
-      .then(setStatus)
-      .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "读取插件状态失败"),
-      )
-      .finally(() => setLoading(false));
+    void load();
   }, []);
 
+  async function reload() {
+    setReloading(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/plugins/reload", {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("重新加载失败");
+      setStatus((await response.json()) as PluginStatus);
+      setNotice({ tone: "ok", text: "插件已重新加载（新请求生效）" });
+    } catch (err: unknown) {
+      setNotice({
+        tone: "error",
+        text: err instanceof Error ? err.message : "重新加载失败",
+      });
+    } finally {
+      setReloading(false);
+    }
+  }
+
+  async function toggle(name: string, enabled: boolean) {
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/plugins/${encodeURIComponent(name)}/enabled`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!response.ok) throw new Error("切换失败");
+      setStatus((await loadStatus()) ?? status);
+      setNotice({ tone: "ok", text: `${name} 已${enabled ? "启用" : "禁用"}` });
+    } catch (err: unknown) {
+      setNotice({
+        tone: "error",
+        text: err instanceof Error ? err.message : "切换失败",
+      });
+    }
+  }
+
+  async function loadStatus(): Promise<PluginStatus | null> {
+    const response = await fetch("/api/plugins");
+    if (!response.ok) return null;
+    return (await response.json()) as PluginStatus;
+  }
+
   const hasStats = (status?.stats.length ?? 0) > 0;
+  const disabledSet = new Set(status?.disabled ?? []);
 
   return (
     <div className="shell">
@@ -55,9 +112,22 @@ export function PluginApp() {
           <div>
             <p className="eyebrow">PLUGINS / OBSERVABILITY</p>
             <h1>插件</h1>
-            <p>已加载插件、加载错误与调用统计（重启 server 后生效，无热重载）。</p>
+            <p>已加载插件、加载错误与调用统计。变更插件文件后点「重新加载」即可生效（新请求），无需重启 server。</p>
           </div>
+          <button
+            className="save-button"
+            onClick={() => void reload()}
+            disabled={reloading}
+          >
+            {reloading ? "加载中…" : "重新加载"}
+          </button>
         </header>
+
+        {notice && (
+          <p className={`plugin-notice plugin-notice-${notice.tone}`}>
+            {notice.text}
+          </p>
+        )}
 
         {loading && <p className="plugin-hint">读取中…</p>}
         {!loading && error && (
@@ -69,15 +139,28 @@ export function PluginApp() {
             <section className="plugin-section">
               <h2>已加载（{status.loaded.length}）</h2>
               {status.loaded.length === 0 ? (
-                <p className="plugin-hint">未加载插件。放入 .myagent/tools/ 并重启 server。</p>
+                <p className="plugin-hint">未加载插件。放入 .myagent/tools/ 并点「重新加载」。</p>
               ) : (
                 <ul className="plugin-list">
-                  {status.loaded.map((entry) => (
-                    <li key={entry.name} className="plugin-item">
-                      <span className="plugin-name">{entry.name}</span>
-                      <code className="plugin-source">{entry.source}</code>
-                    </li>
-                  ))}
+                  {status.loaded.map((entry) => {
+                    const isOff = disabledSet.has(entry.name);
+                    return (
+                      <li
+                        key={entry.name}
+                        className={`plugin-item${isOff ? " plugin-item-off" : ""}`}
+                      >
+                        <span className="plugin-name">{entry.name}</span>
+                        <code className="plugin-source">{entry.source}</code>
+                        <button
+                          className={`plugin-toggle${isOff ? " off" : ""}`}
+                          onClick={() => void toggle(entry.name, isOff)}
+                          title={isOff ? "启用该插件" : "禁用该插件（模型将不可见、不可调用）"}
+                        >
+                          {isOff ? "已禁用" : "启用中"}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>

@@ -68,6 +68,8 @@ export class PluginToolRegistry {
     string,
     { calls: number; errors: number; totalMs: number }
   >();
+  /** 运行时禁用的工具名（面板开关，内存态；重启/reload 后按配置恢复） */
+  readonly #disabled = new Set<string>();
 
   clear(): void {
     this.#tools.clear();
@@ -104,6 +106,18 @@ export class PluginToolRegistry {
     return this.#tools.has(name);
   }
 
+  /** 运行时启用/禁用（内存态；disabled 工具对模型不可见、不可执行） */
+  setEnabled(name: string, enabled: boolean): boolean {
+    if (!this.#tools.has(name)) return false;
+    if (enabled) this.#disabled.delete(name);
+    else this.#disabled.add(name);
+    return true;
+  }
+
+  isEnabled(name: string): boolean {
+    return !this.#disabled.has(name);
+  }
+
   get(name: string): PluginTool | undefined {
     return this.#tools.get(name);
   }
@@ -114,14 +128,16 @@ export class PluginToolRegistry {
 
   /** 插件定义转模型可见的 ToolDefinition（注入 tools 数组与 system prompt 工具清单） */
   definitions(): ToolDefinition[] {
-    return [...this.#tools.values()].map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    }));
+    return [...this.#tools.values()]
+      .filter((tool) => !this.#disabled.has(tool.name))
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      }));
   }
 
-  /** 按名分发执行；未注册名返回失败结果（不抛，与 execute 兜底语义一致） */
+  /** 按名分发执行；未注册名或已禁用工具返回失败结果（不抛，与 execute 兜底语义一致） */
   async execute(
     name: string,
     args: Record<string, unknown>,
@@ -132,6 +148,13 @@ export class PluginToolRegistry {
       return {
         summary: `未知工具：${name}`,
         output: `未注册的工具“${name}”（内置工具见 TOOL_NAMES，插件见 ~/.myagent/tools/）`,
+        isError: true,
+      };
+    }
+    if (this.#disabled.has(name)) {
+      return {
+        summary: `工具已禁用：${name}`,
+        output: `插件“${name}”已在插件面板中禁用，启用后重试`,
         isError: true,
       };
     }

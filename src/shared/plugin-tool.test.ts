@@ -119,3 +119,36 @@ test("注册表：调用统计（次数/失败/耗时聚合，成功与失败均
   assert.equal(err?.errors, 1, "isError 结果计入失败");
   assert.equal(stats.has("Ghost"), false, "未注册名不产生统计（execute 直接返回）");
 });
+
+test("注册表：禁用后对模型不可见、执行返回失败，可重新启用", async () => {
+  const registry = new PluginToolRegistry();
+  const signal = new AbortController().signal;
+  registry.register(tool("WebSearch"), "web-search.ts");
+  registry.register(tool("WebFetch"), "web-fetch.ts");
+
+  // 禁用 WebSearch
+  assert.equal(registry.setEnabled("WebSearch", false), true);
+  assert.equal(registry.isEnabled("WebSearch"), false);
+  assert.equal(registry.isEnabled("WebFetch"), true);
+  assert.deepEqual(
+    registry.definitions().map((definition) => definition.name),
+    ["WebFetch"],
+    "禁用工具不出现在模型可见定义中",
+  );
+
+  const blocked = await registry.execute("WebSearch", {}, signal);
+  assert.equal(blocked.isError, true);
+  assert.match(String(blocked.output), /禁用/);
+
+  // 未注册名 setEnabled 返回 false
+  assert.equal(registry.setEnabled("Ghost", false), false);
+
+  // 重新启用恢复可见与可执行
+  assert.equal(registry.setEnabled("WebSearch", true), true);
+  assert.deepEqual(
+    registry.definitions().map((definition) => definition.name).sort(),
+    ["WebFetch", "WebSearch"],
+  );
+  const ok = await registry.execute("WebSearch", {}, signal);
+  assert.equal(ok.isError, undefined);
+});

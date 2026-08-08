@@ -187,11 +187,15 @@ export class AgentSessionManager {
     loaded: PluginLoadReport["loaded"];
     errors: PluginLoadReport["errors"];
     stats: ReturnType<typeof pluginToolRegistry.stats>;
+    disabled: string[];
   } {
     return {
       loaded: this.#pluginReport.loaded,
       errors: this.#pluginReport.errors,
       stats: pluginToolRegistry.stats(),
+      disabled: pluginToolRegistry
+        .names()
+        .filter((name) => !pluginToolRegistry.isEnabled(name)),
     };
   }
 
@@ -437,8 +441,28 @@ export class AgentSessionManager {
   async #ensurePlugins(): Promise<void> {
     if (this.#pluginsLoaded) return;
     this.#pluginsLoaded = true;
+    await this.#loadPlugins();
+  }
+
+  /**
+   * 插件热重载（插件面板「重新加载」）：重建 registry 并重连 MCP server。
+   * 生效语义：工具集在每次 prompt 构建时从全局 registry 实时组装，reload 后
+   * 后续请求（含运行中会话的下一轮）即用新工具集；prompt cache 前缀自变更点
+   * 失效一次（效率损失，非正确性问题）。统计（#stats）跨 reload 保留。
+   */
+  async reloadPlugins(): Promise<void> {
+    await closeMcpClients(this.#mcpClients);
+    pluginToolRegistry.clear();
+    this.#pluginsLoaded = true;
+    await this.#loadPlugins();
+  }
+
+  async #loadPlugins(): Promise<void> {
     const runtimeConfig = await this.#configService.readEffective();
-    if (runtimeConfig.behavior.enablePlugins === false) return;
+    if (runtimeConfig.behavior.enablePlugins === false) {
+      this.#pluginReport = { loaded: [], errors: [] };
+      return;
+    }
     const report = await loadPluginTools(
       this.#homeDir,
       this.#cwd,

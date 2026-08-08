@@ -39,6 +39,47 @@
   background: #0a1017;
 }
 
+.plugin-item-off {
+  opacity: 0.55;
+}
+
+.plugin-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border: 1px solid #2e6b3f;
+  border-radius: 4px;
+  background: #0f2416;
+  color: #7bc48f;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.plugin-toggle.off {
+  border-color: #6b2e2e;
+  background: #241010;
+  color: #d48a8a;
+}
+
+.plugin-notice {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.plugin-notice-ok {
+  border: 1px solid #2e6b3f;
+  background: #0f2416;
+  color: #7bc48f;
+}
+
+.plugin-notice-error {
+  border: 1px solid #6b2e2e;
+  background: #241010;
+  color: #e06c75;
+}
+
 .plugin-name {
   font: 12px/1.6 var(--mono);
   color: #e5eaf0;

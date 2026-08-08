@@ -21,7 +21,7 @@ MyAgent 支持以插件形式引入自定义工具，参考 Pi 扩展系统的 t
 - 全局：`~/.myagent/tools/*.ts`（或 `.mjs` / `.js`）
 - 项目：`<cwd>/.myagent/tools/*.ts`（同名时项目层覆盖全局层，与配置合并语义一致）
 
-每个文件 default 导出一个工具对象。插件在 **server/进程启动后首个会话创建时一次性加载**（`session-manager.#ensurePlugins`，懒加载；`behavior.enablePlugins: false` 可整体关闭）；会话内工具集固定（与内置工具同一约束，不破坏 prompt cache 前缀）。**新增/修改插件需重启 server（或重新启动 CLI）**，无热重载。坏文件跳过并记日志，不阻塞会话。
+每个文件 default 导出一个工具对象。插件在 **server/进程启动后首个会话创建时懒加载**（`session-manager.#ensurePlugins`；`behavior.enablePlugins: false` 可整体关闭）；会话内工具集固定（与内置工具同一约束，不破坏 prompt cache 前缀）。**修改插件后可在插件面板点「重新加载」**（`POST /api/plugins/reload`）——重建注册表并重连 MCP server，后续请求（含运行中会话的下一轮）即用新工具集；prompt cache 前缀自变更点失效一次（效率损失，非正确性问题）。坏文件跳过并记日志，不阻塞会话。
 
 ### 工具协议
 
@@ -66,9 +66,10 @@ export default definePluginTool({
 
 Web 端侧栏「插件」页（`/#plugins`，`GET /api/plugins`）提供三块数据：
 
-- **已加载清单**：工具名 + 来源文件（全局/项目层）
+- **已加载清单**：工具名 + 来源文件（全局/项目层）；每项带**启用/禁用开关**（内存态，禁用后对模型不可见、执行返回"已禁用"失败；重启/reload 恢复）
 - **加载错误**：坏文件跳过与 MCP server 连接失败的明细（file + message），不再只进服务端日志
 - **调用统计**：按工具聚合的 `calls / errors / 成功率 / 平均耗时 / 累计耗时`（`PluginToolRegistry` 在 execute 时累计，MCP 工具同样计入；未注册名不产生统计）
+- **重新加载按钮**：热重载插件与 MCP 配置（`POST /api/plugins/reload`），无需重启 server
 
 ## 权限
 
@@ -233,6 +234,7 @@ MyAgent 内置最小 MCP 客户端（无 SDK，按 2025-06-18 规范实现）：
 ## 限制
 
 - 构建产物（`dist/cli.js` 由 tsc 编译、无 tsx loader）下加载 `.ts` 插件会失败；构建产物运行时请使用 `.mjs`（原生 ESM）
-- 无热重载：插件变更需重启 server
+- 无热重载 → 已支持：插件面板「重新加载」（`POST /api/plugins/reload`），新请求生效
 - explore 只读子代理不注入插件工具；Task 子代理 `writable: true` 时可见
-- 二期候选：before/afterToolCall 钩子面、/reload 热重载、插件配置（env/密钥注入）、UI 自定义渲染
+- 插件禁用为内存态（重启/reload 恢复）；持久化到 plugins.json 为二期候选
+- 二期候选：before/afterToolCall 钩子面、/reload CLI 命令、插件配置（env/密钥注入）、UI 自定义渲染

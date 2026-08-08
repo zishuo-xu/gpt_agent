@@ -20,6 +20,7 @@ import {
 } from "./memory.js";
 import { parseRunCommand } from "../core/run-task.js";
 import { exportSessionHtml } from "./export-session.js";
+import { pluginToolRegistry } from "../shared/plugin-tool.js";
 import {
   LOBBY_KEY,
   ProjectRegistry,
@@ -243,9 +244,33 @@ export function createWebApp(
   app.get("/api/plugins", async (context) => {
     const target = await resolveProject(context);
     if (!target.sessionManager) {
-      return context.json({ loaded: [], errors: [], stats: [] });
+      return context.json({ loaded: [], errors: [], stats: [], disabled: [] });
     }
     return context.json(target.sessionManager.pluginStatus());
+  });
+
+  app.post("/api/plugins/reload", async (context) => {
+    const target = await resolveProject(context);
+    if (!target.sessionManager) {
+      return context.json({ error: "插件管理器不可用" }, 500);
+    }
+    await target.sessionManager.reloadPlugins();
+    return context.json(target.sessionManager.pluginStatus());
+  });
+
+  app.post("/api/plugins/:name/enabled", async (context) => {
+    const target = await resolveProject(context);
+    if (!target.sessionManager) {
+      return context.json({ error: "插件管理器不可用" }, 500);
+    }
+    const name = context.req.param("name") as string;
+    const body = (await context.req.json()) as { enabled?: boolean };
+    const ok = pluginToolRegistry.setEnabled(
+      name,
+      body.enabled !== false,
+    );
+    if (!ok) return context.json({ error: `插件未加载：${name}` }, 404);
+    return context.json({ name, enabled: body.enabled !== false });
   });
 
   app.put("/api/memory/:id", async (context) => {
