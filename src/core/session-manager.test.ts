@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ConfigService } from "../config/service.js";
+import { pluginToolRegistry } from "../shared/plugin-tool.js";
 import { ConversationAgentModel } from "./agent-model.js";
 import type {
   CompletionRequest,
@@ -660,4 +661,92 @@ test("buildRoleClientChain：供应商缺失或不可用时降级为即抛客户
     chain[1]!.client.complete({ messages: [] }),
     /已禁用/,
   );
+});
+
+test("装配：reloadPlugins 加载 mcpServers 配置，MCP 工具可调用且 closeMcp 清理子进程", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-mcp-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-mcp-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-mcp-home-"),
+  );
+  const fakeServer = `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  const msg = JSON.parse(line);
+  const send = (payload) => process.stdout.write(JSON.stringify(payload) + '\\n');
+  if (msg.method === 'initialize') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1.0' } } });
+  } else if (msg.method === 'tools/list') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { tools: [
+      { name: 'greet', description: 'Greet someone', inputSchema: { type: 'object', properties: { who: { type: 'string' } } } }
+    ] } });
+  } else if (msg.method === 'tools/call') {
+    const who = msg.params.arguments.who || 'world';
+    send({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'hello ' + who }] } });
+  } else {
+    send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'nope' } });
+  }
+});
+`;
+  const configService = new ConfigService({ cwd, homeDir });
+  const manager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    skipLock: true,
+  });
+  await manager.restore();
+  try {
+    // 配置 mcpServers → reloadPlugins 应重连并注册工具
+    await mkdir(path.join(homeDir, ".myagent"), { recursive: true });
+    await writeFile(
+      path.join(homeDir, ".myagent", "plugins.json"),
+      JSON.stringify({
+        mcpServers: {
+          fake: { command: process.execPath, args: ["-e", fakeServer] },
+        },
+      }),
+      "utf8",
+    );
+    await manager.reloadPlugins();
+    const status = manager.pluginStatus();
+    assert.equal(status.errors.length, 0, JSON.stringify(status.errors));
+    // MCP 工具注册进插件注册表（不列入插件文件 loaded 报告）
+    assert.equal(
+      pluginToolRegistry.has("fake_greet"),
+      true,
+      "MCP 工具应注册进插件注册表",
+    );
+    assert.equal(pluginToolRegistry.isEnabled("fake_greet"), true);
+
+    // MCP 工具通过插件通道调用
+    const result = await pluginToolRegistry.execute(
+      "fake_greet",
+      { who: "agent" },
+      new AbortController().signal,
+    );
+    assert.equal(result.output, "hello agent");
+    assert.equal(result.isError, undefined);
+
+    // closeMcp 终止子进程（web server 关闭路径）：连接关闭，注册表条目由 reload 统一清理
+    await manager.closeMcp();
+    assert.equal(
+      pluginToolRegistry.has("fake_greet"),
+      true,
+      "closeMcp 仅断连接，条目保留到下次 reload",
+    );
+    const afterClose = await pluginToolRegistry.execute(
+      "fake_greet",
+      { who: "x" },
+      new AbortController().signal,
+    );
+    assert.equal(afterClose.isError, true, "连接关闭后调用返回失败结果");
+  } finally {
+    pluginToolRegistry.clear();
+    await manager.releaseLock();
+  }
 });
