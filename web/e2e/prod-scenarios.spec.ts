@@ -40,7 +40,8 @@ async function startTask(
 
 /** 等待任务完成（真实模型长任务，最长 15 分钟） */
 async function waitForCompletion(page: Page): Promise<void> {
-  await expect(page.getByText("本轮任务已完成")).toBeVisible({
+  // 用 done-line 类定位，避免工具结果 details 的 diff 高亮文本（含同名代码行）误匹配
+  await expect(page.locator(".web-system-line.done-line")).toBeVisible({
     timeout: 25 * 60_000,
   });
 }
@@ -123,9 +124,20 @@ test.describe("生产级长任务场景", () => {
   }) => {
     // 完成计数递增等待（多轮后页面有多个「本轮任务已完成」）
     const waitForNextCompletion = async (before: number) => {
-      await expect(
-        page.getByText("本轮任务已完成"),
-      ).toHaveCount(before + 1, { timeout: 25 * 60_000 });
+      const deadline = Date.now() + 25 * 60_000;
+      let last = -1;
+      while (Date.now() < deadline) {
+        const count = await page
+          .locator(".web-system-line.done-line")
+          .count();
+        if (count !== last) {
+          console.log(`[P4] done-line 计数：${count}（目标 ${before + 1}）`);
+          last = count;
+        }
+        if (count >= before + 1) return;
+        await page.waitForTimeout(15_000);
+      }
+      throw new Error(`完成标记数未达 ${before + 1}（当前 ${last}）`);
     };
     // 第一轮：分析
     await startTask(
@@ -151,14 +163,16 @@ test.describe("生产级长任务场景", () => {
       "src/core/events.test.ts",
     );
     expect(eventsSource.length).toBeGreaterThan(0);
-    // reload 后重新进入该会话，验证三轮完成标记都保留（同名会话取最新的）
+    // reload 后重新进入该会话，验证三轮完成标记都保留（会话标题由模型动态生成，
+    // 不依赖标题文本，取会话列表最新的一个）
     await page.reload();
-    await page
-      .getByRole("button", { name: "事件模块职责与持久化" })
-      .first()
-      .click();
+    await page.locator(".sidebar-session").first().click();
+    console.log("[P4] reload 后进入最新会话");
     await expect(
-      page.getByText("本轮任务已完成"),
+      page.locator(".web-system-line.done-line"),
+    ).toHaveCount(3, { timeout: 30_000 });
+    await expect(
+      page.locator(".web-system-line.done-line"),
     ).toHaveCount(3, { timeout: 30_000 });
   });
 
@@ -220,12 +234,15 @@ test.describe("生产级长任务场景", () => {
       );
       await waitForCompletion(page);
 
-      // 子代理卡片应显示超时标记（20s 强制打断保留部分结论）
+      // 子代理卡片应显示超时标记（20s 强制打断保留部分结论；模型可能连续派发多个子代理，
+      // 全部被超时打断，故取首个匹配）
       await expect(
-        page.locator(".subtask-card summary", { hasText: "（超时）" }),
+        page
+          .locator(".subtask-card summary", { hasText: "（超时）" })
+          .first(),
       ).toBeVisible({ timeout: 30_000 });
       await expect(
-        page.locator(".subtask-card summary", { hasText: "已中止" }),
+        page.locator(".subtask-card summary", { hasText: "已中止" }).first(),
       ).toBeVisible();
     } finally {
       const restored = structuredClone(current.config);
@@ -236,4 +253,58 @@ test.describe("生产级长任务场景", () => {
       }
       await request.put(`/api/config?scope=${scope}`, { data: restored });
     }
+  });
+
+  test("P8 网络研究：WebSearch 搜索 + WebFetch 抓取，产出结构化总结", async ({
+    page,
+  }) => {
+    const task =
+      "用 WebSearch 搜索「Rust 2024 edition new features」，再用 WebFetch 抓取其中最有价值的 2 个页面，" +
+      "综合来源写一份结构化总结：列出 5 个最重要的新特性，每个特性给出影响和来源 URL。";
+    await startTask(page, task);
+    await waitForCompletion(page);
+
+    // 工具卡：WebSearch 必须出现，且走 searxng 引擎（prod home 已配置）
+    const cards = await page.locator(".web-tool-card").allTextContents();
+    const searchCard = cards.find((t) =>
+      t.toLowerCase().includes("websearch"),
+    );
+    expect(searchCard).toBeDefined();
+    // details 网格渲染为 <b>key</b>value 拼接，textContent 无分隔符：engine+searxng
+    expect(searchCard).toContain("enginesearxng");
+    // 抓取行为（WebFetch 或 Bash curl 均可）
+    expect(
+      cards.some(
+        (t) =>
+          t.toLowerCase().includes("webfetch") ||
+          t.toLowerCase().includes("bash"),
+      ),
+    ).toBeTruthy();
+
+    // 回复应为结构化总结（长度 + 主题关键词）
+    const reply =
+      (await page.locator(".assistant-message").last().textContent()) ?? "";
+    expect(reply.length).toBeGreaterThan(300);
+    expect(reply).toMatch(/Rust|edition|2024/i);
+  });
+
+  test("P9 MCP 集成：系统信息 + 目录列举，产出使用建议", async ({ page }) => {
+    const task =
+      "用 sysinfo MCP server 的工具：先获取本机系统信息（system_info），再列出 /tmp 目录（list_directory），" +
+      "结合两者写一份简短报告：系统配置概况、/tmp 下值得注意的文件、以及一条系统使用建议。";
+    await startTask(page, task);
+    await waitForCompletion(page);
+
+    const cards = await page.locator(".web-tool-card").allTextContents();
+    expect(
+      cards.some((t) => t.toLowerCase().includes("sysinfo_system_info")),
+    ).toBeTruthy();
+    expect(
+      cards.some((t) => t.toLowerCase().includes("sysinfo_list_directory")),
+    ).toBeTruthy();
+
+    const reply =
+      (await page.locator(".assistant-message").last().textContent()) ?? "";
+    expect(reply.length).toBeGreaterThan(200);
+    expect(reply).toMatch(/CPU|内存|平台|系统|负载/i);
   });
