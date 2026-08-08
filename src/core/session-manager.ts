@@ -17,7 +17,10 @@ import type {
 } from "../config/schema.js";
 import { DesktopNotifier, WebhookNotifier } from "./notifier.js";
 import { pluginToolRegistry } from "../shared/plugin-tool.js";
-import { loadPluginTools } from "../tools/plugin-loader.js";
+import {
+  loadPluginTools,
+  type PluginLoadReport,
+} from "../tools/plugin-loader.js";
 import {
   closeMcpClients,
   disposeMcpClientsSync,
@@ -114,6 +117,8 @@ export class AgentSessionManager {
   #lockHeld = false;
   /** 进程级插件加载标记（首个模型构造前填充一次，运行中不刷新） */
   #pluginsLoaded = false;
+  /** 插件加载报告（loaded + errors），供 /api/plugins 可观测性端点 */
+  #pluginReport: PluginLoadReport = { loaded: [], errors: [] };
   /** 已连接的 MCP server 客户端（关闭/退出时统一清理） */
   readonly #mcpClients = new Map<string, McpClient>();
 
@@ -175,6 +180,19 @@ export class AgentSessionManager {
     return [...this.#sessions.values()]
       .map((session) => session.summary())
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /** 插件可观测性数据：加载报告 + 调用统计（供 /api/plugins） */
+  pluginStatus(): {
+    loaded: PluginLoadReport["loaded"];
+    errors: PluginLoadReport["errors"];
+    stats: ReturnType<typeof pluginToolRegistry.stats>;
+  } {
+    return {
+      loaded: this.#pluginReport.loaded,
+      errors: this.#pluginReport.errors,
+      stats: pluginToolRegistry.stats(),
+    };
   }
 
   get(id: string): AgentSession | undefined {
@@ -426,6 +444,10 @@ export class AgentSessionManager {
       this.#cwd,
       pluginToolRegistry,
     );
+    this.#pluginReport = {
+      loaded: report.loaded,
+      errors: report.errors,
+    };
     for (const error of report.errors) {
       console.error(`[plugins] 跳过 ${error.file}：${error.message}`);
     }
@@ -436,6 +458,12 @@ export class AgentSessionManager {
       this.#cwd,
       pluginToolRegistry,
       this.#mcpClients,
+    );
+    this.#pluginReport.errors.push(
+      ...mcpReport.errors.map((error) => ({
+        file: `mcpServers.${error.name}`,
+        message: error.message,
+      })),
     );
     for (const error of mcpReport.errors) {
       console.error(`[plugins] MCP server“${error.name}”加载失败：${error.message}`);

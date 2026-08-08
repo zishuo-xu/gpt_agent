@@ -240,6 +240,14 @@ export function createWebApp(
     return context.json(await target.memoryService.list());
   });
 
+  app.get("/api/plugins", async (context) => {
+    const target = await resolveProject(context);
+    if (!target.sessionManager) {
+      return context.json({ loaded: [], errors: [], stats: [] });
+    }
+    return context.json(target.sessionManager.pluginStatus());
+  });
+
   app.put("/api/memory/:id", async (context) => {
     const target = await resolveProject(context);
     const id = context.req.param("id") as MemoryDocumentId;

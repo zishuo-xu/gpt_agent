@@ -81,3 +81,41 @@ test("注册表：未注册名执行返回失败结果，run 抛错被捕获", a
   assert.equal(failed.isError, true);
   assert.match(String(failed.summary), /插件内部错误/);
 });
+
+test("注册表：调用统计（次数/失败/耗时聚合，成功与失败均计入）", async () => {
+  const registry = new PluginToolRegistry();
+  const signal = new AbortController().signal;
+  registry.register({
+    name: "OkTool",
+    description: "成功工具",
+    inputSchema: { type: "object" },
+    async run() {
+      return { summary: "ok" };
+    },
+  });
+  registry.register({
+    name: "ErrTool",
+    description: "失败工具",
+    inputSchema: { type: "object" },
+    async run() {
+      return { summary: "err", isError: true };
+    },
+  });
+
+  await registry.execute("OkTool", {}, signal);
+  await registry.execute("OkTool", {}, signal);
+  await registry.execute("ErrTool", {}, signal);
+  await registry.execute("Ghost", {}, signal);
+
+  const stats = new Map(
+    registry.stats().map((entry) => [entry.name, entry]),
+  );
+  const ok = stats.get("OkTool");
+  assert.equal(ok?.calls, 2);
+  assert.equal(ok?.errors, 0);
+  assert.ok((ok?.totalMs ?? 0) >= 0);
+  const err = stats.get("ErrTool");
+  assert.equal(err?.calls, 1);
+  assert.equal(err?.errors, 1, "isError 结果计入失败");
+  assert.equal(stats.has("Ghost"), false, "未注册名不产生统计（execute 直接返回）");
+});

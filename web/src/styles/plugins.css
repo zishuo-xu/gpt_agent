@@ -1,0 +1,110 @@
+/* 插件面板（可观测性） */
+.plugin-section {
+  margin: 0 0 28px;
+}
+
+.plugin-section h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #b8c4d0;
+  margin: 0 0 10px;
+}
+
+.plugin-hint {
+  color: #6b7a8a;
+  font-size: 12px;
+  margin: 0;
+}
+
+.plugin-error {
+  color: #e06c75;
+}
+
+.plugin-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plugin-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid #293441;
+  border-radius: 6px;
+  background: #0a1017;
+}
+
+.plugin-name {
+  font: 12px/1.6 var(--mono);
+  color: #e5eaf0;
+  font-weight: 600;
+}
+
+.plugin-source {
+  font: 11px/1.6 var(--mono);
+  color: #5d7290;
+  overflow-wrap: anywhere;
+}
+
+.plugin-errors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plugin-error-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid #5a2a2f;
+  border-radius: 6px;
+  background: #170c0e;
+  color: #e06c75;
+  font-size: 12px;
+}
+
+.plugin-error-item code {
+  font: 11px/1.6 var(--mono);
+  color: #d48a90;
+}
+
+.plugin-stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.plugin-stats th,
+.plugin-stats td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid #1c2632;
+}
+
+.plugin-stats th {
+  color: #5d7290;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.plugin-stats td {
+  color: #b8c4d0;
+}
+
+.plugin-stats-name {
+  font-family: var(--mono);
+  color: #e5eaf0;
+}
+
+.plugin-stats-error {
+  color: #e06c75;
+}

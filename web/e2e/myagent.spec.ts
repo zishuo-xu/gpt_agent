@@ -67,6 +67,25 @@ test.describe("设置页", () => {
   });
 });
 
+test.describe("插件面板", () => {
+  test("插件页渲染三分区（加载清单 / 错误 / 调用统计）", async ({ page }) => {
+    await page.goto("/#plugins");
+    await expect(page.getByRole("heading", { name: "插件" })).toBeVisible();
+    // 侧栏导航有「插件」项
+    await expect(page.getByRole("button", { name: /插件/ })).toBeVisible();
+    // 三个分区标题（数量随环境变化，用正则）
+    await expect(
+      page.getByRole("heading", { name: /已加载（\d+）/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /加载错误（\d+）/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /调用统计（\d+）/ }),
+    ).toBeVisible();
+  });
+});
+
 test.describe("会话页", () => {
   test("会话列表加载、新建面板打开", async ({ page }) => {
     await page.goto("/");

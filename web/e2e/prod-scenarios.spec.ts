@@ -270,8 +270,8 @@ test.describe("生产级长任务场景", () => {
       t.toLowerCase().includes("websearch"),
     );
     expect(searchCard).toBeDefined();
-    // details 网格渲染为 <b>key</b>value 拼接，textContent 无分隔符：engine+searxng
-    expect(searchCard).toContain("enginesearxng");
+    // details 网格渲染为 <b>key</b>：value（全角冒号分隔）
+    expect(searchCard).toContain("engine：searxng");
     // 抓取行为（WebFetch 或 Bash curl 均可）
     expect(
       cards.some(

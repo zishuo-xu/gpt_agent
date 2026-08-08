@@ -105,6 +105,7 @@ export function ItemCard(props: {
                       key={key}
                     >
                       <b>{key}</b>
+                      <span className="tool-details-sep">：</span>
                       {display}
                     </span>
                   );

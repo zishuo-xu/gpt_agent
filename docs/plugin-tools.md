@@ -62,6 +62,14 @@ export default definePluginTool({
 - 分发：`src/tools/executor.ts` 先查内置工具，未命中转 `#plugins.execute()` 调插件 `run`
 - MCP 工具经 `mcp-loader` 归一化后注册进**同一个 registry**，对模型/权限/UI 与普通插件完全同类
 
+### 可观测性（插件面板）
+
+Web 端侧栏「插件」页（`/#plugins`，`GET /api/plugins`）提供三块数据：
+
+- **已加载清单**：工具名 + 来源文件（全局/项目层）
+- **加载错误**：坏文件跳过与 MCP server 连接失败的明细（file + message），不再只进服务端日志
+- **调用统计**：按工具聚合的 `calls / errors / 成功率 / 平均耗时 / 累计耗时`（`PluginToolRegistry` 在 execute 时累计，MCP 工具同样计入；未注册名不产生统计）
+
 ## 权限
 
 插件工具不在内置权限划分（`NORMAL_AUTO`/`STRICT_GATED`）内：

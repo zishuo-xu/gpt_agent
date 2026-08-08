@@ -3,7 +3,7 @@
  * 记忆面板并入设置（作为子项），不再单独占主导航。
  */
 export function SettingsSidebar(props: {
-  active: "settings" | "memory";
+  active: "settings" | "memory" | "plugins";
 }) {
   return (
     <aside className="sidebar">
@@ -29,6 +29,16 @@ export function SettingsSidebar(props: {
           }}
         >
           <span>⚙</span>模型配置
+        </button>
+        <button
+          className={`nav-item ${
+            props.active === "plugins" ? "active" : ""
+          }`}
+          onClick={() => {
+            window.location.hash = "plugins";
+          }}
+        >
+          <span>▣</span>插件
         </button>
         <button
           className={`nav-item ${

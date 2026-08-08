@@ -1493,6 +1493,10 @@
   font-weight: 600;
 }
 
+.tool-details-sep {
+  color: #4a5a6e;
+}
+
 .diff-output,
 .tool-output {
   max-height: 310px;

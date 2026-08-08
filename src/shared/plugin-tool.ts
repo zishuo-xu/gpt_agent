@@ -49,10 +49,25 @@ export function isValidPluginToolName(name: string): boolean {
   return /^[A-Za-z][A-Za-z0-9_-]*$/.test(name);
 }
 
+/** 插件调用统计（按工具聚合，MCP 工具同样计入） */
+export interface PluginCallStats {
+  name: string;
+  calls: number;
+  /** isError 结果数（run 抛错与返回 isError 均计入） */
+  errors: number;
+  /** 累计耗时（ms） */
+  totalMs: number;
+}
+
 export class PluginToolRegistry {
   readonly #tools = new Map<string, PluginTool>();
   /** name → 来源文件（错误信息与同名覆盖诊断用） */
   readonly #sources = new Map<string, string>();
+  /** name → 调用统计（execute 分发时累计，供可观测性面板展示） */
+  readonly #stats = new Map<
+    string,
+    { calls: number; errors: number; totalMs: number }
+  >();
 
   clear(): void {
     this.#tools.clear();
@@ -120,8 +135,11 @@ export class PluginToolRegistry {
         isError: true,
       };
     }
+    const startedAt = performance.now();
+    let isError = false;
     try {
       const result = await tool.run(args ?? {}, signal);
+      isError = result.isError === true;
       return {
         summary: result.summary,
         ...(result.output === undefined ? {} : { output: result.output }),
@@ -129,12 +147,37 @@ export class PluginToolRegistry {
         ...(result.isError === undefined ? {} : { isError: result.isError }),
       };
     } catch (error) {
+      isError = true;
       return {
         summary:
           error instanceof Error ? error.message : "插件工具执行发生未知错误",
         isError: true,
       };
+    } finally {
+      this.#record(name, isError, performance.now() - startedAt);
     }
+  }
+
+  /** 调用统计（按工具聚合；无调用记录的工具不出现） */
+  stats(): PluginCallStats[] {
+    return [...this.#stats.entries()].map(([name, entry]) => ({
+      name,
+      calls: entry.calls,
+      errors: entry.errors,
+      totalMs: Math.round(entry.totalMs),
+    }));
+  }
+
+  #record(name: string, isError: boolean, durationMs: number): void {
+    const entry = this.#stats.get(name) ?? {
+      calls: 0,
+      errors: 0,
+      totalMs: 0,
+    };
+    entry.calls += 1;
+    entry.totalMs += durationMs;
+    if (isError) entry.errors += 1;
+    this.#stats.set(name, entry);
   }
 }
 

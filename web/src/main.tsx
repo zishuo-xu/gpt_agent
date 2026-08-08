@@ -3,10 +3,12 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { SessionApp } from "./SessionApp";
 import { MemoryApp } from "./MemoryApp";
+import { PluginApp } from "./PluginApp";
 import "./styles/base.css";
 import "./styles/settings.css";
 import "./styles/chat.css";
 import "./styles/memory.css";
+import "./styles/plugins.css";
 
 function Router() {
   const [route, setRoute] = useState(window.location.hash.slice(1));
@@ -17,6 +19,7 @@ function Router() {
   }, []);
   if (route === "settings") return <App />;
   if (route === "memory") return <MemoryApp />;
+  if (route === "plugins") return <PluginApp />;
   return <SessionApp />;
 }
 
