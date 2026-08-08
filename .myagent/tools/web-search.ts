@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { definePluginTool } from "../../src/shared/plugin-tool.js";
 import { htmlToText } from "../../src/tools/html-text.js";
+import { fetchPageText } from "./web-fetch.js";
 
 /**
  * WebSearch 示例插件：网络搜索。
@@ -26,6 +27,8 @@ export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  /** 深度模式抓取的页面正文（截断后），未抓取时缺省 */
+  content?: string;
 }
 
 type EngineName = "bing" | "duckduckgo" | "baidu";
@@ -339,18 +342,64 @@ function parseResults(engine: EngineName, html: string): SearchResult[] {
 
 function formatResults(results: SearchResult[]): string {
   return results
-    .map(
-      (result, index) =>
-        `${index + 1}. ${result.title}\n   ${result.url}\n   ${result.snippet}`,
-    )
+    .map((result, index) => {
+      const contentBlock = result.content
+        ? `\n   正文：${result.content}`
+        : "";
+      return `${index + 1}. ${result.title}\n   ${result.url}\n   ${result.snippet}${contentBlock}`;
+    })
     .join("\n");
+}
+
+/**
+ * 深度模式：对前 maxPages 个结果并发抓取正文，失败页面跳过不影响其余。
+ * fetcher 由调用方注入（测试传 mock；运行传 fetchPageText + htmlToText），
+ * 返回正文或抛错；正文按 maxChars 截断。
+ */
+export async function attachPageContents(
+  results: SearchResult[],
+  fetcher: (url: string) => Promise<string>,
+  maxPages: number,
+  maxChars = 2000,
+): Promise<SearchResult[]> {
+  const targets = results.slice(0, Math.min(maxPages, results.length));
+  const settled = await Promise.allSettled(
+    targets.map(async (result) => ({
+      url: result.url,
+      text: await fetcher(result.url),
+    })),
+  );
+  const contents = new Map<string, string>();
+  settled.forEach((entry) => {
+    if (entry.status === "fulfilled" && entry.value.text.trim()) {
+      contents.set(entry.value.url, entry.value.text.slice(0, maxChars));
+    }
+  });
+  return results.map((result) => {
+    const content = contents.get(result.url);
+    return content === undefined ? result : { ...result, content };
+  });
+}
+
+/** 深度模式抓取：8s 单页超时（与会话 signal 组合），非 2xx 抛错跳过 */
+async function fetchSearchPage(
+  url: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const { status, text } = await fetchPageText(
+    url,
+    AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
+  );
+  if (status >= 400) throw new Error(`HTTP ${status}`);
+  return htmlToText(text).trim();
 }
 
 export default definePluginTool({
   name: "WebSearch",
   description:
-    "Search the web and return ranked results (title, URL, snippet). " +
-    "Use to discover relevant pages, then fetch details with WebFetch.",
+    "Search the web and return ranked results with page content. " +
+    "By default fetches the top 2 result pages (depth mode) so content is " +
+    "ready to use without a separate WebFetch call. Set fetch_pages=0 for snippets only.",
   inputSchema: {
     type: "object",
     properties: {
@@ -359,11 +408,19 @@ export default definePluginTool({
         type: "number",
         description: "Maximum results. Defaults to 5, max 10.",
       },
+      fetch_pages: {
+        type: "number",
+        minimum: 0,
+        maximum: 3,
+        description:
+          "Depth mode: fetch page content for the top N results and include it. " +
+          "Defaults to 2. Set 0 to return snippets only.",
+      },
       engine: {
         type: "string",
         enum: ["auto", "html", "bing", "duckduckgo", "baidu"],
         description:
-          "auto: Tavily API (if configured) with HTML fallback. " +
+          "auto: SearXNG/Tavily API (if configured) with HTML fallback. " +
           "html: force HTML engines (bing, then duckduckgo, then baidu). " +
           "Specific engine names force that engine.",
       },
@@ -381,7 +438,16 @@ export default definePluginTool({
       };
     }
     const maxResults = clampInteger(args.max_results, 1, 10, 5);
+    const fetchPages = clampInteger(args.fetch_pages, 0, 3, 2);
     const engineArg = String(args.engine ?? "auto");
+    const deepen = async (results: SearchResult[]): Promise<SearchResult[]> =>
+      fetchPages > 0 && results.length > 0
+        ? await attachPageContents(
+            results,
+            (url) => fetchSearchPage(url, signal),
+            fetchPages,
+          )
+        : results;
 
     // API 模式：显式指定 html 引擎或 engine 非 auto 时不走 API
     const config = engineArg === "auto" || engineArg === "html"
@@ -393,10 +459,11 @@ export default definePluginTool({
           config.provider === "searxng"
             ? await searchSearxng(query, maxResults, config, signal)
             : await searchTavily(query, maxResults, config, signal);
+        const enriched = await deepen(results);
         return {
-          summary: `搜索“${query}”找到 ${results.length} 条结果（${config.provider}）`,
-          output: formatResults(results),
-          details: { engine: config.provider, query, results },
+          summary: `搜索“${query}”找到 ${results.length} 条结果（${config.provider}${fetchPages > 0 ? "，已抓取正文" : ""}）`,
+          output: formatResults(enriched),
+          details: { engine: config.provider, query, results: enriched },
         };
       } catch (error) {
         // API 失败降级 HTML 链，原因附在最终错误信息中
@@ -426,10 +493,11 @@ export default definePluginTool({
           lastError = `${engine} 未解析到结果（可能被反爬或结构变化）`;
           continue;
         }
+        const enriched = await deepen(parsed);
         return {
-          summary: `搜索“${query}”找到 ${parsed.length} 条结果（${engine}）`,
-          output: formatResults(parsed),
-          details: { engine, query, results: parsed },
+          summary: `搜索“${query}”找到 ${parsed.length} 条结果（${engine}${fetchPages > 0 ? "，已抓取正文" : ""}）`,
+          output: formatResults(enriched),
+          details: { engine, query, results: enriched },
         };
       } catch (error) {
         lastError =

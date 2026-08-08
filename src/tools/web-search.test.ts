@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  attachPageContents,
   loadSearchConfig,
   parseBaiduResults,
   parseBingResults,
@@ -188,4 +189,41 @@ test("loadSearchConfig：searxng provider 读取 baseUrl 与 apiToken", async ()
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("深度模式 attachPageContents：成功抓取、失败跳过、正文截断、数量限制", async () => {
+  const results = [
+    { title: "A", url: "https://a.example/", snippet: "s1" },
+    { title: "B", url: "https://b.example/", snippet: "s2" },
+    { title: "C", url: "https://c.example/", snippet: "s3" },
+    { title: "D", url: "https://d.example/", snippet: "s4" },
+  ];
+  const fetcher = async (url: string): Promise<string> => {
+    if (url === "https://b.example/") throw new Error("HTTP 403");
+    return `${url} 的正文内容，比较长的一段文字用于验证截断行为。`.repeat(50);
+  };
+  // 只抓前 2 个：A 成功、B 失败 → C/D 不抓取，B 无正文但保留
+  const enriched = await attachPageContents(results, fetcher, 2, 80);
+  assert.equal(enriched.length, 4, "结果数量不变，失败的页面跳过但不删除");
+  assert.match(enriched[0]!.content ?? "", /正文内容/);
+  assert.equal(enriched[1]!.content, undefined, "抓取失败页面无正文");
+  assert.equal(enriched[2]!.content, undefined, "超出 maxPages 不抓取");
+  assert.equal(enriched[3]!.content, undefined);
+  assert.ok(
+    (enriched[0]!.content ?? "").length <= 80,
+    "正文按 maxChars 截断",
+  );
+});
+
+test("深度模式 attachPageContents：空结果与空正文处理", async () => {
+  assert.deepEqual(await attachPageContents([], async () => "x", 2), []);
+  const blank = [
+    { title: "A", url: "https://a.example/", snippet: "s" },
+  ];
+  const noText = await attachPageContents(
+    blank,
+    async () => "   \n  ",
+    2,
+  );
+  assert.equal(noText[0]!.content, undefined, "空正文视为未抓取");
 });
