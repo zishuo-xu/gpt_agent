@@ -1,5 +1,5 @@
 import { definePluginTool } from "../../src/shared/plugin-tool.js";
-import { htmlToText } from "../../src/tools/html-text.js";
+import { htmlToMainText } from "../../src/tools/html-text.js";
 
 /**
  * WebFetch 示例插件：抓取 URL 并返回可见文本。
@@ -113,7 +113,7 @@ export default definePluginTool({
       const contentType = raw.startsWith("{") ? "json" : "html";
       let text: string;
       if (contentType === "html" || /^\s*<!doctype|<html/i.test(raw)) {
-        text = htmlToText(raw);
+        text = htmlToMainText(raw);
       } else if (contentType.includes("json") || raw.trimStart().startsWith("{")) {
         try {
           text = JSON.stringify(JSON.parse(raw), null, 2);

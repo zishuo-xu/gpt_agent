@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { htmlToText } from "./html-text.js";
+import { htmlToMainText, htmlToText } from "./html-text.js";
 
 test("HTML→文本：剥离 script/style 与注释", () => {
   assert.equal(
@@ -38,4 +38,27 @@ test("HTML→文本：br/hr 换行与连续空行合并", () => {
 test("HTML→文本：空输入与纯文本原样", () => {
   assert.equal(htmlToText(""), "");
   assert.equal(htmlToText("纯文本 no tags"), "纯文本 no tags");
+});
+
+test("htmlToMainText：剥离 nav/header/footer/aside 导航噪音，主内容保留", () => {
+  const html =
+    "<html><head><title>t</title></head><body>" +
+    "<nav><a>首页</a><a>文档</a><a>关于</a></nav>" +
+    "<header><h1>站点标题</h1><p>标语</p></header>" +
+    "<main><article><h2>正文标题</h2><p>正文第一段，有价值内容。</p></article></main>" +
+    "<aside>相关链接 1 相关链接 2</aside>" +
+    "<footer>© 2026 版权信息</footer>" +
+    "</body></html>";
+  const text = htmlToMainText(html);
+  assert.match(text, /正文标题/);
+  assert.match(text, /正文第一段/);
+  assert.doesNotMatch(text, /首页/);
+  assert.doesNotMatch(text, /站点标题/);
+  assert.doesNotMatch(text, /相关链接/);
+  assert.doesNotMatch(text, /版权信息/);
+});
+
+test("htmlToMainText：与 htmlToText 的兼容边界（无 chrome 时等价）", () => {
+  const plain = "<p>只有正文</p><p>第二段</p>";
+  assert.equal(htmlToMainText(plain), htmlToText(plain));
 });

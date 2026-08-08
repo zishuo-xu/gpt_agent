@@ -8,6 +8,7 @@ import {
   parseSearxngResponse,
   parseTavilyResponse,
   resolveSearchConfig,
+  throttleSearch,
 } from "../../.myagent/tools/web-search.js";
 
 test("Bing 解析：b_algo 块提取标题/链接/摘要并解码重定向", () => {
@@ -186,4 +187,15 @@ test("深度模式 attachPageContents：空结果与空正文处理", async () =
     2,
   );
   assert.equal(noText[0]!.content, undefined, "空正文视为未抓取");
+});
+
+test("节流 throttleSearch：连续调用串行化并保持最小间隔", async () => {
+  const stamps: number[] = [];
+  const push = async (): Promise<void> => {
+    stamps.push(Date.now());
+  };
+  await Promise.all([throttleSearch(push), throttleSearch(push)]);
+  assert.equal(stamps.length, 2);
+  const gap = stamps[1]! - stamps[0]!;
+  assert.ok(gap >= 1_400, `两次调用间隔应 ≥1.4s（实测 ${gap}ms）`);
 });

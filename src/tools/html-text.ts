@@ -16,6 +16,14 @@ function stripHiddenBlocks(html: string): string {
   );
 }
 
+/** 剥离导航/页眉/页脚/侧栏/表单块（内容倾向提取：抓取正文时跳过站点 chrome） */
+function stripChrome(html: string): string {
+  return html.replace(
+    /<(nav|header|footer|aside|form)\b[^>]*>[\s\S]*?<\/\1>/gi,
+    "",
+  );
+}
+
 /** 标签替换为换行或删除，保留实体原样 */
 function stripTags(html: string): string {
   // 块级闭合标签 → 换行（配对 <div>...</div> 的闭合处）
@@ -79,4 +87,15 @@ function normalizeWhitespace(text: string): string {
 
 export function htmlToText(html: string): string {
   return normalizeWhitespace(decodeEntities(stripTags(stripHiddenBlocks(html))));
+}
+
+/**
+ * 内容倾向提取：在 htmlToText 基础上额外剥离 nav/header/footer/aside/form 块
+ * （导航菜单、页眉页脚、侧栏是抓取正文的主要噪音来源）。
+ * 供 WebFetch / WebSearch 深度模式抓取正文使用；htmlToText 保持通用语义不变。
+ */
+export function htmlToMainText(html: string): string {
+  return normalizeWhitespace(
+    decodeEntities(stripTags(stripHiddenBlocks(stripChrome(html)))),
+  );
 }

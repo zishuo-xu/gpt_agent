@@ -122,6 +122,7 @@ Web 端侧栏「插件」页（`/#plugins`，`GET /api/plugins`）提供三块�
 - **浏览器级请求头**：完整 Chrome 桌面端请求头集（UA + Accept + Accept-Language + sec-ch-ua 系列）——裸 UA（如 `MyAgent/0.1`）会被 doc.rust-lang.org 这类站点直接拒绝，浏览器请求头实测放行
 - **重试**：网络错误 / 5xx / 429 重试一次（800ms 退避）；4xx 判定为确定性拒绝不重试
 - **可选 `cookies` 参数**：需要会话 cookie 的页面
+- **正文去噪**：`htmlToMainText`（内容倾向提取）剥离 nav/header/footer/aside/form 块——导航菜单与页眉页脚不再混入正文（实测 blog.rust-lang.org 去噪后正文从开头即内容；通用语义的 `htmlToText` 保持不变）
 - 抓取核心 `fetchPageText()` 为具名导出，供 WebSearch 深度模式复用
 
 ### WebSearch：三级 provider 策略 + 深度模式
@@ -136,6 +137,8 @@ searxng（自托管元搜索，默认）→ tavily（可选云 API）→ HTML �
 - `engine` 参数：`auto`（默认）/ `html`（强制 HTML 链）/ 指定单引擎
 
 **深度模式（`fetch_pages` 参数，默认 2，范围 0-3）**：搜索结果返回后自动并发抓取前 N 个结果的页面正文（每页 8s 超时、失败页面跳过、正文 2000 字符截断），拼进 `output` 与 `details`。模型一次 WebSearch 调用即拿到素材，无需二次 WebFetch。设为 0 关闭（仅返回 snippet）。
+
+**调用节流**：搜索调用串行化 + 最小 1.5s 间隔（`throttleSearch`）——上游引擎对同一 IP 频率敏感（实测 3 并发触发整组 CAPTCHA/限流），节流摊开请求节奏，模型连续搜索时不会打爆上游。
 
 ### 配置
 

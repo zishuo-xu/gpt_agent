@@ -1,5 +1,5 @@
 import { definePluginTool, type PluginToolRuntimeConfig } from "../../src/shared/plugin-tool.js";
-import { htmlToText } from "../../src/tools/html-text.js";
+import { htmlToMainText, htmlToText } from "../../src/tools/html-text.js";
 import { fetchPageText } from "./web-fetch.js";
 
 /**
@@ -366,7 +366,36 @@ async function fetchSearchPage(
     AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
   );
   if (status >= 400) throw new Error(`HTTP ${status}`);
-  return htmlToText(text).trim();
+  return htmlToMainText(text).trim();
+}
+
+/**
+ * 搜索调用节流：串行化 + 最小间隔（默认 1.5s）。
+ * 上游搜索引擎对同一 IP 的请求频率高度敏感（实测 3 并发触发整组
+ * CAPTCHA/限流），模型连续搜索时用队列摊开请求节奏。
+ */
+const MIN_SEARCH_INTERVAL_MS = 1_500;
+let lastSearchAt = 0;
+let searchChain: Promise<void> = Promise.resolve();
+
+export function throttleSearch<T>(task: () => Promise<T>): Promise<T> {
+  const run = searchChain.then(async () => {
+    const wait = Math.max(
+      0,
+      MIN_SEARCH_INTERVAL_MS - (Date.now() - lastSearchAt),
+    );
+    if (wait > 0) {
+      await abortableSleep(wait, AbortSignal.timeout(wait + 1_000));
+    }
+    lastSearchAt = Date.now();
+    return await task();
+  });
+  // 队列不因单个搜索失败而中断后续
+  searchChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 export default definePluginTool({
@@ -438,8 +467,12 @@ export default definePluginTool({
       try {
         const results =
           config.provider === "searxng"
-            ? await searchSearxng(query, maxResults, config, signal)
-            : await searchTavily(query, maxResults, config, signal);
+            ? await throttleSearch(() =>
+                searchSearxng(query, maxResults, config, signal),
+              )
+            : await throttleSearch(() =>
+                searchTavily(query, maxResults, config, signal),
+              );
         const enriched = await deepen(results);
         return {
           summary: `搜索“${query}”找到 ${results.length} 条结果（${config.provider}${fetchPages > 0 ? "，已抓取正文" : ""}）`,
@@ -468,7 +501,9 @@ export default definePluginTool({
         : "";
     for (const engine of order) {
       try {
-        const html = await fetchSearch(engine, query, signal);
+        const html = await throttleSearch(() =>
+          fetchSearch(engine, query, signal),
+        );
         const parsed = parseResults(engine, html).slice(0, maxResults);
         if (parsed.length === 0) {
           lastError = `${engine} 未解析到结果（可能被反爬或结构变化）`;
