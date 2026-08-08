@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -161,5 +161,52 @@ export async function loadPluginTools(
       }
     }
   }
+  // 持久化的禁用状态（plugins.json 的 pluginDisabled 段）：全部注册完成后应用
+  const disabledNames = Array.isArray(pluginsJson.pluginDisabled)
+    ? (pluginsJson.pluginDisabled as unknown[]).filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
+  for (const name of disabledNames) {
+    registry.setEnabled(name, false);
+  }
   return report;
+}
+
+/**
+ * 持久化插件禁用状态：写入 plugins.json（全局层）的 pluginDisabled 段。
+ * enabled=false 时把名字加入数组（去重），true 时移除。只修改该文件自身的
+ * pluginDisabled 字段，不动其他段（webSearch/mcpServers 等）。
+ */
+export async function savePluginDisabled(
+  homeDir: string,
+  name: string,
+  enabled: boolean,
+): Promise<void> {
+  const file = path.join(homeDir, ".myagent", "plugins.json");
+  const raw = (await readRawJson(file)) as Record<string, unknown>;
+  const list = Array.isArray(raw.pluginDisabled)
+    ? (raw.pluginDisabled as unknown[]).filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
+  const next = enabled
+    ? list.filter((item) => item !== name)
+    : list.includes(name)
+      ? list
+      : [...list, name];
+  await writeFile(
+    file,
+    `${JSON.stringify({ ...raw, pluginDisabled: next }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+async function readRawJson(file: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
 }

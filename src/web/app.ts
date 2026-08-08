@@ -20,7 +20,6 @@ import {
 } from "./memory.js";
 import { parseRunCommand } from "../core/run-task.js";
 import { exportSessionHtml } from "./export-session.js";
-import { pluginToolRegistry } from "../shared/plugin-tool.js";
 import {
   LOBBY_KEY,
   ProjectRegistry,
@@ -265,12 +264,10 @@ export function createWebApp(
     }
     const name = context.req.param("name") as string;
     const body = (await context.req.json()) as { enabled?: boolean };
-    const ok = pluginToolRegistry.setEnabled(
-      name,
-      body.enabled !== false,
-    );
+    const enabled = body.enabled !== false;
+    const ok = await target.sessionManager.pluginSetEnabled(name, enabled);
     if (!ok) return context.json({ error: `插件未加载：${name}` }, 404);
-    return context.json({ name, enabled: body.enabled !== false });
+    return context.json({ name, enabled });
   });
 
   app.put("/api/memory/:id", async (context) => {

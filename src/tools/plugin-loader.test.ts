@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { PluginToolRegistry } from "../shared/plugin-tool.js";
-import { loadPluginTools } from "./plugin-loader.js";
+import { loadPluginTools, savePluginDisabled } from "./plugin-loader.js";
 
 async function fixture(): Promise<{
   home: string;
@@ -178,4 +178,55 @@ test("加载器：无 config 声明的插件 run 第三参为 undefined", async 
     null,
     "无声明时第三参为 undefined",
   );
+});
+
+test("加载器：plugins.json 的 pluginDisabled 段在注册后应用禁用", async () => {
+  const { home, project, registry } = await fixture();
+  await writeFile(
+    path.join(home, ".myagent", "plugins.json"),
+    JSON.stringify({ pluginDisabled: ["WebFetch"] }),
+    "utf8",
+  );
+  await writeFile(
+    path.join(project, ".myagent", "tools", "fetch.ts"),
+    PLUGIN_TMPL("WebFetch", "async run() { return { summary: 'x' }; }"),
+  );
+  await writeFile(
+    path.join(project, ".myagent", "tools", "search.ts"),
+    PLUGIN_TMPL("WebSearch", "async run() { return { summary: 'x' }; }"),
+  );
+  await loadPluginTools(home, project, registry);
+  assert.equal(registry.isEnabled("WebFetch"), false, "pluginDisabled 中的工具被禁用");
+  assert.equal(registry.isEnabled("WebSearch"), true, "未列出的工具保持启用");
+});
+
+test("savePluginDisabled：写入/移除插件名，保留其他段", async () => {
+  const { home } = await fixture();
+  const file = path.join(home, ".myagent", "plugins.json");
+  await writeFile(
+    file,
+    JSON.stringify({ webSearch: { provider: "searxng" } }),
+    "utf8",
+  );
+  // 禁用 → 加入数组
+  await savePluginDisabled(home, "WebFetch", false);
+  const afterDisable = JSON.parse(await readFile(file, "utf8"));
+  assert.deepEqual(afterDisable.pluginDisabled, ["WebFetch"]);
+  assert.deepEqual(afterDisable.webSearch, { provider: "searxng" }, "其他段保留");
+  // 重复禁用去重
+  await savePluginDisabled(home, "WebFetch", false);
+  const dedup = JSON.parse(await readFile(file, "utf8"));
+  assert.deepEqual(dedup.pluginDisabled, ["WebFetch"]);
+  // 启用 → 移除
+  await savePluginDisabled(home, "WebFetch", true);
+  const afterEnable = JSON.parse(await readFile(file, "utf8"));
+  assert.deepEqual(afterEnable.pluginDisabled, []);
+  // 文件不存在时创建
+  const freshHome = path.join(home, "..", "fresh-home");
+  await mkdir(path.join(freshHome, ".myagent"), { recursive: true });
+  await savePluginDisabled(freshHome, "X", false);
+  const created = JSON.parse(
+    await readFile(path.join(freshHome, ".myagent", "plugins.json"), "utf8"),
+  );
+  assert.deepEqual(created.pluginDisabled, ["X"]);
 });

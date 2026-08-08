@@ -19,6 +19,7 @@ import { DesktopNotifier, WebhookNotifier } from "./notifier.js";
 import { pluginToolRegistry } from "../shared/plugin-tool.js";
 import {
   loadPluginTools,
+  savePluginDisabled,
   type PluginLoadReport,
 } from "../tools/plugin-loader.js";
 import {
@@ -197,6 +198,17 @@ export class AgentSessionManager {
         .names()
         .filter((name) => !pluginToolRegistry.isEnabled(name)),
     };
+  }
+
+  /**
+   * 单插件启用/禁用：registry 切换 + 持久化到全局 plugins.json（pluginDisabled 段），
+   * 重启/reload 后保留。返回 false 表示插件未加载。
+   */
+  async pluginSetEnabled(name: string, enabled: boolean): Promise<boolean> {
+    const ok = pluginToolRegistry.setEnabled(name, enabled);
+    if (!ok) return false;
+    await savePluginDisabled(this.#homeDir, name, enabled);
+    return true;
   }
 
   get(id: string): AgentSession | undefined {

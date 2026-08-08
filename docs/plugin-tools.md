@@ -76,6 +76,8 @@ export default definePluginTool({
 - 配置在**加载时读取一次**；插件面板「重新加载」后重读（plugins.json 变更生效）
 - 读取逻辑：`readPluginsJson(homeDir, cwd)`（`src/tools/plugin-loader.ts`），WebSearch 的 `resolveSearchConfig` 是消费示例
 
+**插件禁用状态**同存于 `plugins.json` 的 `pluginDisabled` 数组（`["WebFetch"]`），由插件面板开关或 `POST /api/plugins/:name/enabled` 维护：加载时全部注册完成后统一应用（未加载/不存在的名字静默忽略），写入时只改该数组本身、保留 `webSearch`/`mcpServers` 等其他段。
+
 ### 注册与分发（关键代码位置）
 
 - 注册：`src/shared/plugin-tool.ts` 的 `PluginToolRegistry` 单例；`loadPluginTools(homeDir, cwd, registry)` 动态 import 插件文件，解析 config 声明后闭包包装 run
@@ -88,7 +90,7 @@ export default definePluginTool({
 
 Web 端侧栏「插件」页（`/#plugins`，`GET /api/plugins`）提供三块数据：
 
-- **已加载清单**：工具名 + 来源文件（全局/项目层）；每项带**启用/禁用开关**（内存态，禁用后对模型不可见、执行返回"已禁用"失败；重启/reload 恢复）
+- **已加载清单**：工具名 + 来源文件（全局/项目层）；每项带**启用/禁用开关**（禁用后对模型不可见、执行返回"已禁用"失败）。开关状态**持久化**：写入全局 `~/.myagent/plugins.json` 的 `pluginDisabled` 段（只改该数组，不动其他配置段），重启 server 或点「重新加载」后保留
 - **加载错误**：坏文件跳过与 MCP server 连接失败的明细（file + message），不再只进服务端日志
 - **调用统计**：按工具聚合的 `calls / errors / 成功率 / 平均耗时 / 累计耗时`（`PluginToolRegistry` 在 execute 时累计，MCP 工具同样计入；未注册名不产生统计）
 - **重新加载按钮**：热重载插件与 MCP 配置（`POST /api/plugins/reload`），无需重启 server
