@@ -51,6 +51,7 @@ export default definePluginTool({
 ```
 
 - `run(args, signal, config?)`：`args` 为经过 schema 校验后的参数；`signal` 中止信号（中断时建议配合 fetch/子进程使用）；`config` 为**声明式配置**（见下）的运行时值，无声明时 undefined
+- **超时护栏**：run 默认 60s 限时（`DEFAULT_PLUGIN_TIMEOUT_MS`，与 MCP 调用超时一致），超时返回失败结果（`summary` 含"执行超时"）**不抛**，不卡死 agent 循环；插件可声明 `timeoutMs: 30_000`（毫秒）覆盖，`<= 0` 关闭超时。挂起的 run 无法强制取消，超时后其后续 settle 被静默忽略（无 unhandled rejection）
 - 结果字段与内置工具 `ToolExecutionResult` 对齐：`summary` 必填，`output`/`details`/`isError` 可选
 - `details` 任意键值对自动渲染到 UI 的详情网格（键名 `diff` 有专门的高亮渲染；`code`/`durationMs` 有退出码/时长着色）
 

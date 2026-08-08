@@ -152,3 +152,47 @@ test("注册表：禁用后对模型不可见、执行返回失败，可重新�
   const ok = await registry.execute("WebSearch", {}, signal);
   assert.equal(ok.isError, undefined);
 });
+
+test("注册表：timeoutMs 覆盖生效，正常路径不受影响", async () => {
+  const registry = new PluginToolRegistry();
+  registry.register({
+    name: "Quick",
+    description: "快速工具",
+    inputSchema: { type: "object" },
+    timeoutMs: 100,
+    async run() {
+      return { summary: "ok", output: "done" };
+    },
+  });
+  registry.register({
+    name: "Slow",
+    description: "慢工具（自带超时）",
+    inputSchema: { type: "object" },
+    timeoutMs: 50,
+    async run() {
+      return await new Promise(() => undefined); // 永不 settle
+    },
+  });
+
+  // 正常路径：限时内完成，原样透传
+  const ok = await registry.execute("Quick", {}, new AbortController().signal);
+  assert.equal(ok.isError, undefined);
+  assert.equal(ok.output, "done");
+
+  // 超时路径：返回失败结果不抛
+  const startedAt = Date.now();
+  const failed = await registry.execute(
+    "Slow",
+    {},
+    new AbortController().signal,
+  );
+  assert.equal(failed.isError, true);
+  assert.match(failed.summary, /Slow.*超时.*50ms/);
+  assert.ok(Date.now() - startedAt < 5_000, "应按 timeoutMs 而非默认 60s");
+
+  // 统计：超时计入 errors
+  const stats = registry.stats();
+  const slow = stats.find((entry) => entry.name === "Slow");
+  assert.equal(slow?.calls, 1);
+  assert.equal(slow?.errors, 1);
+});

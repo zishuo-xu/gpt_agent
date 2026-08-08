@@ -51,6 +51,8 @@ export interface PluginTool {
   inputSchema: Record<string, unknown>;
   /** 声明式配置（可选）；无需配置的插件可不声明，run 第三参为 undefined */
   config?: PluginToolConfigDecl;
+  /** run 超时（毫秒，可选）：超时返回失败结果不抛；缺省 60s（与 MCP 调用超时一致） */
+  timeoutMs?: number;
   run(
     args: Record<string, unknown>,
     signal: AbortSignal,
@@ -72,10 +74,21 @@ export function isValidPluginToolName(name: string): boolean {
 export interface PluginCallStats {
   name: string;
   calls: number;
-  /** isError 结果数（run 抛错与返回 isError 均计入） */
+  /** isError 结果数（run 抛错、返回 isError 与超时均计入） */
   errors: number;
   /** 累计耗时（ms） */
   totalMs: number;
+}
+
+/** 插件 run 超时默认值：60s（与 MCP 客户端调用超时一致） */
+export const DEFAULT_PLUGIN_TIMEOUT_MS = 60_000;
+
+/** run 超时错误（内部标记，execute 捕获后转失败结果，不向调用方抛出） */
+export class PluginTimeoutError extends Error {
+  constructor(name: string, timeoutMs: number) {
+    super(`插件“${name}”执行超时（${timeoutMs}ms）`);
+    this.name = "PluginTimeoutError";
+  }
 }
 
 export class PluginToolRegistry {
@@ -177,10 +190,17 @@ export class PluginToolRegistry {
         isError: true,
       };
     }
+    // 超时护栏：挂起的 run 不卡死 agent 循环（超时转失败结果；插件可声明
+    // timeoutMs 覆盖，缺省 60s，与 MCP 调用超时一致）
+    const timeoutMs = tool.timeoutMs ?? DEFAULT_PLUGIN_TIMEOUT_MS;
     const startedAt = performance.now();
     let isError = false;
     try {
-      const result = await tool.run(args ?? {}, signal);
+      const result = await withRunTimeout(
+        tool.run(args ?? {}, signal),
+        name,
+        timeoutMs,
+      );
       isError = result.isError === true;
       return {
         summary: result.summary,
@@ -192,7 +212,14 @@ export class PluginToolRegistry {
       isError = true;
       return {
         summary:
-          error instanceof Error ? error.message : "插件工具执行发生未知错误",
+          error instanceof PluginTimeoutError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : "插件工具执行发生未知错误",
+        ...(error instanceof PluginTimeoutError
+          ? { output: "run 未在限时内返回；可检查插件实现（外部请求挂起、死循环）或调大 timeoutMs" }
+          : {}),
         isError: true,
       };
     } finally {
@@ -225,3 +252,32 @@ export class PluginToolRegistry {
 
 /** 进程级单例：loader 启动时填充，会话装配与 client 守卫共用同一份注册表 */
 export const pluginToolRegistry = new PluginToolRegistry();
+
+/**
+ * run 超时包装：限时内 settle 原样透传；超时 reject PluginTimeoutError。
+ * 超时后底层 run 仍可能继续（无法强制取消），其后续 settle 被静默忽略——
+ * 已挂上 rejection handler，不会产生 unhandled rejection。
+ */
+function withRunTimeout<T>(
+  promise: Promise<T>,
+  name: string,
+  timeoutMs: number,
+): Promise<T> {
+  if (timeoutMs <= 0) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new PluginTimeoutError(name, timeoutMs));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+    // 超时路径：底层 promise 后续 settle 已被上面 handler 消费，无泄漏
+  });
+}
