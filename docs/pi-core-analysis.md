@@ -145,7 +145,7 @@ Pi 注释原文要点（session-manager.ts:844-854）："append-only trees... Ap
 - `content == null` 的旧数据补 `[]`。
 - 另有会话层扩展角色折叠：`bashExecution`/`custom`/`branchSummary`/`compactionSummary` 都折叠为 user 消息。
 
-**MyAgent 现状**：`FallbackModelClient` 切换供应商后**消息原样重放**（无转换层）。目前 MyAgent 双协议都不发 thinking 块、工具协议简单（tool_use/function calling），实际风险低；但 Anthropic 若开启 thinking 参数、或遇到"OpenAI 端收到空 toolCall id"的供应商，就会踩 Pi 修过的坑。**建议**：低成本实现一个精简版 transform（跳过 error/aborted 回合 + 孤儿 toolCall 补结果），thinking 转换等真用到再加。
+**MyAgent 现状（2026-08-09 已落地）**：`transformMessages`（`src/model/transform-messages.ts`，每次请求前必跑）——toolCallId 归一化 + 空 tool content 兜底 + **相邻 assistant 合并**（半截回合聚合）+ **孤儿 toolCall 补结果**（`No result provided` + isError）+ **空 assistant 丢弃**（Anthropic `content: []` 400 修复）。恢复路径 `conversationFromRaw` 同步聚合连续 text_delta。thinking 全链路（2026-08-09）：provider 配置 `thinking`/`thinkingBudgetTokens`（默认关）→ Anthropic 请求 `thinking:{type:"enabled",budget_tokens}`、响应解析 thinking 块（complete + stream 的 thinking_delta）；OpenAI 请求不加 reasoning 参数（兼容第三方端点），响应解析 `reasoning_content`；会话内 assistant 消息携带 `thinking` 字段（不持久化到事件流，与 Pi「仅同模型保留」一致）；wire 构建时按目标供应商能力保留 thinking 块或降级为普通 text（`[思考过程]\n…`）。流式 fallback（2026-08-09）：`FallbackModelClient.#stream` 首候选流式中途失败顺延下一候选以完整请求重放（已吐出的 text_delta 重复属流式固有限制），done 携带 `model` 与 `fallbacks`；abort 立即透传不 fallback。分支摘要客户端随 `applyModelConfigChange` 热刷新。并行模式补发 `tool_call` 事件（恢复时 tool_result 可配对）。
 
 ---
 
@@ -291,7 +291,7 @@ MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）�
 
 | # | 改造 | Pi 参照 | 说明 |
 |---|---|---|---|
-| 13 | **消息转换层（transform）** | transform-messages.ts：跳过 error/aborted 回合 + 孤儿 toolCall 补结果 + toolCallId 归一化 | ✅ 最小集已落地：`sanitizeMessages`（agent-model.ts）——toolCallId 重写为 Anthropic 合规格式（确定性映射、tool 消息同步）+ 空 content 兜底；孤儿 toolCall 场景 MyAgent 由 `acceptToolResult` 保证配对，无需补 |
+| 13 | **消息转换层（transform）** | transform-messages.ts：跳过 error/aborted 回合 + 孤儿 toolCall 补结果 + toolCallId 归一化 | ✅ 完整版已落地（2026-08-09）：`transformMessages`（src/model/transform-messages.ts）——toolCallId 重写 + 空 content 兜底 + **相邻 assistant 合并**（半截回合聚合）+ **孤儿 toolCall 补结果**（中断批次不再缺配对）+ **空 assistant 丢弃**（Anthropic 400 修复）；恢复路径 conversationFromRaw 同步聚合连续 text_delta；并行模式补发 tool_call 事件 |
 | 14 | **书签（label）与会话标题 entry** | `label`/`session_info` entry（session-manager.ts:1232-1253） | 长会话导航；MyAgent 标题在 index.json（重启可恢复），书签无 |
 | 15 | **TypeBox 参数校验** | AJV + Value.Convert + coercer（validation.ts:285-317） | ✅ `args-validate.ts`（AJV 编译缓存 + coerceTypes 强转 + 字段级报错）：参数全程 wire 键名直接校验 inputSchema（2026-08-05 第四轮）；2026-08-06 第五轮随 wire 统一删除映射层，非空规则以 minLength/minItems 进 schema，未知键 additionalProperties 拒绝并回显 Received | 替代手写 validateArgs；报错更精确可定位字段；补"类型强转"语义（模型常发 string 数字） |
 | 16 | **Bash 超限全量落盘** | `/tmp/pi-bash-*.log` + `fullOutputPath`（bash-executor.ts:64-87） | ✅ 输出截断时全量 stdout/stderr 落盘 `<tmp>/myagent-bash-<pid>-<seq>.log`，details.fullOutputPath + summary 附路径（模型可 Read 查看）；abort/超时路径同样覆盖（2026-08-05 第四轮） | `traceOutput` 内存常驻的兜底；配合 P0-4 |

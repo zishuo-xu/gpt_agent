@@ -461,7 +461,11 @@ export class AgentSession {
     explore?: ModelClient | undefined;
   }): void {
     if (clients.main) this.#model.setClient(clients.main);
-    if (clients.compact) this.#model.setCompactionClient(clients.compact);
+    if (clients.compact) {
+      this.#model.setCompactionClient(clients.compact);
+      // 分支摘要客户端同步刷新（此前模型热切换后仍用陈旧 cheap 客户端）
+      this.#branchOps.setBranchSummaryClient(clients.compact);
+    }
     if (clients.explore) this.#taskRunner?.setClient(clients.explore);
   }
 

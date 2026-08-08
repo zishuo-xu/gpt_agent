@@ -508,6 +508,14 @@ function normalizeProvider(provider: ModelProviderConfig): ModelProviderConfig {
     models: Array.isArray(provider.models)
       ? provider.models.map(String).filter(Boolean)
       : [],
+    ...(provider.thinking === undefined
+      ? {}
+      : { thinking: provider.thinking === true }),
+    ...(provider.thinkingBudgetTokens === undefined
+      ? {}
+      : {
+          thinkingBudgetTokens: Number(provider.thinkingBudgetTokens) || 2048,
+        }),
   };
 }
 
@@ -527,6 +535,12 @@ function mergeSecrets(
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey || existingKeys.get(provider.id) || "",
       models: [...provider.models],
+      ...(provider.thinking === undefined
+        ? {}
+        : { thinking: provider.thinking }),
+      ...(provider.thinkingBudgetTokens === undefined
+        ? {}
+        : { thinkingBudgetTokens: provider.thinkingBudgetTokens }),
     })),
     models: structuredClone(incoming.models),
     permissions: structuredClone(

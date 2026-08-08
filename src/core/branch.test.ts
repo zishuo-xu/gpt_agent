@@ -662,3 +662,22 @@ test("恢复后分支状态与当前分支保持：continue 走新分支", async
   // branch_switch + 分支上的 user/text_delta/cost_update/done ×2 轮
   assert.equal(branchRecords.length, 9);
 });
+
+test("conversationFromRaw：连续 text_delta 聚合为单条 assistant 消息", () => {
+  const records = [
+    event(1, { type: "user", text: "开场" }),
+    event(2, { type: "text_delta", text: "流式" }),
+    event(3, { type: "text_delta", text: "第一段" }),
+    event(4, { type: "text_delta", text: "第二段" }),
+    // 非 delta 事件打断聚合
+    event(5, { type: "done" }),
+    event(6, { type: "text_delta", text: "下一轮文本" }),
+  ];
+  const messages = conversationFrom(records);
+  const assistants = messages.filter(
+    (m) => m.role === "assistant",
+  ) as Array<Extract<ConversationMessage, { role: "assistant" }>>;
+  assert.equal(assistants.length, 2, "聚合为两条 assistant（delta 段 + 后段）");
+  assert.equal(assistants[0]!.content, "流式第一段第二段");
+  assert.equal(assistants[1]!.content, "下一轮文本");
+});

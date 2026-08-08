@@ -779,3 +779,208 @@ test("插件工具 target 取 query 主参（搜索类工具）", async () => {
     pluginToolRegistry.clear();
   }
 });
+
+test("Anthropic thinking：开启时请求含 thinking 参数，响应解析 thinking 块", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    { ...provider("anthropic"), thinking: true, thinkingBudgetTokens: 4096 },
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          content: [
+            { type: "thinking", thinking: "推理第一段" },
+            { type: "text", text: "最终答案" },
+            { type: "tool_use", id: "tu_1", name: "Read", input: {} },
+          ],
+          usage: { input_tokens: 10, output_tokens: 20 },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+
+  const result = await client.complete({
+    system: "system",
+    messages: [{ role: "user", content: "问题" }],
+    signal: new AbortController().signal,
+    tools: [],
+  });
+  assert.deepEqual(requestBody.thinking, {
+    type: "enabled",
+    budget_tokens: 4096,
+  }, "请求携带 thinking 参数与自定义预算");
+  assert.equal(result.thinking, "推理第一段", "thinking 块解析为 thinking 字段");
+  assert.equal(result.text, "最终答案", "text 块不受影响");
+  assert.equal(result.toolCalls.length, 1);
+});
+
+test("Anthropic thinking：未开启时请求不含 thinking 参数，历史 thinking 降级为文本", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    provider("anthropic"),
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "ok" }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+
+  await client.complete({
+    system: "system",
+    messages: [
+      {
+        role: "assistant",
+        content: "回答",
+        toolCalls: [],
+        thinking: "历史推理内容",
+      },
+    ],
+    signal: new AbortController().signal,
+    tools: [],
+  });
+  assert.equal(requestBody.thinking, undefined, "未开启时请求不含 thinking 参数");
+  const assistant = requestBody.messages[0];
+  assert.deepEqual(
+    assistant.content,
+    [{ type: "text", text: "[思考过程]\n历史推理内容\n\n回答" }],
+    "历史 thinking 降级为 text 块",
+  );
+});
+
+test("Anthropic thinking：开启时历史 thinking 保留为 thinking 块", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    { ...provider("anthropic"), thinking: true },
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "ok" }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+
+  await client.complete({
+    system: "system",
+    messages: [
+      {
+        role: "assistant",
+        content: "回答",
+        toolCalls: [],
+        thinking: "推理过程",
+      },
+    ],
+    signal: new AbortController().signal,
+    tools: [],
+  });
+  const assistant = requestBody.messages[0];
+  assert.deepEqual(
+    assistant.content,
+    [
+      { type: "thinking", thinking: "推理过程" },
+      { type: "text", text: "回答" },
+    ],
+    "开启时历史 thinking 保留为 thinking 块",
+  );
+});
+
+test("OpenAI：reasoning_content 解析为 thinking；历史 thinking 降级为文本前缀", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    provider("openai-compatible"),
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "最终回答",
+                reasoning_content: "推理过程",
+                tool_calls: [],
+              },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 5, completion_tokens: 5 },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+
+  const result = await client.complete({
+    system: "system",
+    messages: [{ role: "user", content: "问题" }],
+    signal: new AbortController().signal,
+    tools: [],
+  });
+  assert.equal(result.thinking, "推理过程", "reasoning_content 解析为 thinking");
+
+  // 历史 thinking 在 OpenAI 侧降级为文本前缀
+  await client.complete({
+    system: "system",
+    messages: [
+      { role: "assistant", content: "答", toolCalls: [], thinking: "想" },
+    ],
+    signal: new AbortController().signal,
+    tools: [],
+  });
+  assert.equal(
+    requestBody.messages[1].content,
+    "[思考过程]\n想\n\n答",
+    "OpenAI 历史 thinking 降级为 content 前缀",
+  );
+});
+
+test("Anthropic 流式：thinking_delta 累积为 thinking", async () => {
+  const client = new ConfiguredModelClient(
+    { ...provider("anthropic"), thinking: true },
+    "test-model",
+    async () =>
+      new Response(
+        [
+          `data: {"type":"message_start","message":{"usage":{"input_tokens":5,"cache_read_input_tokens":1}}}`,
+          `data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
+          `data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"推理中"}}`,
+          `data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"继续推理"}}`,
+          `data: {"type":"content_block_stop","index":0}`,
+          `data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+          `data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"答案"}}`,
+          `data: {"type":"content_block_stop","index":1}`,
+          `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}`,
+          `data: {"type":"message_stop"}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+
+  const chunks: string[] = [];
+  let finalResponse: any;
+  for await (const chunk of client.stream!({
+    system: "system",
+    messages: [{ role: "user", content: "问题" }],
+    signal: new AbortController().signal,
+    tools: [],
+  })) {
+    if (chunk.type === "text_delta") chunks.push(chunk.text);
+    else finalResponse = chunk.response;
+  }
+  assert.deepEqual(chunks, ["答案"], "流式只推送 text_delta");
+  assert.equal(finalResponse.thinking, "推理中继续推理", "thinking_delta 累积");
+  assert.equal(finalResponse.text, "答案");
+});

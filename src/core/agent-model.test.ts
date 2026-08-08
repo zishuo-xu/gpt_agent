@@ -5,7 +5,6 @@ import {
   buildSystemPrompt,
   ConversationAgentModel,
   findCompactionCutPoint,
-  sanitizeMessages,
 } from "./agent-model.js";
 import { EXPLORE_TOOL_NAMES } from "../tools/tool-definitions.js";
 import type {
@@ -410,81 +409,3 @@ test("会话小于保留预算或无可压缩时返回 null", () => {
   assert.equal(findCompactionCutPoint(summaryOnly, 10), null);
 });
 
-test("sanitizeMessages：不合规 toolCallId 重写为 Anthropic 合规格式且映射一致", () => {
-  const messages: ConversationMessage[] = [
-    {
-      role: "assistant",
-      content: "",
-      toolCalls: [
-        {
-          id: "call_abc.def!xyz",
-          tool: "Read",
-          target: "a.ts",
-          args: { filePath: "a.ts" },
-        },
-        { id: "ok_id_123", tool: "Bash", target: "ls", args: { command: "ls" } },
-      ],
-    },
-    {
-      role: "tool",
-      toolCallId: "call_abc.def!xyz",
-      toolName: "Read",
-      target: "a.ts",
-      content: "内容",
-    },
-    {
-      role: "tool",
-      toolCallId: "ok_id_123",
-      toolName: "Bash",
-      target: "ls",
-      content: "内容2",
-    },
-  ];
-  const sanitized = sanitizeMessages(messages);
-  const assistant = sanitized[0] as Extract<ConversationMessage, { role: "assistant" }>;
-  const rewritten = assistant.toolCalls.find(
-    (call) => call.target === "a.ts",
-  )!;
-  assert.match(rewritten.id, /^[a-zA-Z0-9_-]{1,64}$/, "重写后必须合规");
-  assert.notEqual(rewritten.id, "call_abc.def!xyz", "不合规 id 必须被重写");
-  const okCall = assistant.toolCalls.find((call) => call.target === "ls")!;
-  assert.equal(okCall.id, "ok_id_123", "已合规 id 保持不变");
-  const tool = sanitized.find(
-    (message) =>
-      message.role === "tool" &&
-      (message as Extract<ConversationMessage, { role: "tool" }>).target === "a.ts",
-  ) as Extract<ConversationMessage, { role: "tool" }>;
-  assert.equal(tool.toolCallId, rewritten.id, "tool 消息的 toolCallId 同步重写");
-  // 原消息不被修改（不可变）
-  const original = messages[0] as Extract<ConversationMessage, { role: "assistant" }>;
-  assert.equal(original.toolCalls[0]!.id, "call_abc.def!xyz");
-});
-
-test("sanitizeMessages：空 content 的 tool 消息补占位", () => {
-  const messages: ConversationMessage[] = [
-    {
-      role: "tool",
-      toolCallId: "t1",
-      toolName: "Bash",
-      target: "ls",
-      content: "",
-    },
-    {
-      role: "tool",
-      toolCallId: "t2",
-      toolName: "Read",
-      target: "a.ts",
-      content: "正常内容",
-    },
-  ];
-  const sanitized = sanitizeMessages(messages);
-  assert.equal(
-    (sanitized[0] as Extract<ConversationMessage, { role: "tool" }>).content,
-    "No result provided",
-  );
-  assert.equal(
-    (sanitized[1] as Extract<ConversationMessage, { role: "tool" }>).content,
-    "正常内容",
-    "非空内容不受影响",
-  );
-});

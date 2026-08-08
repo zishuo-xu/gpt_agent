@@ -12,6 +12,10 @@ export interface Provider {
   apiKey: string;
   hasApiKey: boolean;
   models: string[];
+  /** 推理内容（thinking）开关；对应后端 ModelProviderConfig.thinking */
+  thinking?: boolean;
+  /** 推理预算（tokens）；对应后端 ModelProviderConfig.thinkingBudgetTokens */
+  thinkingBudgetTokens?: number;
 }
 
 export interface ModelSelection {

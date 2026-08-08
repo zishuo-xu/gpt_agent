@@ -39,9 +39,56 @@ export class FallbackModelClient implements ModelClient {
     this.#candidates = [...candidates];
   }
 
+  /**
+   * 流式执行（跨候选 fallback）：首候选流式迭代，中途失败（非 abort）
+   * 顺延下一候选以完整请求重放。已知权衡：重放时已吐出的 text_delta
+   * 会重复（流式无法回滚，Pi 同类）；done 响应附带 model 与 fallbacks。
+   */
+  async *#stream(request: CompletionRequest): AsyncIterable<StreamChunk> {
+    const fallbacks: NonNullable<ModelResponse["fallbacks"]> = [];
+    let lastError: unknown;
+    let attempts = 0;
+    for (let index = 0; index < this.#candidates.length; index += 1) {
+      const candidate = this.#candidates[index]!;
+      if (!candidate.client.stream) continue;
+      attempts += 1;
+      try {
+        for await (const chunk of candidate.client.stream(request)) {
+          if (chunk.type === "text_delta") {
+            yield chunk;
+            continue;
+          }
+          yield {
+            type: "done",
+            response: {
+              ...chunk.response,
+              model: candidate.id,
+              ...(fallbacks.length > 0 ? { fallbacks } : {}),
+            },
+          };
+          return;
+        }
+        throw new Error("流式响应未正常结束");
+      } catch (error) {
+        if (request.signal.aborted || isAbortError(error)) throw error;
+        lastError = error;
+        const next = this.#candidates[index + 1];
+        if (!next || !next.client.stream) {
+          throw new ModelRetriesExhaustedError(lastError, attempts);
+        }
+        fallbacks.push({
+          from: candidate.id,
+          to: next.id,
+          reason:
+            error instanceof Error ? error.message : "未知模型错误",
+        });
+      }
+    }
+    throw new ModelRetriesExhaustedError(lastError, attempts);
+  }
+
   get stream(): ModelClient["stream"] {
-    const first = this.#candidates[0];
-    return first?.client.stream?.bind(first.client);
+    return this.#stream.bind(this);
   }
 
   async complete(

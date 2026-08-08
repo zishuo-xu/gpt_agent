@@ -18,6 +18,12 @@ export interface ModelProviderConfig {
   baseUrl: string;
   apiKey: string;
   models: string[];
+  /** 启用推理内容（Anthropic extended thinking / OpenAI reasoning）。
+      默认关（thinking 增加 output token 成本）；开启后同供应商保留
+      thinking 块，跨供应商切换时降级为普通文本。 */
+  thinking?: boolean;
+  /** thinking 预算（Anthropic budget_tokens，默认 2048） */
+  thinkingBudgetTokens?: number;
 }
 
 export interface RoleModelTarget {

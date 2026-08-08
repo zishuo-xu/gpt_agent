@@ -149,18 +149,26 @@ export function conversationFromRaw(
   // 崩溃残留的孤儿 tool_call（无配对 tool_result/permission_denied）：
   // 记录其 assistant 消息索引，收尾补中断说明，避免发给模型时 tool_calls 缺配套 tool 消息
   const orphanIndexes = new Map<string, number>();
+  // 连续 text_delta 聚合缓冲：流式中断/恢复的半截回合聚合为单条 assistant
+  // （与 transformMessages 的相邻合并互为兜底，此处先在事件层合并）
+  let deltaBuffer = "";
+  const flushDelta = () => {
+    if (!deltaBuffer) return;
+    messages.push({ role: "assistant", content: deltaBuffer, toolCalls: [] });
+    deltaBuffer = "";
+  };
   for (const { event } of records) {
     if (event.type === "branch_switch") continue;
+    if (event.type === "text_delta") {
+      deltaBuffer += event.text;
+      continue;
+    }
+    // 非 text_delta 事件：先落定聚合中的半截回合，再按类型处理
+    flushDelta();
     if (event.type === "user") {
       messages.push({
         role: "user",
         content: event.modelText ?? event.text,
-      });
-    } else if (event.type === "text_delta") {
-      messages.push({
-        role: "assistant",
-        content: event.text,
-        toolCalls: [],
       });
     } else if (event.type === "tool_call") {
       calls.set(event.call.id, event.call);
@@ -205,6 +213,7 @@ export function conversationFromRaw(
       });
     }
   }
+  flushDelta();
   // 崩溃中断的 tool_call：在其后补一条中断说明 tool 消息（倒序插入避免索引偏移）
   const orphans = [...orphanIndexes.entries()].sort(
     (a, b) => b[1] - a[1],

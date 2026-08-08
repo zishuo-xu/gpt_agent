@@ -221,6 +221,11 @@ export class AgentLoop {
       ms: number;
     }>,
   ): Promise<void> {
+    // 先统一 emit tool_call（与串行路径一致）：事件流完整，崩溃恢复时
+    // tool_result 按 callId 配对不丢（此前并行路径缺 tool_call 事件导致恢复丢失）
+    for (const { call } of verdicts) {
+      this.#bus.emit({ type: "tool_call", call });
+    }
     const executions = verdicts.map(async ({ call, verdict }) => {
       const toolStartedAt = Date.now();
       if (signal.aborted) {

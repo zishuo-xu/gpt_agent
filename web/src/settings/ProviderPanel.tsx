@@ -174,6 +174,44 @@ export function ProviderPanel(props: ProviderPanelProps) {
                 </select>
               </label>
               <label>
+                推理内容（thinking）
+                <div className="toggle-field">
+                  <button
+                    className={`toggle-button ${
+                      selectedProvider.thinking ? "on" : ""
+                    }`}
+                    onClick={() =>
+                      props.onUpdateProvider(selectedIndex, {
+                        thinking: !selectedProvider.thinking,
+                      })
+                    }
+                    type="button"
+                  >
+                    {selectedProvider.thinking ? "已开启" : "已关闭"}
+                  </button>
+                  <span className="field-hint">
+                    开启后请求携带 thinking 参数并解析推理内容；增加 output token 成本
+                  </span>
+                </div>
+              </label>
+              {selectedProvider.thinking && (
+                <label>
+                  推理预算（tokens）
+                  <input
+                    type="number"
+                    min={1024}
+                    value={
+                      selectedProvider.thinkingBudgetTokens ?? 2048
+                    }
+                    onChange={(event) =>
+                      props.onUpdateProvider(selectedIndex, {
+                        thinkingBudgetTokens: Number(event.target.value) || 2048,
+                      })
+                    }
+                  />
+                </label>
+              )}
+              <label>
                 API Key
                 <div className="secret-field">
                   <input

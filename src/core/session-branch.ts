@@ -30,7 +30,7 @@ const BRANCH_SUMMARY_MIN_TOKENS = 5_000;
 export class BranchCoordinator {
   readonly #bus: AgentEventBus;
   readonly #model: ConversationAgentModel;
-  readonly #branchSummaryClient: ModelClient | undefined;
+  #branchSummaryClient: ModelClient | undefined;
   readonly #pricing:
     | Partial<Record<"main" | "cheap" | "explore", ModelPricing>>
     | undefined;
@@ -67,6 +67,11 @@ export class BranchCoordinator {
   /** 分支树（根分支 main 恒存在） */
   branches(): SessionBranch[] {
     return structuredClone(this.#branches);
+  }
+
+  /** 模型热切换后刷新分支摘要客户端（cheap 角色配置变更即时生效） */
+  setBranchSummaryClient(client: ModelClient | undefined): void {
+    this.#branchSummaryClient = client;
   }
 
   /** 当前分支 id */

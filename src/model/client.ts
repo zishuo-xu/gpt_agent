@@ -27,6 +27,9 @@ export class ModelHttpError extends Error {
   }
 }
 
+/** Anthropic extended thinking 默认预算（provider.thinkingBudgetTokens 缺省值） */
+export const DEFAULT_THINKING_BUDGET = 2048;
+
 export class ConfiguredModelClient implements ModelClient {
   readonly #provider: ModelProviderConfig;
   readonly #model: string;
@@ -98,6 +101,11 @@ export class ConfiguredModelClient implements ModelClient {
     const choice = asRecord(asArray(payload.choices)[0]);
     const message = asRecord(choice.message);
     const text = typeof message.content === "string" ? message.content : "";
+    // OpenAI reasoning_content：部分端点（o1 系）返回推理内容，保留供会话/降级使用
+    const thinking =
+      typeof message.reasoning_content === "string"
+        ? message.reasoning_content
+        : undefined;
     const toolCalls = asArray(message.tool_calls).map((raw) => {
       const item = asRecord(raw);
       const fn = asRecord(item.function);
@@ -117,6 +125,7 @@ export class ConfiguredModelClient implements ModelClient {
         output: numberValue(usage.completion_tokens),
         cached: numberValue(promptDetails.cached_tokens),
       },
+      ...(thinking ? { thinking } : {}),
       ...(stringValue(choice.finish_reason)
         ? { stopReason: stringValue(choice.finish_reason) }
         : {}),
@@ -131,6 +140,15 @@ export class ConfiguredModelClient implements ModelClient {
       request.cacheRetention === "none"
         ? undefined
         : { type: "ephemeral" as const };
+    // extended thinking：provider.thinking 开启时请求携带 thinking 参数
+    const thinking =
+      this.#provider.thinking === true
+        ? {
+            type: "enabled" as const,
+            budget_tokens:
+              this.#provider.thinkingBudgetTokens ?? DEFAULT_THINKING_BUDGET,
+          }
+        : undefined;
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "messages"),
       {
@@ -151,7 +169,8 @@ export class ConfiguredModelClient implements ModelClient {
             },
           ],
           max_tokens: 4096,
-          messages: toAnthropicMessages(request.messages, cacheControl),
+          ...(thinking ? { thinking } : {}),
+          messages: toAnthropicMessages(request.messages, cacheControl, thinking),
           tools: tools.map((tool, index) => ({
             name: tool.name,
             description: tool.description,
@@ -170,6 +189,13 @@ export class ConfiguredModelClient implements ModelClient {
       .filter((block) => block.type === "text")
       .map((block) => stringValue(block.text))
       .join("");
+    // thinking 块（type === "thinking"）单独累积，与 text 分离
+    const thinkingText = content
+      .map((block) => asRecord(block))
+      .filter((block) => block.type === "thinking")
+      .map((block) => stringValue(block.thinking))
+      .filter(Boolean)
+      .join("\n");
     const toolCalls = content
       .map((block) => asRecord(block))
       .filter((block) => block.type === "tool_use")
@@ -189,6 +215,7 @@ export class ConfiguredModelClient implements ModelClient {
         output: numberValue(usage.output_tokens),
         cached: numberValue(usage.cache_read_input_tokens),
       },
+      ...(thinkingText ? { thinking: thinkingText } : {}),
       ...(stringValue(payload.stop_reason)
         ? { stopReason: stringValue(payload.stop_reason) }
         : {}),
@@ -232,6 +259,7 @@ export class ConfiguredModelClient implements ModelClient {
       throw new Error(stringValue(asRecord(payload.error).message) || `HTTP ${response.status}`);
     }
     let text = "";
+    let thinking = "";
     const toolCallAccum = new Map<number, { id: string; name: string; args: string }>();
     let usage: { input: number; output: number; cached: number } = { input: 0, output: 0, cached: 0 };
     let stopReason = "";
@@ -250,6 +278,10 @@ export class ConfiguredModelClient implements ModelClient {
         if (typeof delta.content === "string" && delta.content) {
           text += delta.content;
           yield { type: "text_delta", text: delta.content };
+        }
+        // OpenAI reasoning_content 增量（o1 系）：累积为 thinking
+        if (typeof delta.reasoning_content === "string" && delta.reasoning_content) {
+          thinking += delta.reasoning_content;
         }
         for (const raw of asArray(delta.tool_calls)) {
           const tc = asRecord(raw);
@@ -281,6 +313,7 @@ export class ConfiguredModelClient implements ModelClient {
         text,
         toolCalls,
         usage,
+        ...(thinking ? { thinking } : {}),
         ...(stopReason ? { stopReason } : {}),
       },
     };
@@ -292,6 +325,14 @@ export class ConfiguredModelClient implements ModelClient {
       request.cacheRetention === "none"
         ? undefined
         : { type: "ephemeral" as const };
+    const thinking =
+      this.#provider.thinking === true
+        ? {
+            type: "enabled" as const,
+            budget_tokens:
+              this.#provider.thinkingBudgetTokens ?? DEFAULT_THINKING_BUDGET,
+          }
+        : undefined;
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "messages"),
       {
@@ -312,8 +353,9 @@ export class ConfiguredModelClient implements ModelClient {
             },
           ],
           max_tokens: 4096,
+          ...(thinking ? { thinking } : {}),
           stream: true,
-          messages: toAnthropicMessages(request.messages, cacheControl),
+          messages: toAnthropicMessages(request.messages, cacheControl, thinking),
           tools: tools.map((tool, index) => ({
             name: tool.name,
             description: tool.description,
@@ -330,6 +372,7 @@ export class ConfiguredModelClient implements ModelClient {
       throw new Error(stringValue(asRecord(payload.error).message) || `HTTP ${response.status}`);
     }
     let text = "";
+    let thinkingText = "";
     let inputTokens = 0;
     let outputTokens = 0;
     let cachedTokens = 0;
@@ -350,11 +393,14 @@ export class ConfiguredModelClient implements ModelClient {
             args: "",
           });
         }
+        // thinking 块开始（extended thinking）：无初始内容
       } else if (eventType === "content_block_delta") {
         const delta = asRecord(parsed.delta);
         if (delta.type === "text_delta" && typeof delta.text === "string") {
           text += delta.text;
           yield { type: "text_delta", text: delta.text };
+        } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
+          thinkingText += delta.thinking;
         } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
           const acc = toolCallAccum.get(currentToolIndex);
           if (acc) acc.args += stringValue(delta.partial_json);
@@ -379,6 +425,7 @@ export class ConfiguredModelClient implements ModelClient {
         text,
         toolCalls,
         usage: { input: inputTokens, output: outputTokens, cached: cachedTokens },
+        ...(thinkingText ? { thinking: thinkingText } : {}),
         ...(stopReason ? { stopReason } : {}),
       },
     };
@@ -394,9 +441,14 @@ function toOpenAiMessage(message: ConversationMessage): Record<string, unknown> 
       content: message.content,
     };
   }
+  // thinking 降级为普通文本前缀（Pi「跨模型时 thinking 降级为 text」；
+  // OpenAI 请求侧不发送 reasoning 参数，历史推理内容以文本形式可见）
+  const thinkingPrefix = message.thinking
+    ? `[思考过程]\n${message.thinking}\n\n`
+    : "";
   return {
     role: "assistant",
-    content: message.content || null,
+    content: `${thinkingPrefix}${message.content ?? ""}` || null,
     ...(message.toolCalls.length === 0
       ? {}
       : {
@@ -416,6 +468,7 @@ function toOpenAiMessage(message: ConversationMessage): Record<string, unknown> 
 function toAnthropicMessages(
   messages: ConversationMessage[],
   cacheControl?: { type: "ephemeral" } | undefined,
+  thinking?: { type: "enabled"; budget_tokens: number } | undefined,
 ): Array<Record<string, unknown>> {
   const output: Array<Record<string, unknown>> = [];
   // 消息级缓存断点：第一条（非末尾）user 消息标记后，其之前的前缀整段可缓存
@@ -438,18 +491,33 @@ function toAnthropicMessages(
       continue;
     }
     if (message.role === "assistant") {
-      output.push({
-        role: "assistant",
-        content: [
-          ...(message.content ? [{ type: "text", text: message.content }] : []),
-          ...message.toolCalls.map((call) => ({
-            type: "tool_use",
-            id: call.id,
-            name: call.tool,
-            input: asRecord(call.args),
-          })),
-        ],
-      });
+      const content: Array<Record<string, unknown>> = [];
+      // thinking 块仅在请求开启 thinking 时发送（否则 Anthropic 400）；
+      // 未开启时降级为普通 text 文本（Pi 跨模型降级语义）
+      if (message.thinking) {
+        if (thinking) {
+          content.push({ type: "thinking", thinking: message.thinking });
+          if (message.content) {
+            content.push({ type: "text", text: message.content });
+          }
+        } else {
+          content.push({
+            type: "text",
+            text: `[思考过程]\n${message.thinking}\n\n${message.content ?? ""}`,
+          });
+        }
+      } else if (message.content) {
+        content.push({ type: "text", text: message.content });
+      }
+      content.push(
+        ...message.toolCalls.map((call) => ({
+          type: "tool_use",
+          id: call.id,
+          name: call.tool,
+          input: asRecord(call.args),
+        })),
+      );
+      output.push({ role: "assistant", content });
       continue;
     }
     const block = {

@@ -653,6 +653,20 @@ test("并行模式：同一批无需审批的工具并发执行（总时长 < �
     events.filter((event) => event.type === "tool_result").length,
     2,
   );
+  // 并行路径也 emit tool_call（事件流完整，崩溃恢复时 tool_result 可配对）
+  assert.equal(
+    events.filter((event) => event.type === "tool_call").length,
+    2,
+    "并行执行应补发 tool_call 事件",
+  );
+  const callEvents = events
+    .filter((event) => event.type === "tool_call")
+    .map((event) => (event as Extract<AgentEvent, { type: "tool_call" }>).call.id);
+  assert.deepEqual(
+    callEvents.sort(),
+    ["p1", "p2"],
+    "tool_call 事件覆盖全部并发调用",
+  );
 });
 
 test("并行模式：批次含 ask 工具时退化为串行并正常审批", async () => {

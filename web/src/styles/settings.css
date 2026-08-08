@@ -613,3 +613,34 @@
   accent-color: #668ff3;
 }
 
+
+/* thinking 开关（provider 编辑区） */
+.toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toggle-button {
+  padding: 7px 11px;
+  border-radius: 7px;
+  border: 1px solid #46505e;
+  background: transparent;
+  color: #8995a6;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.toggle-button.on {
+  border-color: #2b8a52;
+  background: #2eb966;
+  color: #07160d;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: #6b7787;
+  line-height: 1.5;
+}
