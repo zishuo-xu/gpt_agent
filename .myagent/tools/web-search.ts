@@ -491,7 +491,10 @@ export default definePluginTool({
     }
     return {
       summary: "搜索失败",
-      output: `搜索“${query}”失败：${lastError}`,
+      output:
+        `搜索“${query}”失败：${lastError}\n` +
+        "可能原因：上游搜索引擎对当前 IP 限流/风控（常见于密集请求），或网络异常。" +
+        "建议：稍后重试、换一个查询词，或改用 WebFetch 直接抓取已知 URL。",
       isError: true,
       details: { query },
     };

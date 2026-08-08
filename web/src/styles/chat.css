@@ -1726,6 +1726,11 @@
   white-space: nowrap;
 }
 
+.approval-resolved-tag.denied {
+  background: #3a1a1a;
+  color: #e08a8a;
+}
+
 .web-approval-card.resolved {
   opacity: 0.6;
 }

@@ -25,6 +25,8 @@ export type DisplayItem =
       ts: string;
       event: Record<string, any>;
       resolvedByEvent: boolean;
+      /** 审批被拒（用户拒绝/超时）的原因，来自 permission_denied 事件 */
+      deniedReason?: string;
     }
   | {
       kind: "subtask";
@@ -63,6 +65,7 @@ export function statusLabel(status: string): string {
  */
 export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
   const toolResults = new Map<string, Record<string, any>>();
+  const deniedReasons = new Map<string, string>();
   const startedQueues = new Set<string>();
   const taskEnds = new Map<string, Record<string, any>>();
   for (const { event } of events) {
@@ -70,6 +73,9 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
       toolResults.set(String(event.callId), event);
     } else if (event.type === "permission_denied") {
       toolResults.set(String(event.call?.id), event);
+      if (event.call?.id) {
+        deniedReasons.set(String(event.call.id), event.reason);
+      }
     } else if (event.type === "user" && event.queueId) {
       startedQueues.add(String(event.queueId));
     } else if (event.type === "task_end") {
@@ -133,6 +139,7 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
           ts,
           event,
           resolvedByEvent: toolResults.has(String(event.call.id)),
+          deniedReason: deniedReasons.get(String(event.call.id)),
         });
         break;
       case "task_start":

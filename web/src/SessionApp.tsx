@@ -89,6 +89,9 @@ export function SessionApp() {
   const [submitting, setSubmitting] = useState(false);
   const [resolvedPermissions, setResolvedPermissions] =
     useState<Set<string>>(new Set());
+  /** 正在提交审批的 callId（按钮 loading 态） */
+  const [pendingPermissionCallId, setPendingPermissionCallId] =
+    useState<string | null>(null);
   const [permissionFeedback, setPermissionFeedback] =
     useState<Record<string, string>>({});
   const [error, setError] = useState("");
@@ -528,30 +531,35 @@ export function SessionApp() {
     scope: ApprovalScope = "once",
     feedback?: string,
   ) {
-    const response = await fetch(
-      projectUrl(`/api/sessions/${selectedId}/permission`),
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          callId,
-          granted,
-          scope,
-          ...(feedback?.trim()
-            ? { feedback: feedback.trim() }
-            : {}),
-        }),
-      },
-    );
-    const payload = await response.json();
-    if (!response.ok) {
-      setError(payload.error ?? "审批失败");
-      return;
+    setPendingPermissionCallId(callId);
+    try {
+      const response = await fetch(
+        projectUrl(`/api/sessions/${selectedId}/permission`),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            callId,
+            granted,
+            scope,
+            ...(feedback?.trim()
+              ? { feedback: feedback.trim() }
+              : {}),
+          }),
+        },
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        setError(payload.error ?? "审批失败");
+        return;
+      }
+      setResolvedPermissions(
+        (current) => new Set([...current, callId]),
+      );
+      await refreshSessions();
+    } finally {
+      setPendingPermissionCallId(null);
     }
-    setResolvedPermissions(
-      (current) => new Set([...current, callId]),
-    );
-    await refreshSessions();
   }
 
   async function interrupt() {
@@ -771,6 +779,7 @@ export function SessionApp() {
                         item={item}
                         showCacheMissNotices={showCacheMissNotices}
                         locallyResolved={resolvedPermissions}
+                        pendingPermissionCallId={pendingPermissionCallId}
                         feedback={
                           item.kind === "approval"
                             ? (permissionFeedback[

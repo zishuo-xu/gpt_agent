@@ -10,6 +10,8 @@ export function ItemCard(props: {
   /** 缓存 miss 提示开关（behavior.showCacheMissNotices；默认关） */
   showCacheMissNotices: boolean;
   locallyResolved: Set<string>;
+  /** 正在提交审批的 callId（按钮 loading 态，防重复点击） */
+  pendingPermissionCallId?: string | null;
   feedback: string;
   onFeedback: (callId: string, value: string) => void;
   onPermission: (
@@ -153,7 +155,15 @@ export function ItemCard(props: {
             {event.call.tool} · {event.call.target}
           </span>
           {resolved && (
-            <span className="approval-resolved-tag">已处理</span>
+            <span
+              className={`approval-resolved-tag${
+                item.deniedReason ? " denied" : ""
+              }`}
+            >
+              {item.deniedReason
+                ? `已拒绝：${item.deniedReason}`
+                : "已处理"}
+            </span>
           )}
         </div>
         <p>{event.risk}</p>
@@ -163,35 +173,48 @@ export function ItemCard(props: {
             <div className="approval-actions">
               <button
                 className="approve-button"
+                disabled={props.pendingPermissionCallId === callId}
                 onClick={() =>
                   void props.onPermission(callId, true, "once")
                 }
               >
-                仅这一次
+                {props.pendingPermissionCallId === callId
+                  ? "处理中…"
+                  : "仅这一次"}
               </button>
               <button
+                disabled={props.pendingPermissionCallId === callId}
                 onClick={() =>
                   void props.onPermission(callId, true, "session")
                 }
               >
-                本次会话允许
+                {props.pendingPermissionCallId === callId
+                  ? "处理中…"
+                  : "本次会话允许"}
               </button>
               <button
+                disabled={props.pendingPermissionCallId === callId}
                 onClick={() =>
                   void props.onPermission(callId, true, "project")
                 }
               >
-                本项目允许
+                {props.pendingPermissionCallId === callId
+                  ? "处理中…"
+                  : "本项目允许"}
               </button>
               <button
+                disabled={props.pendingPermissionCallId === callId}
                 onClick={() =>
                   void props.onPermission(callId, true, "global")
                 }
               >
-                全局允许
+                {props.pendingPermissionCallId === callId
+                  ? "处理中…"
+                  : "全局允许"}
               </button>
               <button
                 className="reject-button"
+                disabled={props.pendingPermissionCallId === callId}
                 onClick={() => void props.onPermission(callId, false)}
               >
                 拒绝
