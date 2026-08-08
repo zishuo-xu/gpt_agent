@@ -50,13 +50,35 @@ export default definePluginTool({
 });
 ```
 
-- `run(args, signal)`：`args` 为经过 schema 校验后的参数；`signal` 中止信号（中断时建议配合 fetch/子进程使用）
+- `run(args, signal, config?)`：`args` 为经过 schema 校验后的参数；`signal` 中止信号（中断时建议配合 fetch/子进程使用）；`config` 为**声明式配置**（见下）的运行时值，无声明时 undefined
 - 结果字段与内置工具 `ToolExecutionResult` 对齐：`summary` 必填，`output`/`details`/`isError` 可选
 - `details` 任意键值对自动渲染到 UI 的详情网格（键名 `diff` 有专门的高亮渲染；`code`/`durationMs` 有退出码/时长着色）
 
+### 声明式配置（可选）
+
+插件需要配置（token、服务地址等）时，声明 `config` 段即可，**无需自实现配置读取**——loader 在加载时统一读取 `plugins.json`（全局 + 项目两层浅合并）与环境变量，注册时闭包注入 run 第三参：
+
+```ts
+export default definePluginTool({
+  name: "WebSearch",
+  config: {
+    section: "webSearch",                          // plugins.json 顶层段名 → config.section
+    env: { TAVILY_API_KEY: "tavilyKey" },          // 环境变量名 → 注入参数名 → config.env
+  },
+  async run(args, signal, config) {
+    // config.section = plugins.json 的 webSearch 段（两层合并后）
+    // config.env = { tavilyKey: "<TAVILY_API_KEY 的值>" }（未设置时缺省）
+  },
+});
+```
+
+- 无需配置的插件可不声明，run 第三参为 undefined（向后兼容）
+- 配置在**加载时读取一次**；插件面板「重新加载」后重读（plugins.json 变更生效）
+- 读取逻辑：`readPluginsJson(homeDir, cwd)`（`src/tools/plugin-loader.ts`），WebSearch 的 `resolveSearchConfig` 是消费示例
+
 ### 注册与分发（关键代码位置）
 
-- 注册：`src/shared/plugin-tool.ts` 的 `PluginToolRegistry` 单例；`loadPluginTools(homeDir, cwd, registry)` 动态 import 插件文件
+- 注册：`src/shared/plugin-tool.ts` 的 `PluginToolRegistry` 单例；`loadPluginTools(homeDir, cwd, registry)` 动态 import 插件文件，解析 config 声明后闭包包装 run
 - 模型可见：`src/tools/tool-definitions.ts` 的 `getAllToolDefinitions()` = 内置工具 + registry 全部插件
 - 工具名开放集：`src/model/client.ts` guard 用 `isToolName(name) || pluginToolRegistry.has(name)`——模型可以调用任意已注册插件名，不校验内置枚举
 - 分发：`src/tools/executor.ts` 先查内置工具，未命中转 `#plugins.execute()` 调插件 `run`

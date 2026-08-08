@@ -105,3 +105,77 @@ test("加载器：坏文件跳过不阻塞，缺目录返回空", async () => {
   assert.deepEqual(empty.errors, []);
   await rm(emptyHome, { recursive: true, force: true });
 });
+
+test("加载器：声明式配置注入 run 第三参（plugins.json 两层合并 + 环境变量）", async () => {
+  const { home, project, registry } = await fixture();
+  // 全局层 plugins.json + 项目层覆盖（webSearch 段项目层合并）
+  await writeFile(
+    path.join(home, ".myagent", "plugins.json"),
+    JSON.stringify({
+      webSearch: { provider: "tavily", apiKey: "tvly-global" },
+    }),
+    "utf8",
+  );
+  await writeFile(
+    path.join(project, ".myagent", "plugins.json"),
+    JSON.stringify({
+      webSearch: { provider: "searxng", baseUrl: "http://127.0.0.1:8080/" },
+    }),
+    "utf8",
+  );
+  process.env.MYAGENT_TEST_TOKEN = "env-token";
+  try {
+    await writeFile(
+      path.join(project, ".myagent", "tools", "cfg.ts"),
+      PLUGIN_TMPL(
+        "CfgTool",
+        `config: { section: "webSearch", env: { MYAGENT_TEST_TOKEN: "token" } },
+  async run(args, signal, config) {
+    return { summary: "cfg", details: { section: config?.section, token: config?.env?.token } };
+  }`,
+      ),
+    );
+    const report = await loadPluginTools(home, project, registry);
+    assert.equal(report.errors.length, 0);
+    const result = await registry.execute(
+      "CfgTool",
+      {},
+      new AbortController().signal,
+    );
+    const details = result.details as {
+      section?: { provider?: string; baseUrl?: string };
+      token?: string;
+    };
+    // 项目层覆盖全局层（searxng 而非 tavily）
+    assert.equal(details.section?.provider, "searxng");
+    assert.equal(details.section?.baseUrl, "http://127.0.0.1:8080/");
+    // 环境变量注入
+    assert.equal(details.token, "env-token");
+  } finally {
+    delete process.env.MYAGENT_TEST_TOKEN;
+  }
+});
+
+test("加载器：无 config 声明的插件 run 第三参为 undefined", async () => {
+  const { home, project, registry } = await fixture();
+  await writeFile(
+    path.join(project, ".myagent", "tools", "plain.ts"),
+    PLUGIN_TMPL(
+      "PlainTool",
+      `async run(args, signal, config) {
+    return { summary: "plain", details: { config: config ?? null } };
+  }`,
+    ),
+  );
+  await loadPluginTools(home, project, registry);
+  const result = await registry.execute(
+    "PlainTool",
+    {},
+    new AbortController().signal,
+  );
+  assert.deepEqual(
+    (result.details as { config: unknown }).config,
+    null,
+    "无声明时第三参为 undefined",
+  );
+});

@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
 import {
   attachPageContents,
-  loadSearchConfig,
   parseBaiduResults,
   parseBingResults,
   parseDuckDuckGoResults,
   parseSearxngResponse,
   parseTavilyResponse,
+  resolveSearchConfig,
 } from "../../.myagent/tools/web-search.js";
 
 test("Bing 解析：b_algo 块提取标题/链接/摘要并解码重定向", () => {
@@ -89,41 +86,45 @@ test("Tavily 空响应与非数组 results 返回空数组", () => {
   assert.deepEqual(parseTavilyResponse({ results: "oops" }), []);
 });
 
-test("loadSearchConfig：环境变量优先，plugins.json 项目层覆盖全局层", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-searchcfg-"));
-  const home = path.join(root, "home");
-  const project = path.join(root, "project");
-  await mkdir(path.join(home, ".myagent"), { recursive: true });
-  await mkdir(path.join(project, ".myagent"), { recursive: true });
+test("resolveSearchConfig：环境变量优先，plugins.json 段次之", () => {
+  // 无配置 → undefined
+  assert.equal(resolveSearchConfig(undefined), undefined);
+  assert.equal(resolveSearchConfig({}), undefined);
 
-  try {
-    // 无任何配置 → undefined
-    assert.equal(await loadSearchConfig(home, project), undefined);
+  // 环境变量优先（loader 注入 config.env）
+  const withEnv = resolveSearchConfig({
+    section: { provider: "searxng", baseUrl: "http://x", apiToken: "t" },
+    env: { tavilyKey: "tvly-env-key" },
+  });
+  assert.equal(withEnv?.provider, "tavily");
+  assert.equal(withEnv?.apiKey, "tvly-env-key");
 
-    // 环境变量优先
-    process.env.TAVILY_API_KEY = "tvly-env-key";
-    assert.equal((await loadSearchConfig(home, project))?.apiKey, "tvly-env-key");
-    delete process.env.TAVILY_API_KEY;
+  // plugins.json 段：tavily
+  const tavily = resolveSearchConfig({
+    section: { provider: "tavily", apiKey: "tvly-section" },
+  });
+  assert.equal(tavily?.provider, "tavily");
+  assert.equal(tavily?.apiKey, "tvly-section");
 
-    // 全局层配置
-    await writeFile(
-      path.join(home, ".myagent", "plugins.json"),
-      JSON.stringify({ webSearch: { provider: "tavily", apiKey: "tvly-global" } }),
-      "utf8",
-    );
-    assert.equal((await loadSearchConfig(home, project))?.apiKey, "tvly-global");
+  // plugins.json 段：searxng（baseUrl + apiToken）
+  const searxng = resolveSearchConfig({
+    section: {
+      provider: "searxng",
+      baseUrl: "http://127.0.0.1:8080/",
+      apiToken: "local-token",
+    },
+  });
+  assert.equal(searxng?.provider, "searxng");
+  assert.equal(searxng?.baseUrl, "http://127.0.0.1:8080/");
+  assert.equal(searxng?.apiToken, "local-token");
 
-    // 项目层覆盖全局层
-    await writeFile(
-      path.join(project, ".myagent", "plugins.json"),
-      JSON.stringify({ webSearch: { apiKey: "tvly-project" } }),
-      "utf8",
-    );
-    assert.equal((await loadSearchConfig(home, project))?.apiKey, "tvly-project");
-  } finally {
-    delete process.env.TAVILY_API_KEY;
-    await rm(root, { recursive: true, force: true });
-  }
+  // searxng 缺 baseUrl → 无配置（不误判为 tavily）
+  assert.equal(
+    resolveSearchConfig({ section: { provider: "searxng", apiToken: "x" } }),
+    undefined,
+  );
+  // section 缺失 → 无配置
+  assert.equal(resolveSearchConfig({ env: {} }), undefined);
 });
 
 test("SearXNG 响应解析：content 字段映射为 snippet，过滤缺 title/url 条目", () => {
@@ -148,47 +149,6 @@ test("SearXNG 响应解析：content 字段映射为 snippet，过滤缺 title/u
   assert.equal(results[0]!.url, "https://www.typescriptlang.org/");
   assert.match(results[0]!.snippet, /syntax for types/);
   assert.equal(results[1]!.snippet, "旧字段", "无 content 时回退 snippet 字段");
-});
-
-test("loadSearchConfig：searxng provider 读取 baseUrl 与 apiToken", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-searchcfg-"));
-  const home = path.join(root, "home");
-  const project = path.join(root, "project");
-  await mkdir(path.join(home, ".myagent"), { recursive: true });
-  await mkdir(path.join(project, ".myagent"), { recursive: true });
-  try {
-    // 全局 tavily + 项目 searxng：项目层覆盖
-    await writeFile(
-      path.join(home, ".myagent", "plugins.json"),
-      JSON.stringify({ webSearch: { provider: "tavily", apiKey: "tvly-global" } }),
-      "utf8",
-    );
-    await writeFile(
-      path.join(project, ".myagent", "plugins.json"),
-      JSON.stringify({
-        webSearch: {
-          provider: "searxng",
-          baseUrl: "http://127.0.0.1:8080/",
-          apiToken: "local-token",
-        },
-      }),
-      "utf8",
-    );
-    const config = await loadSearchConfig(home, project);
-    assert.equal(config?.provider, "searxng");
-    assert.equal(config?.baseUrl, "http://127.0.0.1:8080/");
-    assert.equal(config?.apiToken, "local-token");
-
-    // searxng 缺 baseUrl → 无配置（不误判为 tavily）
-    await writeFile(
-      path.join(project, ".myagent", "plugins.json"),
-      JSON.stringify({ webSearch: { provider: "searxng", apiToken: "x" } }),
-      "utf8",
-    );
-    assert.equal(await loadSearchConfig(home, project), undefined);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
 });
 
 test("深度模式 attachPageContents：成功抓取、失败跳过、正文截断、数量限制", async () => {

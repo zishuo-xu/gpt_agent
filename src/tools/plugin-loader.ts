@@ -1,9 +1,10 @@
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   isValidPluginToolName,
   type PluginTool,
+  type PluginToolRuntimeConfig,
   type PluginToolRegistry,
 } from "../shared/plugin-tool.js";
 import { isToolName } from "../shared/tool-names.js";
@@ -15,7 +16,9 @@ import { isToolName } from "../shared/tool-names.js";
  * - 运行时 import()：dev/tsx 进程可直接加载 .ts；构建产物（无 tsx loader）下
  *   .ts 会失败，建议用 .mjs（原生 ESM 不依赖 loader）；
  * - 单个文件失败（import 错误、缺 name/description/run、与内置工具重名）跳过并
- *   记入 errors，不阻塞会话。
+ *   记入 errors，不阻塞会话；
+ * - 声明式配置（PluginTool.config）：loader 读取 plugins.json（两层浅合并）与
+ *   环境变量，注册时闭包注入 run 第三参（config.section / config.env）。
  */
 
 export interface PluginLoadReport {
@@ -24,6 +27,55 @@ export interface PluginLoadReport {
 }
 
 const PLUGIN_FILE_RE = /\.(ts|mjs|js)$/i;
+
+/** 读取两层 plugins.json（全局 + 项目，项目层覆盖），缺失返回空对象 */
+export async function readPluginsJson(
+  homeDir: string,
+  cwd: string,
+): Promise<Record<string, unknown>> {
+  let merged: Record<string, unknown> = {};
+  for (const file of [
+    path.join(homeDir, ".myagent", "plugins.json"),
+    path.join(cwd, ".myagent", "plugins.json"),
+  ]) {
+    try {
+      const raw = JSON.parse(await readFile(file, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      merged = { ...merged, ...raw };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.error(
+          `[plugins] 读取 ${file} 失败：${(error as Error).message}`,
+        );
+      }
+    }
+  }
+  return merged;
+}
+
+/** 按插件声明解析运行时配置（plugins.json 段 + 环境变量） */
+export function resolvePluginConfig(
+  tool: Pick<PluginTool, "config">,
+  pluginsJson: Record<string, unknown>,
+): PluginToolRuntimeConfig | undefined {
+  const decl = tool.config;
+  if (!decl) return undefined;
+  const runtime: PluginToolRuntimeConfig = {};
+  if (decl.section) {
+    runtime.section = pluginsJson[decl.section];
+  }
+  if (decl.env) {
+    const env: Record<string, string> = {};
+    for (const [envName, paramName] of Object.entries(decl.env)) {
+      const value = process.env[envName]?.trim();
+      if (value) env[paramName] = value;
+    }
+    runtime.env = env;
+  }
+  return runtime;
+}
 
 async function collectToolFiles(dir: string): Promise<string[]> {
   try {
@@ -74,6 +126,8 @@ export async function loadPluginTools(
   registry: PluginToolRegistry,
 ): Promise<PluginLoadReport> {
   const report: PluginLoadReport = { loaded: [], errors: [] };
+  // 声明式配置：plugins.json 读一次，供全部插件解析
+  const pluginsJson = await readPluginsJson(homeDir, cwd);
   // 全局层先注册，项目层后注册覆盖同名（与 config mergeLayers 语义一致）
   for (const dir of [
     path.join(homeDir, ".myagent", "tools"),
@@ -82,7 +136,17 @@ export async function loadPluginTools(
     for (const file of await collectToolFiles(dir)) {
       try {
         const tool = await loadOne(file);
-        registry.register(tool, file);
+        const runtimeConfig = resolvePluginConfig(tool, pluginsJson);
+        registry.register(
+          runtimeConfig
+            ? {
+                ...tool,
+                run: (args, signal) =>
+                  tool.run(args, signal, runtimeConfig),
+              }
+            : tool,
+          file,
+        );
         // 同名覆盖：移除此前（全局层）的同名条目，保持报告与实际注册一致
         const previous = report.loaded.findIndex(
           (item) => item.name === tool.name,

@@ -26,6 +26,22 @@ export interface PluginToolResult {
   isError?: boolean;
 }
 
+/** 插件声明式配置（可选）：loader 在注册时读取 plugins.json 与环境变量并注入 run 第三参 */
+export interface PluginToolConfigDecl {
+  /** plugins.json 顶层段名；两层合并后的整段对象注入 run 的 config.section */
+  section?: string;
+  /** 环境变量注入：环境变量名 → run 接收的参数名 */
+  env?: Record<string, string>;
+}
+
+/** loader 解析后的运行时配置（run 第三参） */
+export interface PluginToolRuntimeConfig {
+  /** plugins.json 中声明段的合并值（未配置或段缺失时为 undefined） */
+  section?: unknown;
+  /** 声明声明的环境变量值（变量未设置时缺省） */
+  env?: Record<string, string>;
+}
+
 export interface PluginTool {
   /** 全局唯一工具名（建议 PascalCase；不得与内置工具重名） */
   name: string;
@@ -33,9 +49,12 @@ export interface PluginTool {
   description: string;
   /** JSON Schema（与内置工具 inputSchema 同构，参数经统一校验） */
   inputSchema: Record<string, unknown>;
+  /** 声明式配置（可选）；无需配置的插件可不声明，run 第三参为 undefined */
+  config?: PluginToolConfigDecl;
   run(
     args: Record<string, unknown>,
     signal: AbortSignal,
+    config?: PluginToolRuntimeConfig,
   ): Promise<PluginToolResult>;
 }
 

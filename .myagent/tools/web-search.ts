@@ -1,23 +1,17 @@
-import { readFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { definePluginTool } from "../../src/shared/plugin-tool.js";
+import { definePluginTool, type PluginToolRuntimeConfig } from "../../src/shared/plugin-tool.js";
 import { htmlToText } from "../../src/tools/html-text.js";
 import { fetchPageText } from "./web-fetch.js";
 
 /**
  * WebSearch 示例插件：网络搜索。
  *
- * 两级策略（混合）：
- * 1) API 模式（推荐）：配置 provider 后走结构化搜索，返回 title/url/content
- *    （页面正文），agent 一次调用即拿到素材，无需再 WebFetch。配置：
- *    ~/.myagent/plugins.json / <cwd>/.myagent/plugins.json（项目覆盖全局）：
- *    - Tavily（云服务，需 key）：{ "webSearch": { "provider": "tavily", "apiKey": "tvly-..." } }
- *    - SearXNG（自托管元搜索，JSON API）：{ "webSearch": { "provider": "searxng",
- *      "baseUrl": "http://127.0.0.1:8080", "apiToken": "..." } }
- *    环境变量 TAVILY_API_KEY 兼容（等价于 tavily provider）。
- * 2) 降级模式：无配置或 API 失败时自动顺延 HTML 引擎链
- *    （bing → duckduckgo → baidu），免配置但依赖页面结构。
+ * 声明式配置（config: { section: "webSearch", env: { TAVILY_API_KEY: "tavilyKey" } }），
+ * 由插件 loader 统一读取 plugins.json（全局 + 项目两层合并）与环境变量后注入 run 第三参：
+ * - SearXNG（自托管元搜索，JSON API）：{ "webSearch": { "provider": "searxng",
+ *   "baseUrl": "http://127.0.0.1:8080", "apiToken": "..." } }
+ * - Tavily（云服务，需 key）：{ "webSearch": { "provider": "tavily", "apiKey": "tvly-..." } }
+ *   或环境变量 TAVILY_API_KEY（等价于 tavily provider）
+ * 无配置或 API 失败时自动顺延 HTML 引擎链（bing → duckduckgo → baidu）。
  *
  * 注意：搜索引擎无公开稳定 HTML 接口，降级解析可能随页面结构变化失效；
  * 有 provider 时优先 API，可降低单点风险。
@@ -42,32 +36,13 @@ interface SearchConfig {
   apiToken?: string;
 }
 
-/** 读取搜索配置：环境变量优先，其次 plugins.json（项目层覆盖全局层） */
-export async function loadSearchConfig(
-  homeDir = os.homedir(),
-  cwd = process.cwd(),
-): Promise<SearchConfig | undefined> {
-  const envKey = process.env.TAVILY_API_KEY?.trim();
+/** 从 loader 注入的运行时配置解析搜索配置（环境变量优先，其次 plugins.json 段） */
+export function resolveSearchConfig(
+  config?: PluginToolRuntimeConfig,
+): SearchConfig | undefined {
+  const envKey = config?.env?.tavilyKey?.trim();
   if (envKey) return { provider: "tavily", apiKey: envKey };
-  const layers = [
-    path.join(homeDir, ".myagent", "plugins.json"),
-    path.join(cwd, ".myagent", "plugins.json"),
-  ];
-  let merged: Record<string, unknown> = {};
-  for (const file of layers) {
-    try {
-      const raw = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
-      // 浅合并（对象层覆盖），项目层在后
-      merged = { ...merged, ...raw };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.error(`[plugins] 读取 ${file} 失败：${(error as Error).message}`);
-      }
-    }
-  }
-  const section = merged.webSearch as
-    | Record<string, unknown>
-    | undefined;
+  const section = config?.section as Record<string, unknown> | undefined;
   if (!section || typeof section !== "object") return undefined;
   if (section.provider === "searxng") {
     if (typeof section.baseUrl === "string" && section.baseUrl.trim()) {
@@ -400,6 +375,12 @@ export default definePluginTool({
     "Search the web and return ranked results with page content. " +
     "By default fetches the top 2 result pages (depth mode) so content is " +
     "ready to use without a separate WebFetch call. Set fetch_pages=0 for snippets only.",
+  // 声明式配置：loader 读取 plugins.json 的 webSearch 段 + TAVILY_API_KEY 环境变量，
+  // 经 run 第三参注入（resolveSearchConfig 解析）
+  config: {
+    section: "webSearch",
+    env: { TAVILY_API_KEY: "tavilyKey" },
+  },
   inputSchema: {
     type: "object",
     properties: {
@@ -428,7 +409,7 @@ export default definePluginTool({
     required: ["query"],
     additionalProperties: false,
   },
-  async run(args, signal) {
+  async run(args, signal, runtimeConfig) {
     const query = String(args.query ?? "").trim();
     if (!query) {
       return {
@@ -451,7 +432,7 @@ export default definePluginTool({
 
     // API 模式：显式指定 html 引擎或 engine 非 auto 时不走 API
     const config = engineArg === "auto" || engineArg === "html"
-      ? await loadSearchConfig()
+      ? resolveSearchConfig(runtimeConfig)
       : undefined;
     if (config) {
       try {
