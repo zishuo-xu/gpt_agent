@@ -27,7 +27,7 @@ MyAgent 支持以插件形式引入自定义工具，参考 Pi 扩展系统的 t
 
 ```ts
 // .myagent/tools/web-fetch.ts
-import { definePluginTool } from "../../src/shared/plugin-tool.js";
+import { definePluginTool } from "myagent:protocol";
 
 export default definePluginTool({
   name: "WebFetch",                       // 唯一；字母开头，仅字母/数字/_/-；不得与内置工具重名
@@ -54,6 +54,26 @@ export default definePluginTool({
 - **超时护栏**：run 默认 60s 限时（`DEFAULT_PLUGIN_TIMEOUT_MS`，与 MCP 调用超时一致），超时返回失败结果（`summary` 含"执行超时"）**不抛**，不卡死 agent 循环；插件可声明 `timeoutMs: 30_000`（毫秒）覆盖，`<= 0` 关闭超时。挂起的 run 无法强制取消，超时后其后续 settle 被静默忽略（无 unhandled rejection）
 - 结果字段与内置工具 `ToolExecutionResult` 对齐：`summary` 必填，`output`/`details`/`isError` 可选
 - `details` 任意键值对自动渲染到 UI 的详情网格（键名 `diff` 有专门的高亮渲染；`code`/`durationMs` 有退出码/时长着色）
+
+### 引用项目公共代码（稳定 specifier）
+
+插件需要项目公共模块时，用稳定 specifier（loader 统一解析到插件所在项目根的 `src/*.ts`），**不要写 `../../src/...` 相对路径**（依赖目录结构，且 dist 部署下行为不一）：
+
+```ts
+import { definePluginTool } from "myagent:protocol";   // 插件协议（协议接口 + 注册表）
+import { htmlToMainText } from "myagent:html-text";    // HTML → 可见文本
+import { abortableSleep } from "myagent:sleep";        // 可中断延时（配合 signal）
+```
+
+白名单（未知 specifier 报「未知 myagent specifier」错误并计入插件面板加载错误）：
+
+| specifier | 解析目标 |
+| --- | --- |
+| `myagent:protocol` | `src/shared/plugin-tool.ts` |
+| `myagent:html-text` | `src/tools/html-text.ts` |
+| `myagent:sleep` | `src/utils/sleep.ts` |
+
+兼容性：旧写法（`../../src/...` 相对路径）仍可加载，但新插件一律使用 `myagent:*`。直接 import 插件源文件的测试进程需先 `await ensureSpecifierResolver()` 再加载（见 `src/tools/web-search.test.ts`）。
 
 ### 声明式配置（可选）
 
