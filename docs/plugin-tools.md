@@ -75,6 +75,10 @@ import { abortableSleep } from "myagent:sleep";        // 可中断延时（配�
 
 兼容性：旧写法（`../../src/...` 相对路径）仍可加载，但新插件一律使用 `myagent:*`。直接 import 插件源文件的测试进程需先 `await ensureSpecifierResolver()` 再加载（见 `src/tools/web-search.test.ts`）。
 
+边界：
+- `myagent:*` 只适用于**项目层**插件（`<cwd>/.myagent/tools/`，cwd 项目根有 `package.json`）；全局层（`~/.myagent/tools/`）没有归属项目，用 `myagent:*` 会报模块不存在——全局插件请用自包含写法或旧相对路径；
+- 项目根无 `package.json` 时插件可能被按 CJS 加载，`require()` 不经 ESM resolve hook——`myagent:*` 需要项目为 ESM（`"type": "module"`）。
+
 ### 声明式配置（可选）
 
 插件需要配置（token、服务地址等）时，声明 `config` 段即可，**无需自实现配置读取**——loader 在加载时统一读取 `plugins.json`（全局 + 项目两层浅合并）与环境变量，注册时闭包注入 run 第三参：
