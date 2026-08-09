@@ -136,4 +136,48 @@ describe("记忆面板增强：时间线 diff 展开与会话跳转", () => {
     });
     assert.equal(window.location.hash, "#sessions/s1");
   });
+
+  it("预览/编辑切换：预览渲染 markdown 且不丢草稿", async () => {
+    await render();
+    // 找到编辑器 textarea 并输入 markdown 内容
+    const textarea = container.querySelector(".memory-textarea") as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(textarea, "## 标题\n\n- 列表项\n```ts\nconst a = 1;\n```");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    // 切到预览
+    const previewButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent?.trim() === "预览");
+    assert.ok(previewButton, "预览按钮存在");
+    await act(async () => {
+      previewButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    assert.ok(
+      container.querySelector(".memory-preview"),
+      "预览容器渲染",
+    );
+    const previewText = container.querySelector(".memory-preview")?.textContent ?? "";
+    assert.match(previewText, /标题/);
+    assert.match(previewText, /列表项/);
+    assert.ok(
+      container.querySelector(".memory-preview pre.code-block"),
+      "预览中代码块渲染",
+    );
+    // 切回编辑：草稿不丢
+    const editButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent?.trim() === "编辑");
+    assert.ok(editButton, "切回编辑按钮存在");
+    await act(async () => {
+      editButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    assert.ok(container.querySelector(".memory-textarea"), "编辑器恢复");
+    assert.equal(
+      (container.querySelector(".memory-textarea") as HTMLTextAreaElement).value,
+      "## 标题\n\n- 列表项\n```ts\nconst a = 1;\n```",
+    );
+  });
 });

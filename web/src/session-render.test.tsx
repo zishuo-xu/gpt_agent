@@ -83,6 +83,19 @@ describe("RichText（markdown 渲染）", () => {
     assert.equal(links[0]?.getAttribute("href"), "https://github.com");
     assert.equal(links[0]?.textContent, "GitHub");
   });
+
+  it("fenced code block 渲染为 pre.code-block（语言标记 + 多行 + 空行保留 + 后续内容不吞）", async () => {
+    const container = await render(
+      "说明：\n```ts\nconst a = 1;\n\nconsole.log(a);\n```\n之后正常段落",
+    );
+    const pre = container.querySelector(".rich-text pre.code-block");
+    assert.ok(pre, "代码块应渲染为 pre.code-block");
+    assert.equal(pre!.getAttribute("data-lang"), "ts");
+    assert.match(pre!.textContent ?? "", /const a = 1/);
+    assert.match(pre!.textContent ?? "", /console\.log\(a\)/);
+    // 代码块之后的内容正常渲染（未吞掉后续行）
+    assert.match(container.textContent ?? "", /之后正常段落/);
+  });
 });
 
 describe("ItemCard（会话展示组件全分支）", () => {
@@ -291,3 +304,5 @@ describe("ItemCard（会话展示组件全分支）", () => {
     assert.ok(render.formatTime("2026-08-09T10:00:00.000Z").length > 0);
   });
 });
+
+

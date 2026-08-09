@@ -269,3 +269,39 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Markdown 预览模式（记忆面板增强） */
+.memory-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.memory-preview-toggle {
+  padding: 4px 12px;
+  border: 1px solid #3d4c63;
+  border-radius: 4px;
+  background: none;
+  color: #8f9aaa;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.memory-preview-toggle:hover {
+  border-color: #6f93d9;
+  color: #e3e7ed;
+}
+
+.memory-preview {
+  min-height: 320px;
+  padding: 12px 14px;
+  border: 1px solid #2a3442;
+  border-radius: 6px;
+  background: #10151c;
+  overflow: auto;
+}
+
+.memory-preview-empty {
+  color: #556071;
+  font-size: 12px;
+}

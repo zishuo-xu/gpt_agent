@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { SettingsSidebar } from "./SettingsSidebar";
-import { DiffOrOutput } from "./session-render";
+import { DiffOrOutput, RichText } from "./session-render";
 import type {
   MemoryDocument,
   MemoryDocumentId,
@@ -20,6 +20,7 @@ export function MemoryApp() {
   const [selectedId, setSelectedId] =
     useState<MemoryDocumentId>("preferences");
   const [draft, setDraft] = useState("");
+  const [preview, setPreview] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [expandedHistory, setExpandedHistory] = useState<
@@ -206,32 +207,50 @@ export function MemoryApp() {
                     <h2>{selected.label}</h2>
                     <code>{selected.path}</code>
                   </div>
-                  <button
-                    className="memory-clear-button"
-                    disabled={!draft}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `确认清空 ${selected.label}？该操作会立即影响后续会话。`,
-                        )
-                      ) {
-                        void save("");
-                      }
-                    }}
-                  >
-                    清空文档
-                  </button>
+                  <div className="memory-editor-actions">
+                    <button
+                      className="memory-preview-toggle"
+                      onClick={() => setPreview((value) => !value)}
+                    >
+                      {preview ? "编辑" : "预览"}
+                    </button>
+                    <button
+                      className="memory-clear-button"
+                      disabled={!draft}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `确认清空 ${selected.label}？该操作会立即影响后续会话。`,
+                          )
+                        ) {
+                          void save("");
+                        }
+                      }}
+                    >
+                      清空文档
+                    </button>
+                  </div>
                 </div>
-                <textarea
-                  className="memory-textarea"
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder={[
-                    "# 稳定记忆",
-                    "",
-                    "- [2026-07-30] 已验证的项目约定或踩坑",
-                  ].join("\n")}
-                />
+                {preview ? (
+                  <div className="memory-preview">
+                    {draft.trim() ? (
+                      <RichText text={draft} />
+                    ) : (
+                      <p className="memory-preview-empty">空文档（预览无内容）</p>
+                    )}
+                  </div>
+                ) : (
+                  <textarea
+                    className="memory-textarea"
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder={[
+                      "# 稳定记忆",
+                      "",
+                      "- [2026-07-30] 已验证的项目约定或踩坑",
+                    ].join("\n")}
+                  />
+                )}
                 <div className="memory-timeline">
                   <h3>它学到了什么</h3>
                   {timeline.filter(
