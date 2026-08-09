@@ -633,6 +633,8 @@ export class AgentSession {
     const previousMode = this.#permissions.mode;
     const previousRules = this.#permissions.rules();
     const previousApprovalTimeout = this.#approvalTimeoutMs;
+    // 回滚基线：只撤销任务开始之后的编辑（任务前的交互编辑是用户工作，硬停止不得误删）
+    const journalBaseline = this.#tools.files.journal.entries().length;
     // 续跑沿用原 taskId（事件流配对 run_finished）；新任务生成新 id
     const taskBox = new TaskBox(
       options,
@@ -707,11 +709,12 @@ export class AgentSession {
       reason = "error";
       throw error;
     } finally {
-      // 优雅终止：硬停止时自动回滚 Agent 自己的编辑
+      // 优雅终止：硬停止时自动回滚 Agent 自己的编辑（仅任务期条目，
+      // 任务前交互编辑保留；哈希守卫仍防误回滚被后续改动过的文件）
       if (this.#taskHardStopped) {
         const journal = this.#tools.files.journal;
         let rolledBack = 0;
-        while (journal.entries().length > 0) {
+        while (journal.entries().length > journalBaseline) {
           const ok = await journal.rollbackLast().catch(() => false);
           if (!ok) break;
           rolledBack += 1;
