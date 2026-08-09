@@ -201,6 +201,15 @@ export class AgentSessionManager {
   }
 
   /**
+   * 启动时主动加载插件（幂等）：Web 服务 restore 后调用，让插件面板
+   * 立即显示 loaded/errors，而非等到首个模型请求才惰性填充——消除
+   * "无声失败"（dist 部署 + 未跑会话时面板空显示且无错误）。
+   */
+  async ensurePluginsLoaded(): Promise<void> {
+    await this.#ensurePlugins();
+  }
+
+  /**
    * 单插件启用/禁用：registry 切换 + 持久化到全局 plugins.json（pluginDisabled 段），
    * 重启/reload 后保留。返回 false 表示插件未加载。
    */

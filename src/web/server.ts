@@ -43,6 +43,18 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
   await sessionManager.restore();
   timingMark("restore");
 
+  // 启动即加载插件（幂等）：插件面板立即可见 loaded/errors，不等到首个模型请求。
+  // 失败不阻塞启动——加载错误进入 pluginStatus().errors 由面板展示。
+  try {
+    await sessionManager.ensurePluginsLoaded();
+  } catch (error) {
+    process.stderr.write(
+      `[plugins] 启动加载失败（面板可见错误详情）：${
+        error instanceof Error ? error.message : String(error)
+      }\n`,
+    );
+  }
+
   // 定时 /run 调度器：与 app 共享（ticker + API 同一实例），默认项目启动即加载
   const schedulerHub = new SchedulerHub(
     path.join(configService.homeDir, ".myagent"),
