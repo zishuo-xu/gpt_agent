@@ -12,3 +12,6 @@ test-todo-api/
 test-results/
 .zcode/
 gui-test-screenshots/
+
+# 记忆写时留档（本地产物，不进版本库）
+.myagent/memory/.history/

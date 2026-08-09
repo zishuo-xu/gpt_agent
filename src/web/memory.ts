@@ -209,7 +209,7 @@ export class MemoryHistoryError extends Error {
   }
 }
 
-function memoryDefinitions(cwd: string, homeDir: string) {
+export function memoryDefinitions(cwd: string, homeDir: string) {
   return [
     {
       id: "preferences" as const,

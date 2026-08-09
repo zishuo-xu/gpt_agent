@@ -8,6 +8,7 @@ import { modelErrorGuidanceText } from "../model/error-policy.js";
 import { ModelRetriesExhaustedError } from "../model/fallback-client.js";
 import type { ModelClient } from "../model/types.js";
 import { ToolExecutor } from "../tools/executor.js";
+import type { AtomicFileTools } from "../tools/atomic-file.js";
 import { AgentLoop } from "./agent-loop.js";
 import {
   AgentEventBus,
@@ -149,6 +150,8 @@ export class AgentSession {
     pricing?: Partial<
       Record<"main" | "cheap" | "explore", ModelPricing>
     >;
+    /** 文件工具实现（可注入记忆留档钩子等）；缺省新建 */
+    files?: AtomicFileTools;
   }) {
     this.id = options.id;
     this.title = options.title;
@@ -245,12 +248,13 @@ export class AgentSession {
           ...(options.subagentTimeoutMs === undefined
             ? {}
             : { timeoutMs: options.subagentTimeoutMs }),
+          ...(options.files ? { files: options.files } : {}),
         })
       : undefined;
     this.#taskRunner = taskRunner;
     this.#tools = new ToolExecutor(
       options.cwd,
-      undefined,
+      options.files,
       undefined,
       taskRunner
         ? async (args, signal) =>

@@ -9,6 +9,9 @@ import { WebSessionManager } from "./sessions.js";
 import { SchedulerHub } from "./scheduler-hub.js";
 import { ProjectRegistry } from "./project-registry.js";
 import { localDay } from "./stats.js";
+import { AtomicFileTools, EditJournal } from "../tools/atomic-file.js";
+import { MemoryHistoryKeeper } from "./memory-history.js";
+import { memoryDefinitions } from "./memory.js";
 
 export interface WebServerOptions {
   cwd: string;
@@ -39,7 +42,19 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
 
   const preferredPort = options.port ?? 3000;
   const port = await findAvailablePort(effectiveHostname, preferredPort);
-  const sessionManager = new WebSessionManager(options.cwd, configService);
+  // 记忆写时留档：工具写记忆文件前快照旧内容到 .history/（面板时间线 diff 数据源）。
+  // 仅 Web 服务注入；CLI 路径不注入（行为零变化）。
+  const memoryKeeper = new MemoryHistoryKeeper(
+    memoryDefinitions(options.cwd, configService.homeDir).map(
+      (definition) => definition.path,
+    ),
+  );
+  const sessionManager = new WebSessionManager(options.cwd, configService, {
+    files: new AtomicFileTools(new EditJournal(), {
+      snapshot: (filePath, before) =>
+        memoryKeeper.snapshot(filePath, before),
+    }),
+  });
   await sessionManager.restore();
   timingMark("restore");
 

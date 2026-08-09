@@ -28,6 +28,7 @@ import {
   loadMcpServers,
 } from "../tools/mcp-loader.js";
 import type { McpClient } from "../tools/mcp-client.js";
+import type { AtomicFileTools } from "../tools/atomic-file.js";
 import { ConversationAgentModel } from "./agent-model.js";
 import { ConfiguredModelClient } from "../model/client.js";
 import { FallbackModelClient } from "../model/fallback-client.js";
@@ -63,6 +64,8 @@ export interface AgentSessionManagerOptions {
   modelFactory?: (
     messages: ConversationMessage[],
   ) => Promise<ConversationAgentModel> | ConversationAgentModel;
+  /** 文件工具实现（可注入记忆留档钩子等）；缺省每个会话新建 */
+  files?: AtomicFileTools;
 }
 
 /** 项目级单实例写锁：O_EXCL 独占创建 + pid 记录；崩溃残留（持有者已死）自动接管 */
@@ -144,6 +147,7 @@ export class AgentSessionManager {
   readonly #modelFactory:
     | AgentSessionManagerOptions["modelFactory"]
     | undefined;
+  readonly #files: AtomicFileTools | undefined;
   readonly #sessions = new Map<string, AgentSession>();
   readonly #skipLock: boolean;
   #lockFile: string | undefined;
@@ -162,6 +166,7 @@ export class AgentSessionManager {
       options.stateDir ?? path.join(os.homedir(), ".myagent");
     this.#homeDir = options.homeDir ?? os.homedir();
     this.#modelFactory = options.modelFactory;
+    this.#files = options.files;
     this.#skipLock = options.skipLock === true;
     const projectKey = Buffer.from(this.#cwd).toString("base64url");
     this.#projectDir = path.join(
@@ -336,6 +341,7 @@ export class AgentSessionManager {
         mode:
           lastPermissionMode(records) ??
           runtimeConfig.permissions.mode,
+        ...(this.#files ? { files: this.#files } : {}),
         // 恢复当前分支链视角的消息历史（分支点之前不变，之后只含当前分支）
         model: await this.#createModel(
           conversationFrom(records, branches, branchId),
@@ -417,6 +423,7 @@ export class AgentSessionManager {
         (message ? titleFrom(message) : "新会话"),
       cwd: this.#cwd,
       mode: options.mode ?? runtimeConfig.permissions.mode,
+      ...(this.#files ? { files: this.#files } : {}),
       model: await this.#createModel(
         [],
         runtimeConfig.behavior?.crossProjectMemory !== false,

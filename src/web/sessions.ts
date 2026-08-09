@@ -11,6 +11,7 @@ import {
 import type { PermissionMode, PermissionRule } from "../core/types.js";
 import { READONLY_DENY_RULES } from "../core/permissions.js";
 import { parseRunCommand } from "../core/run-task.js";
+import type { AtomicFileTools } from "../tools/atomic-file.js";
 
 export type WebSessionEvent = AgentSessionEvent;
 export type WebSessionStatus = AgentSessionStatus;
@@ -31,12 +32,18 @@ export class WebSessionManager extends AgentSessionManager {
   constructor(
     cwd: string,
     configService: ConfigService,
-    options: { lobby?: boolean; stateDir?: string } = {},
+    options: {
+      lobby?: boolean;
+      stateDir?: string;
+      /** 文件工具实现（可注入记忆留档钩子等）；缺省每个会话新建 */
+      files?: AtomicFileTools;
+    } = {},
   ) {
     super({
       cwd,
       configService,
       ...(options.stateDir ? { stateDir: options.stateDir } : {}),
+      ...(options.files ? { files: options.files } : {}),
     });
     this.#lobby = options.lobby === true;
   }

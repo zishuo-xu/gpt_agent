@@ -6,6 +6,7 @@ import {
   ToolExecutor,
   type TaskArgs,
 } from "../tools/executor.js";
+import type { AtomicFileTools } from "../tools/atomic-file.js";
 import {
   AgentLoop,
   type AgentLoopOptions,
@@ -43,6 +44,8 @@ export interface TaskRunnerOptions {
   steerLoops?: Set<AgentLoop>;
   /** 单次运行超时（ms）；超时软打断子代理并返回已收集结果。缺省 15 分钟 */
   timeoutMs?: number;
+  /** 文件工具实现（可注入记忆留档钩子等）；缺省新建 */
+  files?: AtomicFileTools;
 }
 
 /** 子代理默认超时：15 分钟（无界探索会拖住主任务，参照生产测试 P5 观察） */
@@ -67,6 +70,7 @@ export class TaskRunner {
   readonly #approve: ApprovalHandler | undefined;
   readonly #steerLoops: Set<AgentLoop>;
   readonly #timeoutMs: number;
+  readonly #files: AtomicFileTools | undefined;
 
   constructor(options: TaskRunnerOptions) {
     this.#cwd = options.cwd;
@@ -80,6 +84,7 @@ export class TaskRunner {
     this.#recordTrace = options.recordTrace;
     this.#steerLoops = options.steerLoops ?? new Set();
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS;
+    this.#files = options.files;
   }
 
   /** 配置变更后替换子代理模型客户端 */
@@ -188,7 +193,7 @@ export class TaskRunner {
         : undefined;
     const tools = new ToolExecutor(
       this.#cwd,
-      undefined,
+      this.#files,
       undefined,
       nestedRunner
         ? async (taskArgs, childSignal) =>
