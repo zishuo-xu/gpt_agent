@@ -508,9 +508,9 @@ function normalizeProvider(provider: ModelProviderConfig): ModelProviderConfig {
     models: Array.isArray(provider.models)
       ? provider.models.map(String).filter(Boolean)
       : [],
-    ...(provider.thinking === undefined
-      ? {}
-      : { thinking: provider.thinking === true }),
+    // thinking 默认开启（思考质量优先）；显式 false 关闭。模型不支持时
+    // 客户端自动降级为不带 thinking 重试，默认开不构成兼容性风险
+    thinking: provider.thinking !== false,
     ...(provider.thinkingBudgetTokens === undefined
       ? {}
       : {

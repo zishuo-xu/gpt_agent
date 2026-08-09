@@ -19,8 +19,8 @@ export interface ModelProviderConfig {
   apiKey: string;
   models: string[];
   /** 启用推理内容（Anthropic extended thinking / OpenAI reasoning）。
-      默认关（thinking 增加 output token 成本）；开启后同供应商保留
-      thinking 块，跨供应商切换时降级为普通文本。 */
+      默认开启（思考质量优先，成本次之）；显式 false 关闭。模型不支持
+      extended thinking 时客户端自动降级为不带 thinking 重试。 */
   thinking?: boolean;
   /** thinking 预算（Anthropic budget_tokens，默认 2048） */
   thinkingBudgetTokens?: number;
@@ -218,6 +218,7 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
       baseUrl: "https://api.anthropic.com",
       apiKey: "",
       models: ["claude-sonnet-4-5", "claude-haiku-4-5"],
+      thinking: true,
     },
   ],
   models: {

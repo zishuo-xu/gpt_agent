@@ -133,22 +133,42 @@ export class ConfiguredModelClient implements ModelClient {
     };
   }
 
+  /** extended thinking 请求参数（provider.thinking 默认开；显式 false 关闭） */
+  #anthropicThinking(): { type: "enabled"; budget_tokens: number } | undefined {
+    if (this.#provider.thinking === false) return undefined;
+    return {
+      type: "enabled",
+      budget_tokens:
+        this.#provider.thinkingBudgetTokens ?? DEFAULT_THINKING_BUDGET,
+    };
+  }
+
+  /**
+   * Anthropic complete：thinking 默认开启；若模型不支持 extended thinking
+   * （400 且错误含 thinking），自动降级不带 thinking 重试一次——换模型不卡死。
+   */
   async #completeAnthropic(request: CompletionRequest): Promise<ModelResponse> {
+    const thinking = this.#anthropicThinking();
+    try {
+      return await this.#completeAnthropicOnce(request, thinking);
+    } catch (error) {
+      if (thinking && isThinkingUnsupported(error)) {
+        return await this.#completeAnthropicOnce(request, undefined);
+      }
+      throw error;
+    }
+  }
+
+  async #completeAnthropicOnce(
+    request: CompletionRequest,
+    thinking: { type: "enabled"; budget_tokens: number } | undefined,
+  ): Promise<ModelResponse> {
     const tools = request.tools;
     // 参照 Pi cacheRetention："none" 时省略 cache_control，不写缓存（摘要等一次性请求）
     const cacheControl =
       request.cacheRetention === "none"
         ? undefined
         : { type: "ephemeral" as const };
-    // extended thinking：provider.thinking 开启时请求携带 thinking 参数
-    const thinking =
-      this.#provider.thinking === true
-        ? {
-            type: "enabled" as const,
-            budget_tokens:
-              this.#provider.thinkingBudgetTokens ?? DEFAULT_THINKING_BUDGET,
-          }
-        : undefined;
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "messages"),
       {
@@ -319,20 +339,33 @@ export class ConfiguredModelClient implements ModelClient {
     };
   }
 
+  /**
+   * Anthropic stream：thinking 默认开启；模型不支持 extended thinking 时
+   * 降级不带 thinking 重试一次（400 在 fetch 阶段抛出，尚未 yield 任何
+   * chunk，重试不重复输出）。
+   */
   async *#streamAnthropic(request: CompletionRequest): AsyncIterable<StreamChunk> {
+    const thinking = this.#anthropicThinking();
+    try {
+      yield* this.#streamAnthropicOnce(request, thinking);
+    } catch (error) {
+      if (thinking && isThinkingUnsupported(error)) {
+        yield* this.#streamAnthropicOnce(request, undefined);
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async *#streamAnthropicOnce(
+    request: CompletionRequest,
+    thinking: { type: "enabled"; budget_tokens: number } | undefined,
+  ): AsyncIterable<StreamChunk> {
     const tools = request.tools;
     const cacheControl =
       request.cacheRetention === "none"
         ? undefined
         : { type: "ephemeral" as const };
-    const thinking =
-      this.#provider.thinking === true
-        ? {
-            type: "enabled" as const,
-            budget_tokens:
-              this.#provider.thinkingBudgetTokens ?? DEFAULT_THINKING_BUDGET,
-          }
-        : undefined;
     const response = await this.#fetcher(
       appendEndpoint(this.#provider.baseUrl, "messages"),
       {
@@ -609,6 +642,15 @@ async function parseJsonResponse(
 }
 
 /** 拼接供应商端点：已含 endpoint 原样返回；已以 /v1 结尾直接追加；否则补 /v1 前缀 */
+/** 400 且错误信息含 thinking：模型不支持 extended thinking 的典型信号 */
+function isThinkingUnsupported(error: unknown): boolean {
+  return (
+    error instanceof ModelHttpError &&
+    error.status === 400 &&
+    /thinking/i.test(error.message)
+  );
+}
+
 export function appendEndpoint(baseUrl: string, endpoint: string): string {
   const normalized = baseUrl.replace(/\/+$/, "");
   if (normalized.endsWith(`/${endpoint}`)) return normalized;

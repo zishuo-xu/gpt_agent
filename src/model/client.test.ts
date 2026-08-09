@@ -816,10 +816,10 @@ test("Anthropic thinking：开启时请求含 thinking 参数，响应解析 thi
   assert.equal(result.toolCalls.length, 1);
 });
 
-test("Anthropic thinking：未开启时请求不含 thinking 参数，历史 thinking 降级为文本", async () => {
+test("Anthropic thinking：显式关闭时请求不含 thinking 参数，历史 thinking 降级为文本", async () => {
   let requestBody: Record<string, any> = {};
   const client = new ConfiguredModelClient(
-    provider("anthropic"),
+    { ...provider("anthropic"), thinking: false },
     "test-model",
     async (_input, init) => {
       requestBody = JSON.parse(String(init?.body));
@@ -846,7 +846,7 @@ test("Anthropic thinking：未开启时请求不含 thinking 参数，历史 thi
     signal: new AbortController().signal,
     tools: [],
   });
-  assert.equal(requestBody.thinking, undefined, "未开启时请求不含 thinking 参数");
+  assert.equal(requestBody.thinking, undefined, "显式关闭时请求不含 thinking 参数");
   const assistant = requestBody.messages[0];
   assert.deepEqual(
     assistant.content,
@@ -983,4 +983,126 @@ test("Anthropic 流式：thinking_delta 累积为 thinking", async () => {
   assert.deepEqual(chunks, ["答案"], "流式只推送 text_delta");
   assert.equal(finalResponse.thinking, "推理中继续推理", "thinking_delta 累积");
   assert.equal(finalResponse.text, "答案");
+});
+
+test("Anthropic thinking：默认开启（未显式配置即携带 thinking 参数）", async () => {
+  let requestBody: Record<string, any> = {};
+  const client = new ConfiguredModelClient(
+    provider("anthropic"), // 未设置 thinking 字段 → 默认开启
+    "test-model",
+    async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } }),
+        { status: 200 },
+      );
+    },
+  );
+  await client.complete({
+    system: "system",
+    messages: [{ role: "user", content: "hi" }],
+    signal: new AbortController().signal,
+    tools: [],
+  });
+  assert.deepEqual(requestBody.thinking, { type: "enabled", budget_tokens: 2048 }, "默认开启携带 thinking 参数");
+});
+
+test("Anthropic thinking：模型不支持（400 含 thinking）自动降级不带 thinking 重试", async () => {
+  let calls = 0;
+  const client = new ConfiguredModelClient(
+    provider("anthropic"), // 默认开启
+    "test-model",
+    async (_input, init) => {
+      calls += 1;
+      const body = JSON.parse(String(init?.body));
+      if (calls === 1 && body.thinking) {
+        return new Response(
+          JSON.stringify({ error: { message: "This model does not support the thinking parameter" } }),
+          { status: 400 },
+        );
+      }
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } }),
+        { status: 200 },
+      );
+    },
+  );
+  const result = await client.complete({
+    system: "system",
+    messages: [{ role: "user", content: "hi" }],
+    signal: new AbortController().signal,
+    tools: [],
+  });
+  assert.equal(result.text, "ok");
+  assert.equal(calls, 2, "第一次带 thinking 400，第二次降级重试成功");
+});
+
+test("Anthropic thinking：非 thinking 相关 400 不降级重试", async () => {
+  let calls = 0;
+  const client = new ConfiguredModelClient(
+    provider("anthropic"),
+    "test-model",
+    async () => {
+      calls += 1;
+      return new Response(
+        JSON.stringify({ error: { message: "Invalid model name" } }),
+        { status: 400 },
+      );
+    },
+  );
+  await assert.rejects(
+    client.complete({
+      system: "system",
+      messages: [{ role: "user", content: "hi" }],
+      signal: new AbortController().signal,
+      tools: [],
+    }),
+    (error: unknown) => error instanceof Error && /Invalid model name/.test(error.message),
+  );
+  assert.equal(calls, 1, "非 thinking 错误只请求一次");
+});
+
+test("Anthropic 流式：模型不支持 thinking（400 含 thinking）降级重试不重复输出", async () => {
+  let calls = 0;
+  const client = new ConfiguredModelClient(
+    provider("anthropic"), // 默认开启
+    "test-model",
+    async (_input, init) => {
+      calls += 1;
+      const body = JSON.parse(String(init?.body));
+      if (calls === 1 && body.thinking) {
+        return new Response(
+          JSON.stringify({ error: { message: "thinking blocks are not supported by this model" } }),
+          { status: 400 },
+        );
+      }
+      return new Response(
+        [
+          `data: {"type":"message_start","message":{"usage":{"input_tokens":1,"cache_read_input_tokens":0}}}`,
+          `data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+          `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"降级回答"}}`,
+          `data: {"type":"content_block_stop","index":0}`,
+          `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`,
+          `data: {"type":"message_stop"}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  );
+
+  const chunks: string[] = [];
+  let finalResponse: any;
+  for await (const chunk of client.stream!({
+    system: "system",
+    messages: [{ role: "user", content: "hi" }],
+    signal: new AbortController().signal,
+    tools: [],
+  })) {
+    if (chunk.type === "text_delta") chunks.push(chunk.text);
+    else finalResponse = chunk.response;
+  }
+  assert.equal(calls, 2, "第一次带 thinking 400，第二次降级重试");
+  assert.deepEqual(chunks, ["降级回答"], "降级后不重复输出");
+  assert.equal(finalResponse.text, "降级回答");
 });
