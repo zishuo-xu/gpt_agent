@@ -152,6 +152,12 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     description: "监听非 localhost 时必填。用于远程访问与手机审批场景的密码保护。",
   },
   {
+    key: "server.apiToken",
+    type: "string",
+    title: "API Token",
+    description: "/api/v1 无头接口的 Bearer token（飞书机器人等外部系统集成用）。留空则接口未启用。",
+  },
+  {
     key: "notify.webhook",
     type: "string",
     title: "通知 Webhook",
@@ -271,6 +277,7 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
   server: {
     host: "127.0.0.1",
     password: "",
+    apiToken: "",
   },
   notify: {
     webhook: "",
