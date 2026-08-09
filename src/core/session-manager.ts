@@ -65,7 +65,7 @@ export interface AgentSessionManagerOptions {
   ) => Promise<ConversationAgentModel> | ConversationAgentModel;
 }
 
-/** 项目级单实例写锁：O_EXCL 独占创建 + pid 记录；崩溃残留时读锁内容报错提示 */
+/** 项目级单实例写锁：O_EXCL 独占创建 + pid 记录；崩溃残留（持有者已死）自动接管 */
 async function acquireInstanceLock(
   lockPath: string,
   skip: boolean,
@@ -87,18 +87,50 @@ async function acquireInstanceLock(
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "EEXIST") throw error;
-    let holder = "";
+    // 锁已存在：读取持有者 pid 做存活检测；持有者已死（崩溃残留）则删旧锁重试一次
+    let holderPid: number | undefined;
     try {
       const raw = await readFile(lockPath, "utf8");
-      const parsed = JSON.parse(raw) as { pid?: number };
-      if (parsed.pid) holder = `（pid ${parsed.pid}）`;
+      holderPid = (JSON.parse(raw) as { pid?: number }).pid;
     } catch {
-      // 锁内容不可读：视为残留，提示手动处理
+      // 锁内容不可读（半写坏锁）：按残留处理，同样删锁重试
     }
+    // 持有者已死（崩溃残留）或锁内容不可读（半写坏锁）：删旧锁重试一次
+    if (holderPid === undefined || !isPidAlive(holderPid)) {
+      await unlink(lockPath).catch(() => undefined);
+      try {
+        const handle = await open(lockPath, "wx");
+        try {
+          await handle.writeFile(
+            JSON.stringify({
+              pid: process.pid,
+              startedAt: new Date().toISOString(),
+            }),
+          );
+        } finally {
+          await handle.close();
+        }
+        return; // 接管成功
+      } catch {
+        // 重试仍失败（并发竞争）→ 落到下方统一报错
+      }
+    }
+    const holder = holderPid === undefined ? "" : `（pid ${holderPid}）`;
     throw new Error(
       `项目已被其他进程占用${holder}：事件流为追加写，多进程并发会损坏数据。` +
         `若确认该进程已退出（崩溃残留），删除 ${lockPath} 后重试，或加 --force 忽略。`,
     );
+  }
+}
+
+/** pid 存活检测：kill(pid, 0) 成功=存活；ESRCH=已死；EPERM=存在但无权限（视为存活，fail-closed） */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const errno = (error as NodeJS.ErrnoException).code;
+    return errno === "EPERM";
   }
 }
 
@@ -440,7 +472,17 @@ export class AgentSessionManager {
         },
       );
     }
-    if (message) void session.sendInput(message);
+    if (message) {
+      void session.sendInput(message).catch((error) => {
+        // 兜底：sendInput 内部已把 loop/flush 错误转为会话 error 事件，
+        // 此处防未来其他 reject 源造成 unhandled rejection 崩进程
+        if (error instanceof Error) {
+          console.error(
+            `[session-manager] sendInput 未处理错误：${error.message}`,
+          );
+        }
+      });
+    }
     return session;
   }
 
