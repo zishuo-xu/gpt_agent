@@ -1,11 +1,13 @@
 const MARKER = '<!-- myagent-ai-review -->';
 const MAX_DIFF_CHARS = 60_000;
+const GITHUB_API_ORIGIN = 'https://api.github.com';
+const OPENCODE_COMPLETIONS_URL =
+  'https://opencode.ai/zen/go/v1/chat/completions';
 
 const {
   GITHUB_REPOSITORY: repository,
   GITHUB_TOKEN: githubToken,
   OPENCODE_API_KEY: apiKey,
-  OPENCODE_BASE_URL: baseUrl,
   MYAGENT_REVIEW_MODEL: model,
   PR_NUMBER: rawPullNumber,
 } = process.env;
@@ -14,7 +16,6 @@ for (const [name, value] of Object.entries({
   GITHUB_REPOSITORY: repository,
   GITHUB_TOKEN: githubToken,
   OPENCODE_API_KEY: apiKey,
-  OPENCODE_BASE_URL: baseUrl,
   MYAGENT_REVIEW_MODEL: model,
   PR_NUMBER: rawPullNumber,
 })) {
@@ -25,9 +26,18 @@ const pullNumber = Number(rawPullNumber);
 if (!Number.isInteger(pullNumber) || pullNumber <= 0) {
   throw new Error('PR_NUMBER must be a positive integer');
 }
+if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+  throw new Error('GITHUB_REPOSITORY has an invalid format');
+}
 
 async function githubRequest(path, options = {}) {
-  const response = await fetch(`https://api.github.com${path}`, {
+  const url = new URL(GITHUB_API_ORIGIN);
+  url.pathname = path;
+  for (const [name, value] of Object.entries(options.query ?? {})) {
+    url.searchParams.set(name, String(value));
+  }
+
+  const response = await fetch(url, {
     method: options.method ?? 'GET',
     headers: {
       Accept: options.accept ?? 'application/vnd.github+json',
@@ -93,7 +103,7 @@ const initialMessages = [
 ];
 
 async function requestCompletion(messages, maxTokens) {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+  const response = await fetch(OPENCODE_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -142,7 +152,8 @@ ${review}
 模型：\`${model}\` · 每次 PR 更新会覆盖此评论 · AI 结果仅供参考`;
 
 const commentsResponse = await githubRequest(
-  `/repos/${repository}/issues/${pullNumber}/comments?per_page=100`,
+  `/repos/${repository}/issues/${pullNumber}/comments`,
+  { query: { per_page: 100 } },
 );
 const comments = await commentsResponse.json();
 const previous = comments.find(

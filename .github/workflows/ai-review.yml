@@ -35,7 +35,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          OPENCODE_BASE_URL: https://opencode.ai/zen/go/v1
           MYAGENT_REVIEW_MODEL: deepseek-v4-flash
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: node .github/scripts/ai-review.mjs
