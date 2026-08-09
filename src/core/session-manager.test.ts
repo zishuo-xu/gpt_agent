@@ -851,15 +851,6 @@ test("装配：ensurePluginsLoaded 启动即加载且幂等（报告立即可见
     "utf8",
   );
 
-test("恢复后事件 seq 与磁盘对齐：缺号恢复不产生重复或空洞", async () => {
-  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-seqgap-cwd-"));
-  const stateDir = await mkdtemp(
-    path.join(os.tmpdir(), "myagent-seqgap-state-"),
-  );
-  const homeDir = await mkdtemp(
-    path.join(os.tmpdir(), "myagent-seqgap-home-"),
-  );
-fix(core): 恢复后事件 seq 与磁盘对齐——#eventSeq 从最后合法记录续，杜绝缺号错位)
   const configService = new ConfigService({ cwd, homeDir });
   const manager = new AgentSessionManager({
     cwd,
@@ -883,6 +874,22 @@ fix(core): 恢复后事件 seq 与磁盘对齐——#eventSeq 从最后合法记
   assert.equal(again.loaded.length, 1);
   pluginToolRegistry.clear();
   await manager.releaseLock();
+});
+
+test("恢复后事件 seq 与磁盘对齐：缺号恢复不产生重复或空洞", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-seqgap-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-seqgap-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-seqgap-home-"),
+  );
+  const configService = new ConfigService({ cwd, homeDir });
+  const manager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
     modelFactory: (messages) =>
       new ConversationAgentModel(
         new ScriptedClient([response("第一轮完成")]),
@@ -941,5 +948,5 @@ fix(core): 恢复后事件 seq 与磁盘对齐——#eventSeq 从最后合法记
     `新事件最后 seq ${lastSeq} 应大于磁盘最后 seq ${lastDiskSeq}`,
   );
   await restoredManager.releaseLock();
-fix(core): 恢复后事件 seq 与磁盘对齐——#eventSeq 从最后合法记录续，杜绝缺号错位)
 });
+
