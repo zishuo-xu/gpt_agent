@@ -80,6 +80,8 @@ export interface MemoryTimelineEntry {
   sessionTitle: string;
   documentId: MemoryDocumentId;
   summary: string;
+  /** 该次自动写入的留档文件（写时快照，供 diff 展示）；无留档数据时缺省 */
+  historyPath?: string;
 }
 
 export interface ConnectionTestResult {

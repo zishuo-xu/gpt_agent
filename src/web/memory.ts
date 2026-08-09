@@ -1,7 +1,8 @@
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { atomicWriteFile, readOptional } from "../utils/fs.js";
+import { createDiffPreview } from "../tools/atomic-file.js";
 import type { AgentSessionManager } from "../core/session-manager.js";
 import type {
   MemoryDocument,
@@ -47,7 +48,7 @@ export class MemoryService {
     );
     return {
       documents,
-      timeline: this.#buildTimeline(documents),
+      timeline: await this.#buildTimeline(documents),
     };
   }
 
@@ -69,9 +70,47 @@ export class MemoryService {
     };
   }
 
-  #buildTimeline(
+  /**
+   * 读取某次自动写入的留档：before（写时快照）与 after（文档当前内容）
+   * 及统一格式 diff。path 必须位于某记忆文档的 .history/ 目录内（防越界）。
+   */
+  async getHistory(
+    rawPath: string,
+  ): Promise<{ before: string; after: string; diff: string }> {
+    const resolved = path.resolve(rawPath);
+    const resolvedBase = path.basename(resolved, ".md");
+    const definition = memoryDefinitions(this.#cwd, this.#homeDir).find(
+      (candidate) => {
+        // 同一记忆目录下多个文档共用 .history/：目录 + 文件名前缀双重匹配
+        const historyDir = path.join(
+          path.dirname(candidate.path),
+          HISTORY_DIR,
+        );
+        const candidateBase = path.basename(candidate.path, ".md");
+        return (
+          path.dirname(resolved) === historyDir &&
+          resolvedBase.startsWith(`${candidateBase}-`)
+        );
+      },
+    );
+    if (!definition) {
+      throw new MemoryHistoryError("路径不在记忆留档目录内", 400);
+    }
+    const before = await readOptional(resolved);
+    if (before === null) {
+      throw new MemoryHistoryError("留档文件不存在", 404);
+    }
+    const after = (await readOptional(definition.path)) ?? "";
+    return {
+      before,
+      after,
+      diff: createDiffPreview(definition.path, before, after),
+    };
+  }
+
+  async #buildTimeline(
     documents: MemoryDocument[],
-  ): MemoryTimelineEntry[] {
+  ): Promise<MemoryTimelineEntry[]> {
     if (!this.#sessions) return [];
     const pathToDocument = new Map(
       documents.map((document) => [
@@ -111,16 +150,62 @@ export class MemoryService {
           pathToDocument.get(absolute) ??
           pathToDocument.get(path.resolve(call.target));
         if (!documentId) continue;
+        const historyPath = await this.#historyPathFor(absolute, record.ts);
         timeline.push({
           ts: record.ts,
           sessionId: summary.id,
           sessionTitle: summary.title,
           documentId,
           summary: event.summary,
+          ...(historyPath ? { historyPath } : {}),
         });
       }
     }
     return timeline.sort((a, b) => b.ts.localeCompare(a.ts));
+  }
+
+  /**
+   * 匹配条目 ts 前 HISTORY_WINDOW_MS 窗口内、mtime 最近的留档文件。
+   * 窗口匹配对手动编辑免疫：手动编辑不产生对应会话事件，无事件则无条目；
+   * 同一窗口内若恰好有手动编辑的留档（无事件对应），不影响本条目命中。
+   */
+  async #historyPathFor(
+    filePath: string,
+    ts: string,
+  ): Promise<string | undefined> {
+    const dir = path.join(path.dirname(filePath), HISTORY_DIR);
+    const base = path.basename(filePath, path.extname(filePath));
+    const targetTs = Date.parse(ts);
+    if (Number.isNaN(targetTs)) return undefined;
+    const files = await readdir(dir).catch(() => []);
+    let best: { file: string; mtime: number } | undefined;
+    for (const file of files) {
+      if (!file.startsWith(`${base}-`) || !file.endsWith(".md")) continue;
+      const info = await stat(path.join(dir, file)).catch(() => undefined);
+      if (!info) continue;
+      const mtime = info.mtimeMs;
+      if (
+        mtime <= targetTs &&
+        targetTs - mtime <= HISTORY_WINDOW_MS &&
+        (!best || mtime > best.mtime)
+      ) {
+        best = { file, mtime };
+      }
+    }
+    return best ? path.join(dir, best.file) : undefined;
+  }
+}
+
+/** 留档目录名（与 memory-history.ts 的 MemoryHistoryKeeper 约定一致） */
+const HISTORY_DIR = ".history";
+/** 时间线条目与留档文件的匹配窗口（ms）：工具执行耗时通常 < 数秒 */
+const HISTORY_WINDOW_MS = 60_000;
+
+export class MemoryHistoryError extends Error {
+  readonly status: 400 | 404;
+  constructor(message: string, status: 400 | 404) {
+    super(message);
+    this.status = status;
   }
 }
 

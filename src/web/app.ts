@@ -15,6 +15,7 @@ import {
   type WebSessionEvent,
 } from "./sessions.js";
 import {
+  MemoryHistoryError,
   MemoryService,
   type MemoryDocumentId,
 } from "./memory.js";
@@ -250,6 +251,22 @@ export function createWebApp(
   app.get("/api/memory", async (context) => {
     const target = await resolveProject(context);
     return context.json(await target.memoryService.list());
+  });
+
+  app.get("/api/memory/history", async (context) => {
+    const target = await resolveProject(context);
+    const rawPath = context.req.query("path");
+    if (!rawPath) {
+      return context.json({ error: "缺少 path 参数" }, 400);
+    }
+    try {
+      return context.json(await target.memoryService.getHistory(rawPath));
+    } catch (error) {
+      if (error instanceof MemoryHistoryError) {
+        return context.json({ error: error.message }, error.status);
+      }
+      throw error;
+    }
   });
 
   app.get("/api/plugins", async (context) => {
