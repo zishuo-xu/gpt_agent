@@ -337,54 +337,101 @@ export function ItemCard(props: {
 
 export function RichText(props: { text: string }) {
   const lines = props.text.split(/\r?\n/);
-  return (
-    <div className="rich-text">
-      {lines.map((line, index) => {
-        const trimmed = line.trim();
-        if (!trimmed) return <br key={index} />;
-        // markdown 标题：## 等原样渲染为分级标题（h1 过大映射 h2，最多 h4）
-        const heading = /^(#{1,6})\s+(.*)$/.exec(trimmed);
-        if (heading) {
-          const level = Math.min(Math.max(heading[1]!.length, 2), 4);
-          return createElement(
-            `h${level}`,
-            { key: index },
-            renderInline(heading[2] ?? ""),
-          );
-        }
-        // 引用块
-        if (trimmed.startsWith(">")) {
-          return (
-            <blockquote key={index}>
-              {renderInline(trimmed.replace(/^>\s?/, ""))}
-            </blockquote>
-          );
-        }
-        // 分隔线
-        if (/^-{3,}$/.test(trimmed)) {
-          return <hr key={index} />;
-        }
-        // 有序列表：保留编号前缀
-        const ordered = /^(\d+[.)])\s+(.*)$/.exec(trimmed);
-        if (ordered) {
-          return (
-            <p className="rich-list-line ordered" key={index}>
-              {ordered[1]} {renderInline(ordered[2] ?? "")}
-            </p>
-          );
-        }
-        const isList = /^[-*]\s+/.test(trimmed);
-        return (
-          <p className={isList ? "rich-list-line" : ""} key={index}>
-            {isList ? "• " : ""}
-            {renderInline(
-              isList ? trimmed.replace(/^[-*]\s+/, "") : line,
-            )}
-          </p>
-        );
-      })}
-    </div>
-  );
+  const blocks: ReactNode[] = [];
+  // fenced code block 状态：```lang 开行进入收集，闭合围栏渲染为 <pre>
+  let inCode = false;
+  let codeLang = "";
+  let codeLines: string[] = [];
+  const flushCode = (key: number) => {
+    if (!inCode) return;
+    blocks.push(
+      <pre
+        className="code-block"
+        data-lang={codeLang}
+        key={`code-${key}`}
+      >
+        {codeLines.map((line, lineIndex) => (
+          <span key={lineIndex}>
+            {line || " "}
+            {"\n"}
+          </span>
+        ))}
+      </pre>,
+    );
+    codeLang = "";
+    codeLines = [];
+    inCode = false;
+  };
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    const trimmed = line.trim();
+    const fence = /^```(\S*)\s*$/.exec(trimmed);
+    if (fence) {
+      if (inCode) {
+        flushCode(blocks.length);
+      } else {
+        inCode = true;
+        codeLang = fence[1] ?? "";
+      }
+      continue;
+    }
+    if (inCode) {
+      codeLines.push(line);
+      continue;
+    }
+    if (!trimmed) {
+      blocks.push(<br key={index} />);
+      continue;
+    }
+    // markdown 标题：## 等原样渲染为分级标题（h1 过大映射 h2，最多 h4）
+    const heading = /^(#{1,6})\s+(.*)$/.exec(trimmed);
+    if (heading) {
+      const level = Math.min(Math.max(heading[1]!.length, 2), 4);
+      blocks.push(
+        createElement(
+          `h${level}`,
+          { key: index },
+          renderInline(heading[2] ?? ""),
+        ),
+      );
+      continue;
+    }
+    // 引用块
+    if (trimmed.startsWith(">")) {
+      blocks.push(
+        <blockquote key={index}>
+          {renderInline(trimmed.replace(/^>\s?/, ""))}
+        </blockquote>,
+      );
+      continue;
+    }
+    // 分隔线
+    if (/^-{3,}$/.test(trimmed)) {
+      blocks.push(<hr key={index} />);
+      continue;
+    }
+    // 有序列表：保留编号前缀
+    const ordered = /^(\d+[.)])\s+(.*)$/.exec(trimmed);
+    if (ordered) {
+      blocks.push(
+        <p className="rich-list-line ordered" key={index}>
+          {ordered[1]} {renderInline(ordered[2] ?? "")}
+        </p>,
+      );
+      continue;
+    }
+    const isList = /^[-*]\s+/.test(trimmed);
+    blocks.push(
+      <p className={isList ? "rich-list-line" : ""} key={index}>
+        {isList ? "• " : ""}
+        {renderInline(
+          isList ? trimmed.replace(/^[-*]\s+/, "") : line,
+        )}
+      </p>,
+    );
+  }
+  flushCode(blocks.length);
+  return <div className="rich-text">{blocks}</div>;
 }
 
 export function renderInline(text: string): ReactNode[] {
