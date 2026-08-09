@@ -49,9 +49,17 @@ export class EditJournal {
 export class AtomicFileTools {
   readonly #readSet = new Set<string>();
   readonly journal: EditJournal;
+  readonly #snapshot: (filePath: string, before: string | null) => Promise<void>;
 
-  constructor(journal = new EditJournal()) {
+  constructor(
+    journal = new EditJournal(),
+    options: {
+      /** 写文件前回调（记忆留档等）：默认 noop，非记忆场景零开销 */
+      snapshot?: (filePath: string, before: string | null) => Promise<void>;
+    } = {},
+  ) {
     this.journal = journal;
+    this.#snapshot = options.snapshot ?? (async () => {});
   }
 
   async read(filePath: string, signal?: AbortSignal): Promise<string> {
@@ -123,6 +131,7 @@ export class AtomicFileTools {
       before === null
         ? createNewFilePreview(filePath, content)
         : createDiffPreview(filePath, before, content);
+    await this.#snapshot(filePath, before);
     await atomicWriteFile(filePath, content, signal ? { signal } : {});
     this.journal.record({
       path: filePath,
@@ -155,6 +164,7 @@ export class AtomicFileTools {
     after: string,
     signal?: AbortSignal,
   ): Promise<void> {
+    await this.#snapshot(filePath, before);
     await atomicWriteFile(filePath, after, signal ? { signal } : {});
     this.journal.record({
       path: filePath,
@@ -221,7 +231,7 @@ function applyMultiEdit(
   return after;
 }
 
-function createDiffPreview(
+export function createDiffPreview(
   filePath: string,
   before: string,
   after: string,

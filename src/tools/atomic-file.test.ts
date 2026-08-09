@@ -94,3 +94,20 @@ test("审批预览与最终 Edit 使用同一变换并包含三行上下文", as
   await files.edit(filePath, "before", "after");
   assert.match(await readFile(filePath, "utf8"), /three\nafter\nfive/);
 });
+
+test("snapshot 注入：write/edit 提交前调用且携带旧内容", async () => {
+  const { directory, filePath } = await fixture();
+  const calls: Array<{ file: string; before: string | null }> = [];
+  const files = new AtomicFileTools(undefined, {
+    snapshot: async (file, before) => {
+      calls.push({ file, before });
+    },
+  });
+  await files.read(filePath);
+  await files.write(filePath, "新内容");
+  await files.edit(filePath, "新内容", "更新");
+  assert.equal(calls.length, 2);
+  assert.equal(path.resolve(calls[0]!.file), path.resolve(filePath));
+  assert.equal(calls[0]!.before, "alpha\nbeta\n");
+  assert.equal(calls[1]!.before, "新内容");
+});
