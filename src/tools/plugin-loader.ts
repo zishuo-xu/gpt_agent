@@ -28,6 +28,25 @@ export interface PluginLoadReport {
 
 const PLUGIN_FILE_RE = /\.(ts|mjs|js)$/i;
 
+/**
+ * TS 插件运行时：注册 tsx 的 ESM loader，让 .ts 插件与其相对 src 的
+ * `.js` → `.ts` import（如 `../../src/shared/plugin-tool.js`）在 dist 部署
+ * （node dist/cli.js，无 tsx 包裹）下同样可解析。幂等；tsx 缺失时静默降级
+ * （Node ≥22.6 原生 type-stripping 可加载自包含 .ts 插件，src 相对 import
+ * 的插件在精简安装下不可用，属预期边界）。
+ */
+let tsRuntimeReady = false;
+async function ensureTsRuntime(): Promise<void> {
+  if (tsRuntimeReady) return;
+  try {
+    const { register } = await import("tsx/esm/api");
+    register();
+  } catch {
+    // tsx 不可用：降级原生 import
+  }
+  tsRuntimeReady = true;
+}
+
 /** 读取两层 plugins.json（全局 + 项目，项目层覆盖），缺失返回空对象 */
 export async function readPluginsJson(
   homeDir: string,
@@ -91,6 +110,7 @@ async function collectToolFiles(dir: string): Promise<string[]> {
 }
 
 async function loadOne(file: string): Promise<PluginTool> {
+  await ensureTsRuntime();
   const module = (await import(pathToFileURL(file).href)) as {
     default?: unknown;
   };

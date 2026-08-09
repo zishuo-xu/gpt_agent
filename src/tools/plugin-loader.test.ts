@@ -230,3 +230,24 @@ test("savePluginDisabled：写入/移除插件名，保留其他段", async () =
   );
   assert.deepEqual(created.pluginDisabled, ["X"]);
 });
+
+test("加载器：插件以项目相对路径 import src 模块可加载（dist 部署回归）", async () => {
+  const { home, project, registry } = await fixture();
+  // 模拟真实项目结构：插件在 <项目根>/.myagent/tools/，import ../../src/xxx.js
+  // （web-search.ts 的写法）——文件名 .js 实际解析到 .ts，dist 部署下依赖 tsx
+  await mkdir(path.join(project, "src", "shared"), { recursive: true });
+  await writeFile(
+    path.join(project, "src", "shared", "plugin-tool.ts"),
+    "export function definePluginTool<T>(tool: T): T { return tool; }\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(project, ".myagent", "tools", "rel-import.ts"),
+    `import { definePluginTool } from "../../src/shared/plugin-tool.js";\n` +
+      `export default definePluginTool({ name: "RelImport", description: "相对 import", inputSchema: { type: "object" }, async run() { return { summary: "ok" }; } });\n`,
+    "utf8",
+  );
+  const report = await loadPluginTools(home, project, registry);
+  assert.equal(report.errors.length, 0, JSON.stringify(report.errors));
+  assert.deepEqual(report.loaded.map((item) => item.name), ["RelImport"]);
+});
