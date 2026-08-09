@@ -128,7 +128,11 @@ export async function ensureSpecifierResolver(): Promise<void> {
       }) => void;
       register: (specifier: string, parentURL: string) => void;
     };
-    if (typeof moduleApi.registerHooks === "function") {
+    if (
+      typeof moduleApi.registerHooks === "function" &&
+      // 测试钩子：强制走 legacy register 回退路径（覆盖 Node <22.15 场景），生产不设置
+      process.env.MYAGENT_FORCE_LEGACY_RESOLVER !== "1"
+    ) {
       // @types/node 将 registerHooks 的 resolve 声明为纯同步（ResolveHookSync），
       // 但运行时同步 hook 可返回 thenable（委派链下游 tsx 为异步 hook，实测可用）
       moduleApi.registerHooks({

@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { PluginToolRegistry } from "../shared/plugin-tool.js";
 import { loadPluginTools, savePluginDisabled } from "./plugin-loader.js";
 
@@ -16,6 +17,13 @@ async function fixture(): Promise<{
   const project = path.join(root, "project");
   await mkdir(path.join(home, ".myagent", "tools"), { recursive: true });
   await mkdir(path.join(project, ".myagent", "tools"), { recursive: true });
+  // 真实项目结构：项目根有 package.json（type: module）→ 插件按 ESM 加载，
+  // myagent:* 走 ESM resolve hook（无 package.json 会被判为 CJS，require 不经 hook）
+  await writeFile(
+    path.join(project, "package.json"),
+    `${JSON.stringify({ type: "module" })}\n`,
+    "utf8",
+  );
   return { home, project, registry: new PluginToolRegistry() };
 }
 
@@ -239,6 +247,89 @@ const MYAGENT_MODULES: Record<string, string> = {
   "src/utils/sleep.ts":
     "export async function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> { if (signal?.aborted) return; await new Promise((r) => setTimeout(r, ms)); }\n",
 };
+
+/** legacy register 回退路径子进程脚本：强制走 register + data URL，端到端验证 */
+const LEGACY_RUNNER_SRC = `import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+async function main() {
+  process.env.MYAGENT_FORCE_LEGACY_RESOLVER = "1";
+  const { loadPluginTools } = await import(pathToFileURL(process.argv[2]!).href);
+  const { PluginToolRegistry } = await import(pathToFileURL(process.argv[3]!).href);
+  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-legacy-"));
+  const project = path.join(root, "project");
+  await mkdir(path.join(project, "src", "shared"), { recursive: true });
+  await mkdir(path.join(project, ".myagent", "tools"), { recursive: true });
+  // 同 fixture：项目根 package.json type: module，插件按 ESM 加载
+  await writeFile(
+    path.join(project, "package.json"),
+    JSON.stringify({ type: "module" }) + "\\n",
+  );
+  await writeFile(
+    path.join(project, "src", "shared", "plugin-tool.ts"),
+    "export function definePluginTool<T>(tool: T): T { return tool; }\\n",
+  );
+  await writeFile(
+    path.join(project, ".myagent", "tools", "legacy-alias.ts"),
+    \`import { definePluginTool } from "myagent:protocol";
+export default definePluginTool({ name: "LegacyAlias", description: "legacy 路径", inputSchema: { type: "object" }, async run() { return { summary: "legacy" }; } });\`,
+  );
+  const report = await loadPluginTools(root, project, new PluginToolRegistry());
+  console.log("RESULT:" + JSON.stringify({ loaded: report.loaded.map((l) => l.name), errors: report.errors }));
+}
+main().catch((err) => { console.error(err); process.exit(1); });
+`;
+
+test("加载器：legacy register 回退路径（Node <22.15 模拟）下 myagent:* 同样可加载", async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
+  const scriptDir = await mkdtemp(path.join(os.tmpdir(), "myagent-legacy-script-"));
+  const script = path.join(scriptDir, "run.ts");
+  await writeFile(script, LEGACY_RUNNER_SRC, "utf8");
+  const tsxCli = fileURLToPath(
+    new URL("../../node_modules/tsx/dist/cli.mjs", import.meta.url),
+  );
+  const loaderSrc = fileURLToPath(
+    new URL("../../src/tools/plugin-loader.ts", import.meta.url),
+  );
+  const protocolSrc = fileURLToPath(
+    new URL("../../src/shared/plugin-tool.ts", import.meta.url),
+  );
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [tsxCli, script, loaderSrc, protocolSrc],
+    { timeout: 30_000 },
+  );
+  const marker = "RESULT:";
+  const idx = stdout.lastIndexOf(marker);
+  assert.ok(idx >= 0, `子进程未输出结果标记：${stdout}`);
+  const result = JSON.parse(stdout.slice(idx + marker.length)) as {
+    loaded: string[];
+    errors: Array<{ file: string; message: string }>;
+  };
+  assert.deepEqual(result.loaded, ["LegacyAlias"]);
+  assert.deepEqual(result.errors, []);
+  await rm(scriptDir, { recursive: true, force: true });
+});
+
+test("加载器：home 层（~/.myagent/tools）插件用 myagent:* 报错且信息可读", async () => {
+  const { home, project, registry } = await fixture();
+  // home 层插件：resolver 从 parentURL 推导 root=home，home/src 不存在 → 加载失败
+  await writeFile(
+    path.join(home, ".myagent", "tools", "home-alias.ts"),
+    `import { definePluginTool } from "myagent:protocol";\n` +
+      `export default definePluginTool({ name: "HomeAlias", description: "home 层", inputSchema: { type: "object" }, async run() { return { summary: "x" }; } });\n`,
+    "utf8",
+  );
+  const report = await loadPluginTools(home, project, registry);
+  assert.equal(report.loaded.length, 0);
+  assert.equal(report.errors.length, 1);
+  assert.match(report.errors[0]!.file, /home-alias\.ts/);
+  // 错误信息需指出目标模块不存在（可定位问题），而非静默失败
+  assert.match(report.errors[0]!.message, /Cannot find|myagent/i);
+});
 
 test("加载器：myagent:* 稳定 specifier 解析成功且可调用", async () => {
   const { home, project, registry } = await fixture();
