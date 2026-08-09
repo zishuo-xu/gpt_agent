@@ -47,6 +47,98 @@ async function ensureTsRuntime(): Promise<void> {
   tsRuntimeReady = true;
 }
 
+/**
+ * myagent:* 稳定 specifier 解析（插件协议稳定化）：插件 import
+ * "myagent:protocol" / "myagent:html-text" / "myagent:sleep"，由本解析器翻译为
+ * 插件所在项目根的 src/*.ts 文件，与部署方式（tsx / node dist）和 src 相对路径
+ * 解耦。注册在 tsx 之后（后注册先调用）：myagent:* 先命中本解析器，其余委派。
+ *
+ * 两条注册路径：
+ * - Node ≥22.15 用 registerHooks（同步契约，内联函数，见 resolveMyagentSpecifier）；
+ * - 更早版本用 register + data URL（自包含 hook 模块，逻辑与内联版保持同步）。
+ * 都通过 nextResolve 委派翻译后的路径，不直接返回结果对象（registerHooks 下
+ * 非委派返回要求 shortCircuit，会截断 tsx 的解析链）。
+ */
+const MYAGENT_MODULE_MAP: Record<string, string> = {
+  "myagent:protocol": "src/shared/plugin-tool.ts",
+  "myagent:html-text": "src/tools/html-text.ts",
+  "myagent:sleep": "src/utils/sleep.ts",
+};
+
+let specifierResolverReady = false;
+
+function resolveMyagentSpecifier(
+  specifier: string,
+  context: { parentURL?: string },
+  nextResolve: (
+    specifier: string,
+    context?: { parentURL?: string },
+  ) => { url: string } | Promise<{ url: string }>,
+): { url: string } | Promise<{ url: string }> {
+  if (!specifier.startsWith("myagent:")) {
+    return nextResolve(specifier, context);
+  }
+  const rel = MYAGENT_MODULE_MAP[specifier];
+  if (!rel) {
+    throw new Error(
+      `未知 myagent specifier: ${specifier}（白名单：${Object.keys(MYAGENT_MODULE_MAP).join(" / ")}）`,
+    );
+  }
+  const parent = context.parentURL;
+  if (!parent) {
+    throw new Error("myagent:* 只能在插件模块内使用（缺少 parentURL）");
+  }
+  // 插件文件 <root>/.myagent/tools/xx.ts → 上两级 = 项目根
+  const root = new URL("../..", new URL(".", parent));
+  return nextResolve(new URL(rel, root).href, context);
+}
+
+/** data URL 版 hook 模块（Node <22.15 的 register 回退路径）：与内联版逻辑一致 */
+const MYAGENT_RESOLVER_DATA_URL = `data:text/javascript,${encodeURIComponent(
+  `const MODULES = ${JSON.stringify(MYAGENT_MODULE_MAP)};\n` +
+    `export async function resolve(specifier, context, nextResolve) {\n` +
+    `  if (!specifier.startsWith("myagent:")) return nextResolve(specifier, context);\n` +
+    `  const rel = MODULES[specifier];\n` +
+    `  if (!rel) throw new Error("未知 myagent specifier: " + specifier + "（白名单：" + Object.keys(MODULES).join(" / ") + "）");\n` +
+    `  if (!context.parentURL) throw new Error("myagent:* 只能在插件模块内使用（缺少 parentURL）");\n` +
+    `  const root = new URL("../..", new URL(".", context.parentURL));\n` +
+    `  return nextResolve(new URL(rel, root).href, context);\n` +
+    `}\n`,
+)}`;
+
+async function ensureSpecifierResolver(): Promise<void> {
+  if (specifierResolverReady) return;
+  try {
+    const moduleApi = (await import("node:module")) as {
+      registerHooks?: (hooks: {
+        resolve: (
+          specifier: string,
+          context: { parentURL?: string },
+          nextResolve: (
+            specifier: string,
+            context?: { parentURL?: string },
+          ) => { url: string } | Promise<{ url: string }>,
+        ) => { url: string } | Promise<{ url: string }>;
+      }) => void;
+      register: (specifier: string, parentURL: string) => void;
+    };
+    if (typeof moduleApi.registerHooks === "function") {
+      // @types/node 将 registerHooks 的 resolve 声明为纯同步（ResolveHookSync），
+      // 但运行时同步 hook 可返回 thenable（委派链下游 tsx 为异步 hook，实测可用）
+      moduleApi.registerHooks({
+        resolve: resolveMyagentSpecifier,
+      } as never);
+    } else {
+      moduleApi.register(MYAGENT_RESOLVER_DATA_URL, import.meta.url);
+    }
+  } catch (error) {
+    console.error(
+      `[plugins] myagent:* 解析器注册失败：${(error as Error).message}（插件可用相对路径写法）`,
+    );
+  }
+  specifierResolverReady = true;
+}
+
 /** 读取两层 plugins.json（全局 + 项目，项目层覆盖），缺失返回空对象 */
 export async function readPluginsJson(
   homeDir: string,
@@ -111,6 +203,7 @@ async function collectToolFiles(dir: string): Promise<string[]> {
 
 async function loadOne(file: string): Promise<PluginTool> {
   await ensureTsRuntime();
+  await ensureSpecifierResolver();
   const module = (await import(pathToFileURL(file).href)) as {
     default?: unknown;
   };
