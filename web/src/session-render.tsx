@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, createElement, useState, type ReactNode } from "react";
 import type { SessionStatus } from "@shared/types.js";
 import type { DisplayItem } from "./session-display";
 import { statusLabel, toolResultDiffText } from "./session-display";
@@ -342,6 +342,37 @@ export function RichText(props: { text: string }) {
       {lines.map((line, index) => {
         const trimmed = line.trim();
         if (!trimmed) return <br key={index} />;
+        // markdown 标题：## 等原样渲染为分级标题（h1 过大映射 h2，最多 h4）
+        const heading = /^(#{1,6})\s+(.*)$/.exec(trimmed);
+        if (heading) {
+          const level = Math.min(Math.max(heading[1]!.length, 2), 4);
+          return createElement(
+            `h${level}`,
+            { key: index },
+            renderInline(heading[2] ?? ""),
+          );
+        }
+        // 引用块
+        if (trimmed.startsWith(">")) {
+          return (
+            <blockquote key={index}>
+              {renderInline(trimmed.replace(/^>\s?/, ""))}
+            </blockquote>
+          );
+        }
+        // 分隔线
+        if (/^-{3,}$/.test(trimmed)) {
+          return <hr key={index} />;
+        }
+        // 有序列表：保留编号前缀
+        const ordered = /^(\d+[.)])\s+(.*)$/.exec(trimmed);
+        if (ordered) {
+          return (
+            <p className="rich-list-line ordered" key={index}>
+              {ordered[1]} {renderInline(ordered[2] ?? "")}
+            </p>
+          );
+        }
         const isList = /^[-*]\s+/.test(trimmed);
         return (
           <p className={isList ? "rich-list-line" : ""} key={index}>
@@ -357,13 +388,26 @@ export function RichText(props: { text: string }) {
 }
 
 export function renderInline(text: string): ReactNode[] {
-  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  // 链接优先于 code/bold 解析：避免 [text](url) 中括号内容被误判
+  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]\n]+\]\([^)\n]+\))/g);
   return tokens.map((token, index) => {
     if (token.startsWith("`") && token.endsWith("`")) {
       return <code key={index}>{token.slice(1, -1)}</code>;
     }
     if (token.startsWith("**") && token.endsWith("**")) {
       return <strong key={index}>{token.slice(2, -2)}</strong>;
+    }
+    const link = /^\[([^\]\n]+)\]\(([^)\n]+)\)$/.exec(token);
+    if (link) {
+      const href = link[2] ?? "";
+      // 只放行 http(s) 链接，防 javascript: 等危险协议
+      return /^https?:\/\//i.test(href) ? (
+        <a key={index} href={href} target="_blank" rel="noopener noreferrer">
+          {link[1]}
+        </a>
+      ) : (
+        <Fragment key={index}>{token}</Fragment>
+      );
     }
     return <Fragment key={index}>{token}</Fragment>;
   });
