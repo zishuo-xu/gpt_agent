@@ -457,14 +457,14 @@ test("记忆 history API：返回 before/after/diff；越界 400；缺失 404", 
   const memDir = path.join(service.cwd, ".myagent", "memory");
   await mkdir(memDir, { recursive: true });
   const docPath = path.join(memDir, "pitfalls.md");
-  await writeFile(docPath, "- 新内容\n", "utf8");
+  await writeFile(docPath, "after line\n", "utf8");
   const historyDir = path.join(memDir, ".history");
   await mkdir(historyDir, { recursive: true });
   const historyFile = path.join(
     historyDir,
     "pitfalls-20260810-120000-000-abcd.md",
   );
-  await writeFile(historyFile, "- 旧内容\n", "utf8");
+  await writeFile(historyFile, "before line\n", "utf8");
 
   const response = await app.request(
     `/api/memory/history?path=${encodeURIComponent(historyFile)}`,
@@ -475,10 +475,10 @@ test("记忆 history API：返回 before/after/diff；越界 400；缺失 404", 
     after: string;
     diff: string;
   };
-  assert.equal(payload.before, "- 旧内容\n");
-  assert.equal(payload.after, "- 新内容\n");
-  assert.match(payload.diff, /- 旧内容/);
-  assert.match(payload.diff, /\+ 新内容/);
+  assert.equal(payload.before, "before line\n");
+  assert.equal(payload.after, "after line\n");
+  assert.match(payload.diff, /-before line/);
+  assert.match(payload.diff, /\+after line/);
 
   // 越界 path（不在 .history/ 内）→ 400
   const bad = await app.request(
@@ -486,9 +486,11 @@ test("记忆 history API：返回 before/after/diff；越界 400；缺失 404", 
   );
   assert.equal(bad.status, 400);
 
-  // 缺失留档 → 404
+  // 缺失留档（文件名前缀匹配但文件不存在）→ 404
   const missing = await app.request(
-    `/api/memory/history?path=${encodeURIComponent(path.join(historyDir, "nope.md"))}`,
+    `/api/memory/history?path=${encodeURIComponent(
+      path.join(historyDir, "pitfalls-20260810-999999-999-abcd.md"),
+    )}`,
   );
   assert.equal(missing.status, 404);
 });
