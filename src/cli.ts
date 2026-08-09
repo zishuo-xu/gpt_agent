@@ -318,6 +318,12 @@ async function runCli(): Promise<void> {
     if (line === "/run" || line.startsWith("/run ")) {
       try {
         const task = parseRunCommand(line);
+        if (task.at || task.everyMinutes) {
+          // 定时规格由 Web 服务的调度器消费；CLI 是前台进程，本次立即执行一次
+          output.write(
+            "⚠ 定时规格（--at/--every）仅 Web 服务端生效；本次立即执行一次。\n",
+          );
+        }
         if (task.hardRules.length > 0) {
           pendingRun = task;
           output.write(

@@ -70,6 +70,8 @@ export interface BehaviorConfig {
   enablePlugins: boolean;
   /** 子代理（Task）单次运行超时（ms）；超时强制结束并返回已收集结果。缺省 15 分钟 */
   subagentTimeoutMs?: number;
+  /** 单次模型请求最大输出 tokens；缺省 8192（原硬编码 4096 会截断长输出） */
+  maxOutputTokens?: number;
 }
 
 export interface MyAgentConfig {
@@ -204,6 +206,15 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     description:
       "Task 子代理单次运行超时，超时强制结束并返回已收集结果，防止子代理无界探索拖住主任务。缺省 15 分钟（900000）。",
     default: 900_000,
+    hot: true,
+  },
+  {
+    key: "behavior.maxOutputTokens",
+    type: "number",
+    title: "单次最大输出 tokens",
+    description:
+      "模型单次请求的输出上限。缺省 8192；长任务输出被截断时可调大（注意输出 token 计费）。",
+    default: 8192,
     hot: true,
   },
 ];

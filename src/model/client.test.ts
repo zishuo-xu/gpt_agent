@@ -98,6 +98,57 @@ test("OpenAI-compatible 响应转换为统一工具调用", async () => {
   assert.equal(requestBody.messages[0].role, "system");
 });
 
+test("maxTokens 配置透传到请求（Anthropic + OpenAI 两协议）", async () => {
+  let anthropicBody: Record<string, any> = {};
+  let openaiBody: Record<string, any> = {};
+  const anthropicClient = new ConfiguredModelClient(
+    provider("anthropic"),
+    "test-model",
+    async (_input, init) => {
+      anthropicBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "ok" }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+  const openaiClient = new ConfiguredModelClient(
+    provider("openai-compatible"),
+    "test-model",
+    async (_input, init) => {
+      openaiBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [
+            { message: { content: "ok", tool_calls: [] }, finish_reason: "stop" },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+        { status: 200 },
+      );
+    },
+  );
+  const baseRequest = {
+    system: "system",
+    messages: [{ role: "user" as const, content: "问题" }],
+    signal: new AbortController().signal,
+    tools: [],
+    maxTokens: 16_384,
+  };
+  await anthropicClient.complete(baseRequest);
+  await openaiClient.complete(baseRequest);
+  assert.equal(anthropicBody.max_tokens, 16384, "Anthropic max_tokens 透传");
+  assert.equal(openaiBody.max_tokens, 16384, "OpenAI max_tokens 透传");
+
+  // 未配置时用默认兜底 8192
+  const { maxTokens: _omit, ...withoutMax } = baseRequest;
+  await anthropicClient.complete(withoutMax);
+  assert.equal(anthropicBody.max_tokens, 8192, "缺省 8192 兜底");
+});
+
 test("OpenAI-compatible 响应解析 finish_reason 为 stopReason", async () => {
   const client = new ConfiguredModelClient(
     provider("openai-compatible"),

@@ -3,7 +3,7 @@
  * 记忆面板并入设置（作为子项），不再单独占主导航。
  */
 export function SettingsSidebar(props: {
-  active: "settings" | "memory" | "plugins";
+  active: "settings" | "memory" | "plugins" | "scheduled" | "stats";
 }) {
   return (
     <aside className="sidebar">
@@ -19,6 +19,26 @@ export function SettingsSidebar(props: {
           }}
         >
           <span>◉</span>会话
+        </button>
+        <button
+          className={`nav-item ${
+            props.active === "scheduled" ? "active" : ""
+          }`}
+          onClick={() => {
+            window.location.hash = "scheduled";
+          }}
+        >
+          <span>⏱</span>定时任务
+        </button>
+        <button
+          className={`nav-item ${
+            props.active === "stats" ? "active" : ""
+          }`}
+          onClick={() => {
+            window.location.hash = "stats";
+          }}
+        >
+          <span>▤</span>任务统计
         </button>
         <button
           className={`nav-item ${

@@ -81,6 +81,7 @@ export class ConfiguredModelClient implements ModelClient {
         },
         body: JSON.stringify({
           model: this.#model,
+          max_tokens: request.maxTokens ?? 8192,
           messages: [
             { role: "system", content: request.system },
             ...request.messages.map(toOpenAiMessage),
@@ -188,7 +189,7 @@ export class ConfiguredModelClient implements ModelClient {
               ...(cacheControl ? { cache_control: cacheControl } : {}),
             },
           ],
-          max_tokens: 4096,
+          max_tokens: request.maxTokens ?? 8192,
           ...(thinking ? { thinking } : {}),
           messages: toAnthropicMessages(request.messages, cacheControl, thinking),
           tools: tools.map((tool, index) => ({
@@ -256,6 +257,7 @@ export class ConfiguredModelClient implements ModelClient {
         },
         body: JSON.stringify({
           model: this.#model,
+          max_tokens: request.maxTokens ?? 8192,
           stream: true,
           stream_options: { include_usage: true },
           messages: [
@@ -386,7 +388,7 @@ export class ConfiguredModelClient implements ModelClient {
               ...(cacheControl ? { cache_control: cacheControl } : {}),
             },
           ],
-          max_tokens: 4096,
+          max_tokens: request.maxTokens ?? 8192,
           ...(thinking ? { thinking } : {}),
           stream: true,
           messages: toAnthropicMessages(request.messages, cacheControl, thinking),

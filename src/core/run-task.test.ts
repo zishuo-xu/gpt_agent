@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ConversationAgentModel } from "./agent-model.js";
+import { ModelRetriesExhaustedError } from "../model/fallback-client.js";
 import type {
   CompletionRequest,
   ModelClient,
@@ -451,4 +452,52 @@ test("check() 仅首次触发预算阶段，后续相同 key 返回空或 finalO
   // 第二次调用相同 key，因为 finalOnly=true 所以只返回 { finalOnly: true }
   const second = box.check(Date.now(), 12);
   assert.deepEqual(second, { finalOnly: true });
+});
+
+test("/run 模型重试+fallback 耗尽时 run_finished 报 failed 而非 completed", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-model-fail-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-model-fail-state-"),
+  );
+  const client = new ScriptedClient([]);
+  // 让模型调用抛 ModelRetriesExhaustedError（error-policy 判 fatal 直接上抛）
+  client.complete = async () => {
+    throw new ModelRetriesExhaustedError(
+      new Error("余额不足（模拟）"),
+      3,
+    );
+  };
+  const session = new AgentSession({
+    id: "model-fail",
+    title: "模型失败",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(client, []),
+    stateDir,
+  });
+  const events: AgentEvent[] = [];
+  session.subscribe((record) => events.push(record.event));
+
+  await session.runTask({
+    description: "跑不动的任务",
+    permission: "trust",
+    hardRules: [],
+    semanticBounds: [],
+  });
+
+  const finished = events.find(
+    (event) => event.type === "run_finished",
+  );
+  assert.equal(finished?.type, "run_finished");
+  if (finished?.type === "run_finished") {
+    assert.equal(finished.status, "failed", "模型耗尽应记为失败");
+    assert.equal(finished.reason, "error");
+  }
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "notify" && event.level === "error",
+    ),
+    "应发出 error 级通知",
+  );
 });

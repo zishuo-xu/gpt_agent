@@ -1,0 +1,309 @@
+/* ========== 定时任务面板 ========== */
+
+.page-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 4px 0 14px;
+  color: #8f9aaa;
+  font-size: 11px;
+}
+
+.page-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scheduler-hint {
+  color: #5f6b7c;
+  font: 10px var(--mono);
+}
+
+.scheduler-new {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.scheduler-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #2d3846;
+  border-radius: 8px;
+  background: #0d131b;
+  color: #d5dbe5;
+  font: 11px var(--mono);
+}
+
+.scheduler-input:focus {
+  border-color: #4c6fc4;
+  outline: none;
+}
+
+.scheduler-list {
+  min-height: 120px;
+  overflow-y: auto;
+}
+
+.scheduler-empty {
+  padding: 26px 16px;
+  border: 1px dashed #303b4a;
+  border-radius: 8px;
+  color: #5f6b7c;
+  font-size: 10px;
+  text-align: center;
+}
+
+.scheduler-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+  padding: 10px 14px;
+  border: 1px solid #2b3441;
+  border-radius: 8px;
+  background: #111720;
+}
+
+.scheduler-item-main {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  flex: 1;
+}
+
+.scheduler-item code {
+  overflow: hidden;
+  color: #d5dbe5;
+  font: 11px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduler-item small {
+  color: #647082;
+  font-size: 9px;
+}
+
+.scheduler-remove {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #55383e;
+  border-radius: 6px;
+  background: transparent;
+  color: #bd7e87;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.scheduler-remove:hover {
+  background: #2a1b1e;
+}
+
+/* ========== 任务统计面板 ========== */
+
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.stats-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid #2b3441;
+  border-radius: 9px;
+  background: #111720;
+}
+
+.stats-card span {
+  color: #707c8d;
+  font-size: 10px;
+}
+
+.stats-card strong {
+  color: #e3e7ed;
+  font-size: 20px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-card small {
+  color: #5f6b7c;
+  font-size: 9px;
+}
+
+.stats-chart-section,
+.stats-sessions {
+  margin-bottom: 20px;
+}
+
+.stats-chart-section h2,
+.stats-sessions h2 {
+  margin: 0 0 12px;
+  color: #707c8d;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* 纯 CSS 柱状图：每列两根柱子（tokens / 费用），高度按各自最大值归一 */
+.stats-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 150px;
+  padding: 14px 16px;
+  border: 1px solid #2b3441;
+  border-radius: 9px;
+  background: #0d131b;
+  overflow-x: auto;
+}
+
+.stats-chart-col {
+  display: grid;
+  height: 100%;
+  min-width: 34px;
+  flex: 1;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 5px;
+  text-align: center;
+}
+
+.stats-chart-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  min-height: 0;
+}
+
+.stats-bar {
+  width: 11px;
+  border-radius: 3px 3px 0 0;
+  min-height: 1px;
+  transition: height 250ms ease;
+}
+
+.stats-bar.tokens {
+  background: linear-gradient(180deg, #668ff3, #3d5bb8);
+}
+
+.stats-bar.cost {
+  background: linear-gradient(180deg, #4cc38a, #2c7a58);
+}
+
+.stats-chart-label {
+  color: #647082;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-chart-count {
+  color: #8f9aaa;
+  font-size: 9px;
+}
+
+.stats-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+  color: #5f6b7c;
+  font-size: 9px;
+}
+
+.stats-chart-legend span::before {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: -1px;
+  content: "";
+}
+
+.stats-chart-legend .legend-tokens::before {
+  background: #668ff3;
+}
+
+.stats-chart-legend .legend-cost::before {
+  background: #4cc38a;
+}
+
+.stats-empty {
+  padding: 26px 16px;
+  border: 1px dashed #303b4a;
+  border-radius: 8px;
+  color: #5f6b7c;
+  font-size: 10px;
+  text-align: center;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.stats-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid #2b3441;
+  color: #707c8d;
+  font-weight: 550;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.stats-table td {
+  max-width: 320px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #212b38;
+  color: #9aa6b6;
+  white-space: nowrap;
+}
+
+.stats-table td:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stats-table tbody tr:hover td {
+  background: #141c27;
+}
+
+.stats-table .status-done {
+  color: #4cc38a;
+}
+
+.stats-table .status-running {
+  color: #668ff3;
+}
+
+.stats-table .status-error {
+  color: #e57373;
+}
+
+.stats-table .status-interrupted {
+  color: #e0a35c;
+}
+
+.stats-table .status-waiting_permission {
+  color: #e0a35c;
+}
+
+.stats-table .status-idle {
+  color: #647082;
+}
+
+@media (max-width: 1180px) {
+  .sessions-main {
+    padding-right: 28px;
+    padding-left: 28px;
+  }
+}

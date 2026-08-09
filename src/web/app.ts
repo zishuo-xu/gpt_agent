@@ -18,18 +18,21 @@ import {
   MemoryService,
   type MemoryDocumentId,
 } from "./memory.js";
-import { parseRunCommand } from "../core/run-task.js";
+import { parseRunCommand, stripScheduleFlags } from "../core/run-task.js";
 import { exportSessionHtml } from "./export-session.js";
 import {
   LOBBY_KEY,
   ProjectRegistry,
 } from "./project-registry.js";
+import { SchedulerHub } from "./scheduler-hub.js";
+import { computeSessionStats } from "./stats.js";
 
 export function createWebApp(
   configService: ConfigService,
   sessionManager?: WebSessionManager,
   /** 在业务路由之前挂载的中间件（如访问密码认证）；Hono 按注册顺序执行，必须先于路由 */
   mountBeforeRoutes?: (app: Hono) => void,
+  schedulerHub?: SchedulerHub,
 ): Hono & { registry: ProjectRegistry } {
   const app = new Hono();
   mountBeforeRoutes?.(app);
@@ -235,6 +238,14 @@ export function createWebApp(
     return context.json({ sessions: target.sessionManager.list() });
   });
 
+  app.get("/api/stats", async (context) => {
+    const target = await resolveProject(context);
+    if (!target.sessionManager) {
+      return context.json({ totals: {}, byDay: [], sessions: [] });
+    }
+    return context.json(computeSessionStats(target.sessionManager.list()));
+  });
+
   app.get("/api/memory", async (context) => {
     const target = await resolveProject(context);
     return context.json(await target.memoryService.list());
@@ -335,6 +346,65 @@ export function createWebApp(
         400,
       );
     }
+  });
+
+  app.get("/api/scheduled", async (context) => {
+    if (!schedulerHub) return context.json({ tasks: [] });
+    const key = context.req.query("project");
+    if (!key) return context.json({ tasks: [] });
+    const scheduler = await schedulerHub.ensureLoaded(key);
+    return context.json({ tasks: scheduler.list() });
+  });
+
+  app.post("/api/scheduled", async (context) => {
+    if (!schedulerHub) {
+      return context.json({ error: "定时任务不可用（未启用 Web 服务）" }, 500);
+    }
+    const key = context.req.query("project");
+    if (!key) return context.json({ error: "缺少 project 参数" }, 400);
+    const body = (await context.req.json()) as { command?: unknown };
+    const command = typeof body.command === "string" ? body.command.trim() : "";
+    if (!command) return context.json({ error: "命令不能为空" }, 400);
+    try {
+      // 原命令先整体解析（校验全部参数并取调度字段），落库时剥离 --at/--every 存干净命令
+      const parsed = parseRunCommand(command);
+      if (!parsed.at && !parsed.everyMinutes) {
+        return context.json(
+          { error: "定时任务需要 --at HH:mm 或 --every N 分钟" },
+          400,
+        );
+      }
+      const cleanCommand = stripScheduleFlags(command);
+      const options = parseRunCommand(cleanCommand);
+      const scheduler = await schedulerHub.ensureLoaded(key);
+      const task = await scheduler.add({
+        command: cleanCommand,
+        options,
+        // 只有 --every 时从注册时刻顺延一个周期开始
+        at:
+          parsed.at ??
+          new Date(Date.now() + (parsed.everyMinutes ?? 1) * 60_000).toISOString(),
+        ...(parsed.everyMinutes === undefined
+          ? {}
+          : { everyMinutes: parsed.everyMinutes }),
+      });
+      return context.json({ task }, 201);
+    } catch (error) {
+      return context.json(
+        { error: error instanceof Error ? error.message : "注册定时任务失败" },
+        400,
+      );
+    }
+  });
+
+  app.delete("/api/scheduled/:id", async (context) => {
+    if (!schedulerHub) return context.json({ error: "定时任务不可用" }, 500);
+    const key = context.req.query("project");
+    if (!key) return context.json({ error: "缺少 project 参数" }, 400);
+    const scheduler = await schedulerHub.ensureLoaded(key);
+    const removed = await scheduler.remove(context.req.param("id"));
+    if (!removed) return context.json({ error: "定时任务不存在" }, 404);
+    return context.json({ removed: true });
   });
 
   app.post("/api/sessions/:id/input", async (context) => {

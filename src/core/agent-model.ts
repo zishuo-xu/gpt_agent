@@ -98,7 +98,11 @@ export class ConversationAgentModel implements AgentModel {
     client: ModelClient,
     initialConversation: string | ConversationMessage[],
     context = new ContextManager(),
-    options: { toolNames?: readonly ToolName[] | undefined } = {},
+    options: {
+      toolNames?: readonly ToolName[] | undefined;
+      /** 单次请求最大输出 tokens（behavior.maxOutputTokens；缺省用客户端兜底 8192） */
+      maxTokens?: number | undefined;
+    } = {},
   ) {
     this.#client = client;
     this.#messages =
@@ -107,9 +111,11 @@ export class ConversationAgentModel implements AgentModel {
         : structuredClone(initialConversation);
     this.#context = context;
     this.#toolNames = options.toolNames;
+    this.#maxTokens = options.maxTokens;
   }
 
   readonly #toolNames: readonly ToolName[] | undefined;
+  readonly #maxTokens: number | undefined;
 
   addUserMessage(content: string): void {
     this.#messages.push({ role: "user", content });
@@ -248,6 +254,9 @@ export class ConversationAgentModel implements AgentModel {
       messages: transformMessages(prepared.messages),
       // 动态工具集：只注入本模型角色启用的工具（main 全量 / explore 只读集）
       tools: toolDefinitionsFor(this.#toolNames),
+      ...(this.#maxTokens === undefined
+        ? {}
+        : { maxTokens: this.#maxTokens }),
       signal,
     };
     let response: ModelResponse;

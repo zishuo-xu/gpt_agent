@@ -277,6 +277,7 @@ export class AgentSessionManager {
         model: await this.#createModel(
           conversationFrom(records, branches, branchId),
           runtimeConfig.behavior?.crossProjectMemory !== false,
+          runtimeConfig.behavior?.maxOutputTokens,
         ),
         stateDir: this.#stateDir,
         restoredEvents: records,
@@ -355,6 +356,7 @@ export class AgentSessionManager {
       model: await this.#createModel(
         [],
         runtimeConfig.behavior?.crossProjectMemory !== false,
+        runtimeConfig.behavior?.maxOutputTokens,
       ),
       stateDir: this.#stateDir,
       permissionRules: [
@@ -420,6 +422,7 @@ export class AgentSessionManager {
   async #createModel(
     messages: ConversationMessage[],
     crossProjectMemory = true,
+    maxOutputTokens?: number,
   ): Promise<ConversationAgentModel> {
     if (this.#modelFactory) {
       return await this.#modelFactory(messages);
@@ -438,6 +441,7 @@ export class AgentSessionManager {
         stateDir: this.#stateDir,
         crossProjectMemory,
       }),
+      maxOutputTokens === undefined ? {} : { maxTokens: maxOutputTokens },
     );
   }
 

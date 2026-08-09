@@ -14,6 +14,10 @@ export interface RunTaskOptions {
   permission?: PermissionMode;
   hardRules: PermissionRule[];
   semanticBounds: string[];
+  /** 定时执行：首次执行时间（ISO；--at HH:mm 解析，今天过期自动 +1 天） */
+  at?: string;
+  /** 定时执行：周期（分钟；--every N 解析；缺省一次性） */
+  everyMinutes?: number;
 }
 
 export interface TaskBoxDecision {
@@ -165,6 +169,8 @@ export function parseRunCommand(
     "--until",
     "--budget",
     "--permission",
+    "--at",
+    "--every",
   ]);
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index] ?? "";
@@ -202,6 +208,17 @@ export function parseRunCommand(
   const deadline = until ? parseDeadline(until, now) : undefined;
   const bounds = values.get("--bounds");
   const goal = values.get("--goal");
+  const atValue = values.get("--at");
+  const at = atValue ? parseAtTime(atValue, now) : undefined;
+  const everyValue = values.get("--every");
+  const everyMinutes =
+    everyValue === undefined ? undefined : Number(everyValue);
+  if (
+    everyMinutes !== undefined &&
+    (!Number.isInteger(everyMinutes) || everyMinutes <= 0)
+  ) {
+    throw new Error("--every 必须是大于 0 的整数分钟");
+  }
   const compiled = compileBounds(bounds);
   return {
     description: task,
@@ -213,8 +230,46 @@ export function parseRunCommand(
     ...(permissionValue
       ? { permission: permissionValue as PermissionMode }
       : {}),
+    ...(at ? { at: at.toISOString() } : {}),
+    ...(everyMinutes === undefined ? {} : { everyMinutes }),
     ...compiled,
   };
+}
+
+/**
+ * 解析 --at HH:mm：今天该时刻；已过则顺延到明天（与 --until 语义一致）。
+ * 返回 undefined 表示未提供。
+ */
+export function parseAtTime(value: string, now = new Date()): Date | undefined {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
+  if (!match) throw new Error("--at 必须是 HH:mm 格式（如 09:00）");
+  const target = new Date(now);
+  target.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  if (target.getTime() <= now.getTime()) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target;
+}
+
+/**
+ * 从 /run 命令中剥离定时规格（--at / --every）：
+ * 注册定时任务时落库存"可立即执行"的干净命令，调度信息由
+ * ScheduledTask.at / everyMinutes 单独承载，避免到期执行时二次解析带出调度字段。
+ */
+export function stripScheduleFlags(command: string): string {
+  const tokens = tokenize(command.trim());
+  if (tokens[0] === "/run") tokens.shift();
+  const remaining: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
+    if (token === "--at" || token === "--every") {
+      // 解析器保证这两个参数必带值，跳过下一个 token
+      index += 1;
+      continue;
+    }
+    remaining.push(token);
+  }
+  return ["/run", ...remaining].join(" ");
 }
 
 export function compileBounds(

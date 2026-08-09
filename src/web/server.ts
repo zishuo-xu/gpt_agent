@@ -1,10 +1,13 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createServer } from "node:net";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ConfigService } from "../config/service.js";
 import { createWebApp } from "./app.js";
 import { WebSessionManager } from "./sessions.js";
+import { SchedulerHub } from "./scheduler-hub.js";
+import { ProjectRegistry } from "./project-registry.js";
 
 export interface WebServerOptions {
   cwd: string;
@@ -38,6 +41,14 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
   const sessionManager = new WebSessionManager(options.cwd, configService);
   await sessionManager.restore();
   timingMark("restore");
+
+  // 定时 /run 调度器：与 app 共享（ticker + API 同一实例），默认项目启动即加载
+  const schedulerHub = new SchedulerHub(
+    path.join(configService.homeDir, ".myagent"),
+  );
+  await schedulerHub.ensureLoaded(
+    ProjectRegistry.projectKey(options.cwd),
+  );
 
   // 认证中间件：非 localhost 监听时校验密码。
   // 必须通过 mountBeforeRoutes 在业务路由之前注册——Hono 按注册顺序执行中间件，
@@ -84,9 +95,26 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
           });
         }
       : undefined,
+    schedulerHub,
   );
   // 主实例注册进 registry（共享锁），disposeAll 也会释放主实例的锁
   app.registry.seed(options.cwd, configService, sessionManager);
+
+  // 每 30s 轮询到期任务：解析到目标项目的 sessionManager 后按 /run 路径启动会话。
+  // 无人值守场景下 hardRules（deny 规则）由权限引擎强制，无需交互确认，直接放行。
+  const schedulerTicker = setInterval(() => {
+    void schedulerHub.tick(new Date(), async (projectKey, task) => {
+      const { resources } = await app.registry.resolve(projectKey);
+      const session = await resources.sessionManager.create(
+        task.command,
+        task.options.permission ?? "normal",
+      );
+      process.stdout.write(
+        `[scheduler] 定时任务 ${task.id} 已启动会话 ${session.id}（${session.title}）\n`,
+      );
+    });
+  }, 30_000);
+  schedulerTicker.unref();
 
   const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
 
@@ -105,6 +133,7 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
+    clearInterval(schedulerTicker);
     await sessionManager.flush();
     await sessionManager.releaseLock();
     await sessionManager.closeMcp();

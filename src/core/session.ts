@@ -101,6 +101,9 @@ export class AgentSession {
   #taskBox: TaskBox | undefined;
   #taskStopReason: "deadline" | "budget" | undefined;
   #taskHardStopped = false;
+  /** /run 任务期间模型重试+fallback 全部耗尽（sendInput 捕获后置位；
+      修复 run_finished 误报 completed——need_user 会把 status 盖成 done） */
+  #taskModelFailed = false;
   /** 恢复时检测到的中断任务（run_started 无配对 run_finished；进程崩溃残留） */
   readonly #interruptedTask:
     | {
@@ -567,6 +570,7 @@ export class AgentSession {
             // 重试与 fallback 全部耗尽：可操作化指引（分类 + 原文 + 建议），
             // 并发出 error 级 notify，无人值守时 webhook 能推送出去（失败要响）
             const guidance = modelErrorGuidanceText(error);
+            this.#taskModelFailed = true;
             this.#bus.emit({
               type: "notify",
               level: "error",
@@ -619,6 +623,7 @@ export class AgentSession {
     this.#taskBox = taskBox;
     this.#taskStopReason = undefined;
     this.#taskHardStopped = false;
+    this.#taskModelFailed = false;
     this.#permissions.setMode(options.permission ?? previousMode);
     this.#permissions.setRules([
       ...previousRules,
@@ -660,7 +665,7 @@ export class AgentSession {
           ? "interrupted"
           : "completed";
         reason = this.#taskStopReason;
-      } else if (this.#status === "error") {
+      } else if (this.#status === "error" || this.#taskModelFailed) {
         status = "failed";
         reason = "error";
       } else if (this.#status === "interrupted") {

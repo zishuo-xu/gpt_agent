@@ -482,6 +482,11 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
         config.behavior.subagentTimeoutMs > 0
           ? config.behavior.subagentTimeoutMs
           : 900_000,
+      maxOutputTokens:
+        typeof config.behavior?.maxOutputTokens === "number" &&
+        config.behavior.maxOutputTokens >= 256
+          ? config.behavior.maxOutputTokens
+          : 8192,
     },
   };
   for (const field of CONFIG_SCHEMA) {

@@ -56,6 +56,8 @@ export interface CompletionRequest {
   /** 缓存写入策略（参照 Pi cacheRetention）：摘要等一次性辅助请求用 "none"
       省略 cache_control，避免污染主会话缓存前缀。缺省 "default"（正常写缓存）。 */
   cacheRetention?: "default" | "none";
+  /** 单次请求最大输出 tokens；缺省 8192（客户端兜底） */
+  maxTokens?: number;
 }
 
 export type StreamChunk =
