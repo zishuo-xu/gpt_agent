@@ -1,7 +1,10 @@
-import { definePluginTool, type PluginToolRuntimeConfig } from "../../src/shared/plugin-tool.js";
-import { htmlToMainText, htmlToText } from "../../src/tools/html-text.js";
+import {
+  definePluginTool,
+  type PluginToolRuntimeConfig,
+} from "myagent:protocol";
+import { htmlToMainText, htmlToText } from "myagent:html-text";
 import { fetchPageText } from "./web-fetch.js";
-import { abortableSleep } from "../../src/utils/sleep.js";
+import { abortableSleep } from "myagent:sleep";
 
 /**
  * WebSearch 示例插件：网络搜索。

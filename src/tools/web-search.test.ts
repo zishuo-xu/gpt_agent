@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
+import { ensureSpecifierResolver } from "../tools/plugin-loader.js";
+// 插件源文件已改用 myagent:* 稳定 specifier：直接 import 前先注册解析器
+await ensureSpecifierResolver();
+const {
   attachPageContents,
   parseBaiduResults,
   parseBingResults,
@@ -9,7 +12,7 @@ import {
   parseTavilyResponse,
   resolveSearchConfig,
   throttleSearch,
-} from "../../.myagent/tools/web-search.js";
+} = await import("../../.myagent/tools/web-search.js");
 
 test("Bing 解析：b_algo 块提取标题/链接/摘要并解码重定向", () => {
   const html = `

@@ -1,6 +1,6 @@
-import { definePluginTool } from "../../src/shared/plugin-tool.js";
-import { htmlToMainText } from "../../src/tools/html-text.js";
-import { abortableSleep } from "../../src/utils/sleep.js";
+import { definePluginTool } from "myagent:protocol";
+import { htmlToMainText } from "myagent:html-text";
+import { abortableSleep } from "myagent:sleep";
 
 /**
  * WebFetch 示例插件：抓取 URL 并返回可见文本。
