@@ -1981,3 +1981,27 @@
   color: #cfc4aa;
 }
 
+
+/* ========== 移动端（≤768px） ========== */
+@media (max-width: 768px) {
+  .sessions-main {
+    width: 100vw;
+    padding: 16px 12px 12px;
+  }
+  .sessions-header {
+    padding-bottom: 10px;
+  }
+  .header-actions {
+    flex-wrap: wrap;
+  }
+  .header-actions button,
+  .header-actions select {
+    min-height: 44px;
+  }
+  .web-composer textarea {
+    font-size: 16px;
+  }
+  .web-approval-card .approval-actions button {
+    min-height: 44px;
+  }
+}
