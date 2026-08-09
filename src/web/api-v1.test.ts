@@ -218,3 +218,162 @@ test("v1 只读：会话不存在返回 404 not_found", async () => {
   const body = await response.json();
   assert.equal(body.code, "not_found");
 });
+
+async function v1Fixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-v1-"));
+  const configService = new ConfigService({
+    cwd: path.join(root, "project"),
+    homeDir: path.join(root, "home"),
+  });
+  const registry = new ProjectRegistry({
+    defaultCwd: path.join(root, "project"),
+    homeDir: path.join(root, "home"),
+  });
+  const sessionManager = new WebSessionManager(
+    path.join(root, "project"),
+    configService,
+  );
+  await sessionManager.restore();
+  registry.seed(path.join(root, "project"), configService, sessionManager);
+  const app = mounted(
+    createApiV1({
+      apiToken: "secret-token",
+      registry,
+      configService,
+      sessionManager,
+    }),
+  );
+  return { app, sessionManager };
+}
+
+const jsonHeaders = {
+  authorization: "Bearer secret-token",
+  "content-type": "application/json",
+};
+
+test("v1 写：runs 发起任务（无边界直发；有边界需确认）", async () => {
+  const { app, sessionManager } = await v1Fixture();
+
+  // 无边界：直接创建
+  const okResponse = await app.request("/api/v1/runs", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ command: "/run 修复测试" }),
+  });
+  assert.equal(okResponse.status, 200);
+  const okBody = await okResponse.json();
+  assert.ok(typeof okBody.data.sessionId === "string");
+  assert.equal(sessionManager.list().length, 1);
+
+  // 有边界（路径规则 → hardRules）：未确认 → 409 conflict + 边界清单
+  const needConfirm = await app.request("/api/v1/runs", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ command: '/run 修复测试 --bounds "不改 src/**"' }),
+  });
+  assert.equal(needConfirm.status, 409);
+  const confirmBody = await needConfirm.json();
+  assert.equal(confirmBody.code, "conflict");
+  assert.ok(Array.isArray(confirmBody.data.hardRules));
+  assert.equal(confirmBody.data.hardRules.length, 3);
+  assert.equal(sessionManager.list().length, 1, "未确认不创建会话");
+
+  // 自然语言边界（无路径规则 → 仅 semanticBounds）不要求确认
+  const softBounds = await app.request("/api/v1/runs", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ command: "/run 修复测试 --bounds 禁止删除 src" }),
+  });
+  assert.equal(softBounds.status, 200);
+  assert.equal(sessionManager.list().length, 2);
+
+  // 确认后创建成功
+  const confirmed = await app.request("/api/v1/runs", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({
+      command: '/run 修复测试 --bounds "不改 src/**"',
+      confirmBounds: true,
+    }),
+  });
+  assert.equal(confirmed.status, 200);
+  assert.equal(sessionManager.list().length, 3);
+
+  // 非 /run 命令 → 400 invalid
+  const invalid = await app.request("/api/v1/runs", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ command: "随便说说" }),
+  });
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).code, "invalid");
+});
+
+test("v1 写：messages 发送/排队语义 + /run 拒绝", async () => {
+  const { app, sessionManager } = await v1Fixture();
+  const session = await sessionManager.create("你好", "normal");
+
+  const sent = await app.request(`/api/v1/sessions/${session.id}/messages`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ message: "继续" }),
+  });
+  assert.equal(sent.status, 200);
+  const sentBody = await sent.json();
+  assert.equal(sentBody.data.accepted, true);
+  // 会话创建后立即进入处理，排队与否由核心状态决定（测试环境恒为处理中）
+  assert.equal(typeof sentBody.data.queued, "boolean");
+
+  const runRejected = await app.request(
+    `/api/v1/sessions/${session.id}/messages`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ message: "/run 新任务" }),
+    },
+  );
+  assert.equal(runRejected.status, 400);
+
+  const empty = await app.request(`/api/v1/sessions/${session.id}/messages`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ message: "   " }),
+  });
+  assert.equal(empty.status, 400);
+});
+
+test("v1 写：approvals 审批 + interrupt 中断", async () => {
+  const { app, sessionManager } = await v1Fixture();
+  const session = await sessionManager.create("你好", "normal");
+
+  // granted 非布尔 → 400
+  const bad = await app.request(
+    `/api/v1/sessions/${session.id}/approvals/c1`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ granted: "yes" }),
+    },
+  );
+  assert.equal(bad.status, 400);
+
+  // 不存在的审批 callId → 409（resolvePermission 对未知 id 返回 false）
+  const missing = await app.request(
+    `/api/v1/sessions/${session.id}/approvals/c1`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ granted: true }),
+    },
+  );
+  assert.equal(missing.status, 409);
+
+  // 运行中会话 interrupt → 200 interrupted:true（测试环境会话创建即处理）
+  const interrupt = await app.request(
+    `/api/v1/sessions/${session.id}/interrupt`,
+    { method: "POST", headers: jsonHeaders },
+  );
+  assert.equal(interrupt.status, 200);
+  const interruptBody = await interrupt.json();
+  assert.equal(interruptBody.data.interrupted, true);
+});
