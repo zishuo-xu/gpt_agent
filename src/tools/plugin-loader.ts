@@ -131,7 +131,7 @@ export async function ensureSpecifierResolver(): Promise<void> {
     if (
       typeof moduleApi.registerHooks === "function" &&
       // 测试钩子：强制走 legacy register 回退路径（覆盖 Node <22.15 场景），生产不设置
-      process.env.MYAGENT_FORCE_LEGACY_RESOLVER !== "1"
+      process.env.MYAGENT_TEST_FORCE_LEGACY_RESOLVER !== "1"
     ) {
       // @types/node 将 registerHooks 的 resolve 声明为纯同步（ResolveHookSync），
       // 但运行时同步 hook 可返回 thenable（委派链下游 tsx 为异步 hook，实测可用）
@@ -142,9 +142,11 @@ export async function ensureSpecifierResolver(): Promise<void> {
       moduleApi.register(MYAGENT_RESOLVER_DATA_URL, import.meta.url);
     }
   } catch (error) {
+    // 注册失败不置 ready：下次 loadOne 可重试（相对路径写法始终可用作兜底）
     console.error(
       `[plugins] myagent:* 解析器注册失败：${(error as Error).message}（插件可用相对路径写法）`,
     );
+    return;
   }
   specifierResolverReady = true;
 }

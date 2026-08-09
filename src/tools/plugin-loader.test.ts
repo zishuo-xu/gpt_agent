@@ -254,7 +254,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 async function main() {
-  process.env.MYAGENT_FORCE_LEGACY_RESOLVER = "1";
+  process.env.MYAGENT_TEST_FORCE_LEGACY_RESOLVER = "1";
   const { loadPluginTools } = await import(pathToFileURL(process.argv[2]!).href);
   const { PluginToolRegistry } = await import(pathToFileURL(process.argv[3]!).href);
   const root = await mkdtemp(path.join(os.tmpdir(), "myagent-legacy-"));
@@ -329,6 +329,33 @@ test("加载器：home 层（~/.myagent/tools）插件用 myagent:* 报错且信
   assert.match(report.errors[0]!.file, /home-alias\.ts/);
   // 错误信息需指出目标模块不存在（可定位问题），而非静默失败
   assert.match(report.errors[0]!.message, /Cannot find|myagent/i);
+});
+
+test("加载器：项目路径含空格/中文时 myagent:* 项目根推导仍正确", async () => {
+  const { home, registry } = await fixture();
+  // 项目根带空格与中文（URL 编码路径）——项目根推导必须与特殊字符无关
+  const project = path.join(home, "..", "My Agent 项目");
+  await mkdir(path.join(project, "src", "shared"), { recursive: true });
+  await mkdir(path.join(project, ".myagent", "tools"), { recursive: true });
+  await writeFile(
+    path.join(project, "package.json"),
+    `${JSON.stringify({ type: "module" })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(project, "src", "shared", "plugin-tool.ts"),
+    "export function definePluginTool<T>(tool: T): T { return tool; }\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(project, ".myagent", "tools", "特殊 插件.ts"),
+    `import { definePluginTool } from "myagent:protocol";\n` +
+      `export default definePluginTool({ name: "I18nAlias", description: "特殊字符", inputSchema: { type: "object" }, async run() { return { summary: "ok" }; } });\n`,
+    "utf8",
+  );
+  const report = await loadPluginTools(home, project, registry);
+  assert.equal(report.errors.length, 0, JSON.stringify(report.errors));
+  assert.deepEqual(report.loaded.map((item) => item.name), ["I18nAlias"]);
 });
 
 test("加载器：myagent:* 稳定 specifier 解析成功且可调用", async () => {
