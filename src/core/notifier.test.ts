@@ -238,3 +238,87 @@ test("run 会话的 done 不双推（由 run_finished 覆盖）；交互会话�
   notifier.dispose();
   fetch.restore();
 });
+
+test("通用网关推送附带结构化字段（status/cost/tokens/sessionId/durationMs）", async () => {
+  const bus = createBus();
+  const fetch = stubFetch();
+  const notifier = new WebhookNotifier(bus.subscribe, {
+    webhookUrl: "https://example.com/hook",
+    sessionTitle: "任务D",
+    getSummary: () => ({
+      id: "sess-9",
+      title: "任务D",
+      status: "error",
+      permissionMode: "normal",
+      createdAt: "2026-08-09T10:00:00.000Z",
+      updatedAt: "2026-08-09T10:40:00.000Z",
+      totalInputTokens: 8000,
+      totalOutputTokens: 300,
+      totalCachedTokens: 0,
+      totalCostCny: 0.66,
+      totalMissedTokens: 0,
+      totalMissedCostCny: 0,
+      todos: [],
+      toolCallCount: 2,
+      kind: "run",
+    }),
+  });
+  bus.emit({
+    type: "run_finished",
+    taskId: "t1",
+    status: "failed",
+    reason: "error",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fetch.calls.length, 1);
+  assert.deepEqual(fetch.calls[0].body, {
+    title: "任务已失败",
+    body: "会话「任务D」的无人值守任务已失败（error）。耗时 40 分钟 · 费用 ¥0.66 · 输入 8000 tokens",
+    status: "failed",
+    sessionId: "sess-9",
+    costCny: 0.66,
+    tokens: 8000,
+    durationMs: 40 * 60_000,
+  });
+  notifier.dispose();
+  fetch.restore();
+});
+
+test("企业微信/飞书机器人格式不携带结构化字段（文本格式不变）", async () => {
+  const bus = createBus();
+  const fetch = stubFetch();
+  const notifier = new WebhookNotifier(bus.subscribe, {
+    webhookUrl:
+      "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc",
+    sessionTitle: "会话E",
+    getSummary: () => ({
+      id: "sess-9",
+      title: "会话E",
+      status: "done",
+      permissionMode: "normal",
+      createdAt: "2026-08-09T10:00:00.000Z",
+      updatedAt: "2026-08-09T10:00:03.000Z",
+      totalInputTokens: 100,
+      totalOutputTokens: 10,
+      totalCachedTokens: 0,
+      totalCostCny: 0.01,
+      totalMissedTokens: 0,
+      totalMissedCostCny: 0,
+      todos: [],
+      toolCallCount: 0,
+      kind: "run",
+    }),
+  });
+  bus.emit({ type: "run_finished", taskId: "t1", status: "completed" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(fetch.calls[0].body, {
+    msgtype: "text",
+    text: {
+      content:
+        "[MyAgent] 任务已完成\n会话「会话E」的无人值守任务已完成。耗时 0 分钟 · 费用 ¥0.01 · 输入 100 tokens",
+    },
+  });
+  assert.equal(fetch.calls[0].body.status, undefined);
+  notifier.dispose();
+  fetch.restore();
+});

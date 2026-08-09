@@ -18,6 +18,10 @@ export interface RunTaskOptions {
   at?: string;
   /** 定时执行：周期（分钟；--every N 解析；缺省一次性） */
   everyMinutes?: number;
+  /** 任务期审批超时（毫秒；--approve-timeout 秒 解析，缺省沿用会话配置） */
+  approveTimeoutMs?: number;
+  /** 任务期自动放行规则（--auto-allow 逗号分隔的权限 pattern，如 "Bash(pnpm*),Read(*)"；结束回落） */
+  autoAllowRules?: string[];
 }
 
 export interface TaskBoxDecision {
@@ -66,6 +70,9 @@ export class TaskBox {
         : "",
       this.options.semanticBounds.length
         ? `软语义边界（路径规则无法完全保证，必须严格遵守）：${this.options.semanticBounds.join("；")}`
+        : "",
+      this.options.autoAllowRules?.length
+        ? `任务期已自动放行（无需审批）：${this.options.autoAllowRules.join("、")}`
         : "",
       this.options.deadline
         ? `截止时间：${this.options.deadline}`
@@ -171,6 +178,8 @@ export function parseRunCommand(
     "--permission",
     "--at",
     "--every",
+    "--approve-timeout",
+    "--auto-allow",
   ]);
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index] ?? "";
@@ -219,6 +228,29 @@ export function parseRunCommand(
   ) {
     throw new Error("--every 必须是大于 0 的整数分钟");
   }
+  const approveTimeoutValue = values.get("--approve-timeout");
+  const approveTimeoutSec =
+    approveTimeoutValue === undefined ? undefined : Number(approveTimeoutValue);
+  if (
+    approveTimeoutSec !== undefined &&
+    (!Number.isFinite(approveTimeoutSec) || approveTimeoutSec < 5)
+  ) {
+    throw new Error("--approve-timeout 必须是 ≥5 的秒数");
+  }
+  const autoAllowValue = values.get("--auto-allow");
+  const autoAllowRules =
+    autoAllowValue === undefined
+      ? undefined
+      : autoAllowValue
+          .split(",")
+          .map((pattern) => pattern.trim())
+          .filter(Boolean);
+  if (
+    autoAllowRules !== undefined &&
+    autoAllowRules.length === 0
+  ) {
+    throw new Error("--auto-allow 需要至少一个规则 pattern，如 Bash(pnpm*),Read(*)");
+  }
   const compiled = compileBounds(bounds);
   return {
     description: task,
@@ -232,6 +264,10 @@ export function parseRunCommand(
       : {}),
     ...(at ? { at: at.toISOString() } : {}),
     ...(everyMinutes === undefined ? {} : { everyMinutes }),
+    ...(approveTimeoutSec === undefined
+      ? {}
+      : { approveTimeoutMs: Math.round(approveTimeoutSec * 1000) }),
+    ...(autoAllowRules === undefined ? {} : { autoAllowRules }),
     ...compiled,
   };
 }
@@ -331,6 +367,12 @@ export function serializeTaskOptions(
       ? {}
       : { budgetCny: options.budgetCny }),
     ...(options.permission ? { permission: options.permission } : {}),
+    ...(options.approveTimeoutMs === undefined
+      ? {}
+      : { approveTimeoutMs: options.approveTimeoutMs }),
+    ...(options.autoAllowRules === undefined
+      ? {}
+      : { autoAllowRules: options.autoAllowRules }),
     hardRules: structuredClone(options.hardRules),
     semanticBounds: [...options.semanticBounds],
   };
@@ -352,6 +394,12 @@ export function taskOptionsFromSerialized(
     ...(taskOptions.permission
       ? { permission: taskOptions.permission }
       : {}),
+    ...(taskOptions.approveTimeoutMs === undefined
+      ? {}
+      : { approveTimeoutMs: taskOptions.approveTimeoutMs }),
+    ...(taskOptions.autoAllowRules === undefined
+      ? {}
+      : { autoAllowRules: taskOptions.autoAllowRules }),
     hardRules: structuredClone(taskOptions.hardRules),
     semanticBounds: [...taskOptions.semanticBounds],
   };
@@ -367,6 +415,8 @@ type AgentEventRunStarted = {
     deadline?: string;
     budgetCny?: number;
     permission?: PermissionMode;
+    approveTimeoutMs?: number;
+    autoAllowRules?: string[];
     hardRules: PermissionRule[];
     semanticBounds: string[];
   };

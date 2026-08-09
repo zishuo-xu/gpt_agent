@@ -59,20 +59,23 @@ export class SchedulerHub {
 
   async tick(
     now = new Date(),
-    onDue: (projectKey: string, task: ScheduledTask) => boolean | Promise<boolean>,
+    onDue: (
+      projectKey: string,
+      task: ScheduledTask,
+    ) => string | false | Promise<string | false>,
   ): Promise<void> {
     for (const [projectKey, scheduler] of this.#schedulers) {
       for (const task of scheduler.due(now)) {
         try {
-          const started = await onDue(projectKey, task);
-          if (started === false) {
+          const sessionId = await onDue(projectKey, task);
+          if (sessionId === false) {
             // 预算护栏拒绝：不视为失败，顺延后继续保留
             await scheduler.postpone(task, BUDGET_RETRY_MS, now);
             console.warn(
               `[scheduler] 定时任务 ${task.id} 因预算护栏顺延（24 小时后重试）`,
             );
           } else {
-            await scheduler.confirm(task, now);
+            await scheduler.confirm(task, now, sessionId);
           }
         } catch (error) {
           const message =

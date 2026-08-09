@@ -27,6 +27,12 @@ interface SessionStatsPayload {
     runSessions: number;
   };
   byDay: DayBucket[];
+  byModel: Array<{
+    providerId: string;
+    model: string;
+    costCny: number;
+    tokens: number;
+  }>;
   sessions: Array<{
     id: string;
     title: string;
@@ -296,6 +302,47 @@ export function StatsApp() {
               <div className="stats-empty">
                 暂无会话数据。跑过 /run 任务或对话后这里会出现聚合。
               </div>
+            )}
+            {stats.byModel.length > 0 && (
+              <section className="stats-model-section">
+                <h2>按模型成本</h2>
+                <div className="stats-model-table">
+                  {stats.byModel.map((entry) => {
+                    const maxCost = Math.max(
+                      ...stats.byModel.map((item) => item.costCny),
+                      0.01,
+                    );
+                    return (
+                      <div
+                        className="stats-model-row"
+                        key={`${entry.providerId}/${entry.model}`}
+                      >
+                        <span className="stats-model-name">
+                          {entry.model}
+                          <small>{entry.providerId}</small>
+                        </span>
+                        <span className="stats-model-bar">
+                          <span
+                            style={{
+                              width: `${
+                                Math.round(
+                                  (entry.costCny / maxCost) * 100,
+                                ) || 1
+                              }%`,
+                            }}
+                          />
+                        </span>
+                        <span className="stats-model-cost">
+                          {formatCost(entry.costCny)}
+                        </span>
+                        <span className="stats-model-tokens">
+                          {formatTokens(entry.tokens)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
             )}
             {stats.sessions.length > 0 && (
               <section className="stats-sessions">

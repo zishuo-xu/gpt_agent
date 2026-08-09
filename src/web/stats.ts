@@ -23,6 +23,13 @@ export interface SessionStats {
     runSessions: number;
   };
   byDay: DayBucket[];
+  /** 按模型/供应商聚合的成本（跨会话累计，按费用降序） */
+  byModel: Array<{
+    providerId: string;
+    model: string;
+    costCny: number;
+    tokens: number;
+  }>;
   /** 按创建时间倒序的会话明细（前端表格直接消费 summary 字段） */
   sessions: AgentSessionSummary[];
 }
@@ -53,6 +60,7 @@ export function computeSessionStats(
     runSessions: 0,
   };
   const byDay = new Map<string, DayBucket>();
+  const byModel = new Map<string, SessionStats["byModel"][number]>();
 
   for (const summary of summaries) {
     totals.sessions += 1;
@@ -77,6 +85,20 @@ export function computeSessionStats(
         break;
     }
 
+    // 按模型/供应商累计（各会话 summary 的 costByModel 合并）
+    for (const bucket of summary.costByModel) {
+      const key = `${bucket.providerId}/${bucket.model}`;
+      const current = byModel.get(key) ?? {
+        providerId: bucket.providerId,
+        model: bucket.model,
+        costCny: 0,
+        tokens: 0,
+      };
+      current.costCny += bucket.costCny;
+      current.tokens += bucket.tokens;
+      byModel.set(key, current);
+    }
+
     const day = localDay(summary.createdAt);
     const bucket = byDay.get(day) ?? {
       day,
@@ -97,8 +119,16 @@ export function computeSessionStats(
   const byDaySorted = [...byDay.values()].sort((a, b) =>
     a.day.localeCompare(b.day),
   );
+  const byModelSorted = [...byModel.values()].sort(
+    (a, b) => b.costCny - a.costCny,
+  );
   const sessionsSorted = [...summaries].sort((a, b) =>
     b.createdAt.localeCompare(a.createdAt),
   );
-  return { totals, byDay: byDaySorted, sessions: sessionsSorted };
+  return {
+    totals,
+    byDay: byDaySorted,
+    byModel: byModelSorted,
+    sessions: sessionsSorted,
+  };
 }

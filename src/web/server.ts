@@ -128,7 +128,7 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
       process.stdout.write(
         `[scheduler] 定时任务 ${task.id} 已启动会话 ${session.id}（${session.title}）\n`,
       );
-      return true;
+      return session.id;
     });
   }, 30_000);
   schedulerTicker.unref();

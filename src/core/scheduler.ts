@@ -19,6 +19,12 @@ export interface ScheduledTask {
   options: RunTaskOptions;
   /** 连续启动失败次数（持久化，重启不重置）；达上限后任务被丢弃 */
   attempts?: number;
+  /** 上次触发时间（成功/失败/预算顺延均记录） */
+  lastRunAt?: string;
+  /** 上次触发结果 */
+  lastRunStatus?: "started" | "failed" | "skipped-budget";
+  /** 上次成功启动的会话 id（面板可跳转） */
+  lastRunSessionId?: string;
 }
 
 /**
@@ -70,6 +76,19 @@ export class RunScheduler {
         if (typeof record.attempts === "number") {
           task.attempts = record.attempts;
         }
+        if (typeof record.lastRunAt === "string") {
+          task.lastRunAt = record.lastRunAt;
+        }
+        if (
+          record.lastRunStatus === "started" ||
+          record.lastRunStatus === "failed" ||
+          record.lastRunStatus === "skipped-budget"
+        ) {
+          task.lastRunStatus = record.lastRunStatus;
+        }
+        if (typeof record.lastRunSessionId === "string") {
+          task.lastRunSessionId = record.lastRunSessionId;
+        }
         return task;
       });
   }
@@ -104,10 +123,17 @@ export class RunScheduler {
       .map((task) => structuredClone(task));
   }
 
-  /** 启动成功：一次性任务移除；周期任务按原时刻重排到下一个 > now 的周期 */
-  async confirm(task: ScheduledTask, now = new Date()): Promise<void> {
+  /** 启动成功：记录执行结果，一次性任务移除；周期任务按原时刻重排到下一个 > now 的周期 */
+  async confirm(
+    task: ScheduledTask,
+    now = new Date(),
+    sessionId?: string,
+  ): Promise<void> {
     const current = this.#find(task.id);
     if (!current) return;
+    current.lastRunAt = now.toISOString();
+    current.lastRunStatus = "started";
+    if (sessionId) current.lastRunSessionId = sessionId;
     if (current.everyMinutes && current.everyMinutes > 0) {
       this.#advanceToNext(current, now);
     } else {
@@ -116,7 +142,7 @@ export class RunScheduler {
     await this.persist();
   }
 
-  /** 预算护栏顺延：周期任务保相位（重排到下一周期），一次性任务 +delayMs */
+  /** 预算护栏顺延：记录结果，周期任务保相位（重排到下一周期），一次性任务 +delayMs */
   async postpone(
     task: ScheduledTask,
     delayMs: number,
@@ -124,6 +150,8 @@ export class RunScheduler {
   ): Promise<void> {
     const current = this.#find(task.id);
     if (!current) return;
+    current.lastRunAt = now.toISOString();
+    current.lastRunStatus = "skipped-budget";
     if (current.everyMinutes && current.everyMinutes > 0) {
       this.#advanceToNext(current, now);
     } else {
@@ -133,7 +161,7 @@ export class RunScheduler {
   }
 
   /**
-   * 启动失败重试：attempts+1 后顺延 delayMs；超过 maxAttempts 丢弃任务。
+   * 启动失败重试：记录结果，attempts+1 后顺延 delayMs；超过 maxAttempts 丢弃任务。
    * 返回 false 表示已丢弃。
    */
   async retry(
@@ -151,6 +179,8 @@ export class RunScheduler {
       return false;
     }
     current.attempts = attempts;
+    current.lastRunAt = now.toISOString();
+    current.lastRunStatus = "failed";
     current.at = new Date(now.getTime() + delayMs).toISOString();
     await this.persist();
     return true;

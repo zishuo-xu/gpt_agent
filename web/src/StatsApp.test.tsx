@@ -65,6 +65,7 @@ function makeSummary(
     todos: [],
     toolCallCount: 5,
     kind,
+    costByModel: [],
     ...overrides,
   };
 }
@@ -83,6 +84,10 @@ const STATS = {
   byDay: [
     { day: "2026-08-08", sessions: 1, completed: 1, failed: 0, tokens: 500, costCny: 0.1 },
     { day: "2026-08-09", sessions: 1, completed: 1, failed: 0, tokens: 1500, costCny: 0.74 },
+  ],
+  byModel: [
+    { providerId: "opencode", model: "claude-sonnet", costCny: 0.6, tokens: 1500 },
+    { providerId: "opencode", model: "deepseek", costCny: 0.24, tokens: 500 },
   ],
   sessions: [
     makeSummary("s-run", "巡检任务", "run"),
@@ -146,6 +151,18 @@ describe("StatsApp（任务统计面板）", () => {
     // 类型标识
     assert.match(text, /无人值守/);
     assert.match(text, /交互/);
+    fetch.restore();
+  });
+
+  it("渲染按模型成本维度表（费用占比条 + tokens）", async () => {
+    const fetch = stubFetch(baseRoutes());
+    const { container } = await setup(baseRoutes());
+    const text = container.textContent ?? "";
+    assert.match(text, /按模型成本/);
+    assert.equal(container.querySelectorAll(".stats-model-row").length, 2);
+    assert.match(text, /claude-sonnet/);
+    assert.match(text, /deepseek/);
+    assert.match(text, /¥0\.6/);
     fetch.restore();
   });
 

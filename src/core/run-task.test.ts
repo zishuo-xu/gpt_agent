@@ -17,7 +17,9 @@ import type {
 } from "../model/types.js";
 import {
   parseRunCommand,
+  serializeTaskOptions,
   TaskBox,
+  taskOptionsFromSerialized,
   type RunTaskOptions,
 } from "./run-task.js";
 import { AgentSession } from "./session.js";
@@ -500,4 +502,140 @@ test("/run 模型重试+fallback 耗尽时 run_finished 报 failed 而非 comple
     ),
     "应发出 error 级通知",
   );
+});
+
+test("parseRunCommand --approve-timeout / --auto-allow 解析与校验", () => {
+  const task = parseRunCommand(
+    '/run 巡检 --approve-timeout 30 --auto-allow "Bash(pnpm*),Read(*)"',
+  );
+  assert.equal(task.approveTimeoutMs, 30_000);
+  assert.deepEqual(task.autoAllowRules, ["Bash(pnpm*)", "Read(*)"]);
+  assert.throws(
+    () => parseRunCommand("/run x --approve-timeout 3"),
+    /--approve-timeout/,
+  );
+  assert.throws(
+    () => parseRunCommand("/run x --auto-allow ",""),
+    /--auto-allow/,
+  );
+  // 序列化往返（崩溃恢复续跑语义一致）
+  const serialized = serializeTaskOptions(task);
+  const restored = taskOptionsFromSerialized(serialized);
+  assert.equal(restored.approveTimeoutMs, 30_000);
+  assert.deepEqual(restored.autoAllowRules, ["Bash(pnpm*)", "Read(*)"]);
+});
+
+test("任务级 --approve-timeout 覆盖会话级超时，任务结束后恢复", async () => {
+  const cwd = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-task-approve-timeout-"),
+  );
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-task-approve-timeout-state-"),
+  );
+  const client = new ScriptedClient([
+    response("", [
+      {
+        id: "side-effect",
+        tool: "Bash",
+        target: "echo changed > changed.txt",
+        args: { command: "echo changed > changed.txt" },
+      },
+    ]),
+    response("审批超时，未执行命令；任务已安全收尾。"),
+  ]);
+  const session = new AgentSession({
+    id: "task-timeout",
+    title: "任务级超时",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(client, []),
+    stateDir,
+    // 会话级 60s：若任务级覆盖失效，测试会在审批上等 60s 超时
+    approvalTimeoutMs: 60_000,
+  });
+  const events: AgentEvent[] = [];
+  session.subscribe((record) => events.push(record.event));
+
+  await session.runTask({
+    description: "写文件验证超时",
+    hardRules: [],
+    semanticBounds: [],
+    approveTimeoutMs: 50,
+  });
+
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "permission_denied" &&
+        event.call.id === "side-effect",
+    ),
+    "任务级 50ms 超时应拒绝审批",
+  );
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "notify" &&
+        event.level === "warn" &&
+        /0\.0?5s 无人响应/.test(event.message),
+    ),
+    "超时通知应显示任务级超时值（0.05s）",
+  );
+  await assert.rejects(access(path.join(cwd, "changed.txt")));
+});
+
+test("--auto-allow 任务期放行指定工具，任务结束后回落", async () => {
+  const cwd = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-auto-allow-"),
+  );
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-auto-allow-state-"),
+  );
+  const call = {
+    id: "side-effect",
+    tool: "Bash",
+    target: "echo changed > changed.txt",
+    args: { command: "echo changed > changed.txt" },
+  };
+  const client = new ScriptedClient([
+    response("", [call]),
+    response("任务完成。"),
+    response("", [call]),
+    response("已拒绝。"),
+  ]);
+  const session = new AgentSession({
+    id: "auto-allow",
+    title: "任务期白名单",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(client, []),
+    stateDir,
+    approvalTimeoutMs: 100,
+  });
+  const events: AgentEvent[] = [];
+  session.subscribe((record) => events.push(record.event));
+  const hasAsk = () =>
+    events.some(
+      (event) => event.type === "ask_permission" && event.call.id === "side-effect",
+    );
+  const hasDenied = () =>
+    events.some(
+      (event) =>
+        event.type === "permission_denied" && event.call.id === "side-effect",
+    );
+
+  // 任务期：auto-allow 命中 → 直接执行，无审批请求
+  await session.runTask({
+    description: "写文件",
+    hardRules: [],
+    semanticBounds: [],
+    autoAllowRules: ["Bash(echo changed*)"],
+  });
+  assert.equal(hasAsk(), false, "任务期内应被 auto-allow 放行");
+  assert.equal(hasDenied(), false);
+  await access(path.join(cwd, "changed.txt"));
+
+  // 任务结束：规则回落 → 同样的命令重新要求审批（100ms 超时拒绝）
+  await session.sendInput("再执行一次");
+  assert.equal(hasAsk(), true, "任务结束后规则应回落，命令重新要求审批");
+  assert.equal(hasDenied(), true, "无响应时按会话级超时拒绝");
 });

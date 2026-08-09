@@ -85,14 +85,18 @@ test("confirm：一次性任务移除；周期任务按原时刻重排（不累�
   });
 
   const now = new Date("2026-08-09T10:05:00.000Z");
-  await scheduler.confirm(oneShot, now);
+  await scheduler.confirm(oneShot, now, "sess-1");
   assert.equal(scheduler.list().length, 1);
 
-  await scheduler.confirm(recurring, now);
+  await scheduler.confirm(recurring, now, "sess-2");
   const remaining = scheduler.list();
   assert.equal(remaining.length, 1);
   // 原定 09:00，错过 09:30 / 10:00 两个周期 → 重排到 10:30
   assert.equal(remaining[0]?.at, "2026-08-09T10:30:00.000Z");
+  // 执行记录
+  assert.equal(remaining[0]?.lastRunStatus, "started");
+  assert.equal(remaining[0]?.lastRunAt, now.toISOString());
+  assert.equal(remaining[0]?.lastRunSessionId, "sess-2");
   // 重排后的任务在新时刻之前不再触发
   assert.equal(scheduler.due(new Date("2026-08-09T10:29:59.000Z")).length, 0);
 });

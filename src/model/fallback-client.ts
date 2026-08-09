@@ -29,6 +29,16 @@ export interface FallbackModelCandidate {
   pricing?: ModelPricing;
 }
 
+/** 从候选模型 id（形如 "opencode/deepseek-v4-flash"）拆供应商与模型名 */
+function splitCandidateId(id: string): {
+  providerId: string;
+  model: string;
+} {
+  const slash = id.indexOf("/");
+  if (slash <= 0) return { providerId: "unknown", model: id };
+  return { providerId: id.slice(0, slash), model: id.slice(slash + 1) };
+}
+
 export class FallbackModelClient implements ModelClient {
   readonly #candidates: FallbackModelCandidate[];
 
@@ -65,7 +75,7 @@ export class FallbackModelClient implements ModelClient {
             type: "done",
             response: {
               ...chunk.response,
-              model: candidate.id,
+              ...splitCandidateId(candidate.id),
               ...(fallbacks.length > 0 ? { fallbacks } : {}),
             },
           };
@@ -106,7 +116,7 @@ export class FallbackModelClient implements ModelClient {
         const response = await candidate.client.complete(request);
         return {
           ...response,
-          model: candidate.id,
+          ...splitCandidateId(candidate.id),
           ...(candidate.pricing
             ? { pricing: candidate.pricing }
             : {}),

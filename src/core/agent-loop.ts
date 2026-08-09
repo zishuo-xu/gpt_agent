@@ -27,6 +27,9 @@ export interface ModelTurn {
   thinking?: string;
   usage?: { input: number; output: number; cached: number };
   usagePricing?: ModelPricing;
+  /** 成本来源（按模型/供应商拆维度统计） */
+  providerId?: string;
+  model?: string;
   fallbacks?: Array<{
     from: string;
     to: string;
@@ -440,6 +443,8 @@ export class AgentLoop {
             output: turn.usage.output,
             cached: turn.usage.cached,
             totalTokens: this.#totalTokens,
+            ...(turn.providerId ? { providerId: turn.providerId } : {}),
+            ...(turn.model ? { model: turn.model } : {}),
             ...(missed.missedTokens > 0
               ? {
                   missedTokens: missed.missedTokens,

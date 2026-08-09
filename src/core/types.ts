@@ -147,6 +147,9 @@ export type AgentEvent =
       totalTokens: number;
       costCny?: number;
       totalCostCny?: number;
+      /** 成本来源（按模型/供应商拆维度统计；子代理/压缩轮次可能缺失） */
+      providerId?: string;
+      model?: string;
       /** 本应命中缓存却未命中的 token 数（参照 Pi 的 cache-stats：missedCost 度量） */
       missedTokens?: number;
       /** 缓存失效原因：压缩（合法）/ 模型切换（异常）/ 空闲超时（TTL） */

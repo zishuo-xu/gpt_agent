@@ -30,6 +30,15 @@ const RUN_FINISHED_STATUS = {
   interrupted: "已中断",
 } as const;
 
+/** 推送附带的结构化字段（通用网关 JSON 顶层扩展；企微/飞书文本格式不携带） */
+interface PushMeta {
+  status?: string;
+  sessionId?: string;
+  costCny?: number;
+  tokens?: number;
+  durationMs?: number;
+}
+
 interface RateWindow {
   start: number;
   count: number;
@@ -76,10 +85,26 @@ export class WebhookNotifier {
         event.reason && event.reason !== "done"
           ? `（${event.reason}）`
           : "";
+      const summary = this.#getSummary?.();
       const detail = this.#summaryDetail();
       void this.#push(
         `任务${status}`,
         `会话「${this.#sessionTitle}」的无人值守任务${status}${reason}。${detail}`,
+        {
+          status: event.status,
+          ...(summary
+            ? {
+                sessionId: summary.id,
+                costCny: summary.totalCostCny,
+                tokens: summary.totalInputTokens,
+                durationMs: Math.max(
+                  0,
+                  Date.parse(summary.updatedAt) -
+                    Date.parse(summary.createdAt),
+                ),
+              }
+            : {}),
+        },
       );
     } else if (event.type === "error") {
       void this.#push("任务出错", `会话「${this.#sessionTitle}」出错：${event.message}`);
@@ -108,13 +133,17 @@ export class WebhookNotifier {
     return `耗时 ${minutes} 分钟 · 费用 ¥${summary.totalCostCny.toFixed(2)} · 输入 ${summary.totalInputTokens} tokens`;
   }
 
-  async #push(title: string, body: string): Promise<void> {
+  async #push(
+    title: string,
+    body: string,
+    meta?: PushMeta,
+  ): Promise<void> {
     const url = this.#webhookUrl;
     if (!url) return;
     if (!this.#allowPush()) return;
 
     try {
-      const payload = buildPayload(url, title, body);
+      const payload = buildPayload(url, title, body, meta);
       await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -142,6 +171,7 @@ function buildPayload(
   url: string,
   title: string,
   body: string,
+  meta?: PushMeta,
 ): Record<string, unknown> {
   if (url.includes("qyapi.weixin.qq.com")) {
     return {
@@ -158,7 +188,8 @@ function buildPayload(
       content: { text: `[MyAgent] ${title}\n${body}` },
     };
   }
-  return { title, body };
+  // 通用网关（Bark 等）：title/body 之上附带结构化字段，机器人可做卡片
+  return { title, body, ...(meta ?? {}) };
 }
 
 /**

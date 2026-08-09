@@ -97,10 +97,17 @@ export class AgentSession {
   /** 累计缓存浪费（仅计异常失效；压缩属合法重置不计入，参照 Pi cache-stats） */
   #totalMissedTokens = 0;
   #totalMissedCostCny = 0;
+  /** 按模型/供应商拆分的成本（cost_update 带来源时累计；key = providerId/model） */
+  readonly #costByModel = new Map<
+    string,
+    { providerId: string; model: string; costCny: number; tokens: number }
+  >();
   #todos: TodoItem[] = [];
   #taskBox: TaskBox | undefined;
   #taskStopReason: "deadline" | "budget" | undefined;
   #taskHardStopped = false;
+  /** /run 任务期审批超时（--approve-timeout；任务期覆盖会话级配置，结束恢复） */
+  #taskApprovalTimeoutMs: number | undefined;
   /** /run 任务期间模型重试+fallback 全部耗尽（sendInput 捕获后置位；
       修复 run_finished 误报 completed——need_user 会把 status 盖成 done） */
   #taskModelFailed = false;
@@ -203,7 +210,11 @@ export class AgentSession {
           client: options.exploreModelClient,
           mode: () => this.#permissions.mode,
           approve: async (call, signal) =>
-            await this.#approvalWaiter.wait(call, signal),
+            await this.#approvalWaiter.wait(
+              call,
+              signal,
+              this.#taskApprovalTimeoutMs,
+            ),
           reportUsage: (usage) => {
             const costCny = usageCostCny(
               usage,
@@ -359,6 +370,9 @@ export class AgentSession {
       toolCallCount: this.#events.filter(
         (record) => record.event.type === "tool_call",
       ).length,
+      costByModel: [...this.#costByModel.values()]
+        .map((bucket) => ({ ...bucket }))
+        .sort((a, b) => b.costCny - a.costCny),
       kind: this.#events.some(
         (record) => record.event.type === "run_started",
       )
@@ -547,7 +561,11 @@ export class AgentSession {
           permissions: this.#permissions,
           tools: this.#tools,
           approve: async (call, signal) =>
-            await this.#approvalWaiter.wait(call, signal),
+            await this.#approvalWaiter.wait(
+              call,
+              signal,
+              this.#taskApprovalTimeoutMs,
+            ),
           initialTotalTokens:
             this.#totalInputTokens + this.#totalOutputTokens,
           getTotalTokens: () =>
@@ -614,6 +632,7 @@ export class AgentSession {
     }
     const previousMode = this.#permissions.mode;
     const previousRules = this.#permissions.rules();
+    const previousApprovalTimeout = this.#approvalTimeoutMs;
     // 续跑沿用原 taskId（事件流配对 run_finished）；新任务生成新 id
     const taskBox = new TaskBox(
       options,
@@ -625,10 +644,21 @@ export class AgentSession {
     this.#taskHardStopped = false;
     this.#taskModelFailed = false;
     this.#permissions.setMode(options.permission ?? previousMode);
+    // 任务级审批控制：--auto-allow 规则任务期生效（结束后随 previousRules 恢复一并回落）
+    const taskAllowRules = (options.autoAllowRules ?? []).map((pattern) => ({
+      effect: "allow" as const,
+      pattern,
+    }));
     this.#permissions.setRules([
       ...previousRules,
       ...options.hardRules,
+      ...taskAllowRules,
     ]);
+    // 任务级审批超时（--approve-timeout）覆盖会话级配置，finally 恢复
+    if (options.approveTimeoutMs !== undefined) {
+      this.#approvalTimeoutMs = options.approveTimeoutMs;
+      this.#taskApprovalTimeoutMs = options.approveTimeoutMs;
+    }
     // 续跑时事件流已存在原 run_started（含原 taskOptions），不再重复发
     if (!resumeTaskId) {
       this.#bus.emit({
@@ -702,6 +732,10 @@ export class AgentSession {
             (candidate) =>
               candidate.effect === rule.effect &&
               candidate.pattern === rule.pattern,
+          ) &&
+          // 任务期注入的 --auto-allow 规则随任务结束回落，不并入会话记忆
+          !taskAllowRules.some(
+            (candidate) => candidate.pattern === rule.pattern,
           ),
       );
       this.#permissions.setRules([
@@ -709,6 +743,9 @@ export class AgentSession {
         ...rememberedDuringTask,
       ]);
       this.#permissions.setMode(previousMode);
+      // 任务级审批超时回落会话级配置
+      this.#approvalTimeoutMs = previousApprovalTimeout;
+      this.#taskApprovalTimeoutMs = undefined;
       // 权限档是会话级状态且只在事件流持久化（index.json 已废除）：
       // 恢复任务前模式的事件，保证重启后 restore 能还原到任务结束时的真实档位
       this.#bus.emit({
@@ -864,6 +901,21 @@ export class AgentSession {
       if (event.missedTokens && event.missedReason !== "compaction") {
         this.#totalMissedTokens += event.missedTokens;
         this.#totalMissedCostCny += event.missedCostCny ?? 0;
+      }
+      // 按模型/供应商拆分（缺失来源的轮次不进入维度统计）
+      if (event.providerId || event.model) {
+        const providerId = event.providerId ?? "unknown";
+        const model = event.model ?? "unknown";
+        const key = `${providerId}/${model}`;
+        const bucket = this.#costByModel.get(key) ?? {
+          providerId,
+          model,
+          costCny: 0,
+          tokens: 0,
+        };
+        bucket.costCny += event.costCny ?? 0;
+        bucket.tokens += event.input + event.output;
+        this.#costByModel.set(key, bucket);
       }
     }
     if (event.type === "done") this.#status = "done";

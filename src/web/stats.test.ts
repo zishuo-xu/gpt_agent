@@ -20,6 +20,7 @@ function summary(overrides: Partial<AgentSessionSummary>): AgentSessionSummary {
     todos: [],
     toolCallCount: 3,
     kind: "run",
+    costByModel: [],
     ...overrides,
   };
 }
@@ -121,4 +122,33 @@ test("computeSessionStats：空列表返回零值", () => {
   });
   assert.deepEqual(stats.byDay, []);
   assert.deepEqual(stats.sessions, []);
+});
+
+test("computeSessionStats：byModel 跨会话聚合，按费用降序", () => {
+  const stats = computeSessionStats([
+    summary({
+      id: "a",
+      costByModel: [
+        { providerId: "opencode", model: "claude-sonnet", costCny: 0.5, tokens: 8000 },
+        { providerId: "opencode", model: "deepseek", costCny: 0.1, tokens: 5000 },
+      ],
+    }),
+    summary({
+      id: "b",
+      costByModel: [
+        { providerId: "opencode", model: "claude-sonnet", costCny: 0.25, tokens: 4000 },
+      ],
+    }),
+    summary({
+      id: "c",
+      costByModel: [
+        { providerId: "other", model: "explore", costCny: 0.05, tokens: 1000 },
+      ],
+    }),
+  ]);
+  assert.deepEqual(stats.byModel, [
+    { providerId: "opencode", model: "claude-sonnet", costCny: 0.75, tokens: 12000 },
+    { providerId: "opencode", model: "deepseek", costCny: 0.1, tokens: 5000 },
+    { providerId: "other", model: "explore", costCny: 0.05, tokens: 1000 },
+  ]);
 });

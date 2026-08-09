@@ -43,6 +43,13 @@ export interface SessionSummary {
   todos: TodoItem[];
   toolCallCount: number;
   kind: "interactive" | "run";
+  /** 按模型/供应商拆分的成本（统计面板维度表；缺失来源的轮次不计入） */
+  costByModel: Array<{
+    providerId: string;
+    model: string;
+    costCny: number;
+    tokens: number;
+  }>;
   /** 首条用户消息文本（Web 会话搜索用）；截断至 80 字符 */
   firstMessage?: string;
   /** 崩溃中断的任务（进程重启后存在；Web 展示「续跑」入口） */

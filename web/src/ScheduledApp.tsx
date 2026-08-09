@@ -12,7 +12,16 @@ interface ScheduledTaskView {
   at: string;
   everyMinutes?: number;
   createdAt: string;
+  lastRunAt?: string;
+  lastRunStatus?: "started" | "failed" | "skipped-budget";
+  lastRunSessionId?: string;
 }
+
+const LAST_RUN_LABEL: Record<string, string> = {
+  started: "已启动",
+  failed: "启动失败",
+  "skipped-budget": "预算顺延",
+};
 
 const TIME_FORMAT = new Intl.DateTimeFormat("zh-CN", {
   month: "2-digit",
@@ -243,6 +252,9 @@ export function ScheduledApp() {
                   <small>
                     {scheduleLabel(task)} · 注册于{" "}
                     {formatTime(task.createdAt)}
+                    {task.lastRunAt
+                      ? ` · 上次${LAST_RUN_LABEL[task.lastRunStatus ?? ""] ?? task.lastRunStatus ?? ""} ${formatTime(task.lastRunAt)}${task.lastRunSessionId ? `（会话 ${task.lastRunSessionId}）` : ""}`
+                      : ""}
                   </small>
                 </div>
                 <button

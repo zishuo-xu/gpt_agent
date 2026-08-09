@@ -51,19 +51,24 @@ export class PermissionWaiter {
     this.#setStatus = options.setStatus;
   }
 
-  async wait(call: ToolCall, signal: AbortSignal): Promise<ApprovalAnswer> {
+  async wait(
+    call: ToolCall,
+    signal: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<ApprovalAnswer> {
     this.#setStatus("waiting_permission");
     return await new Promise<ApprovalAnswer>((resolve) => {
+      const effectiveTimeout = timeoutMs ?? this.#approvalTimeoutMs;
       const timeout = setTimeout(
         () => {
           this.#bus.emit({
             type: "notify",
             level: "warn",
-            message: `审批超时（${this.#approvalTimeoutMs / 1000}s 无人响应），已自动拒绝：${call.tool} ${call.target ?? ""}`,
+            message: `审批超时（${effectiveTimeout / 1000}s 无人响应），已自动拒绝：${call.tool} ${call.target ?? ""}`,
           });
           finish({ granted: false });
         },
-        this.#approvalTimeoutMs,
+        effectiveTimeout,
       );
       const onAbort = () => finish({ granted: false });
       signal.addEventListener("abort", onAbort, { once: true });

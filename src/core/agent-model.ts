@@ -288,6 +288,11 @@ export class ConversationAgentModel implements AgentModel {
       ...(response.pricing
         ? { usagePricing: response.pricing }
         : {}),
+      // 成本按模型/供应商拆分：cost_update 携带来源，统计面板可按维度聚合
+      ...(response.providerId
+        ? { providerId: response.providerId }
+        : {}),
+      ...(response.model ? { model: response.model } : {}),
       ...(response.fallbacks
         ? { fallbacks: response.fallbacks }
         : {}),

@@ -46,7 +46,8 @@ test("主候选失败后按顺序 fallback 并携带实际单价", async () => {
 
   const result = await fallback.complete(request());
 
-  assert.equal(result.model, "provider-b/backup");
+  assert.equal(result.providerId, "provider-b");
+  assert.equal(result.model, "backup");
   assert.equal(result.pricing?.outputPerMillionCny, 8);
   assert.equal(result.fallbacks?.[0]?.from, "provider-a/main");
   assert.equal(result.fallbacks?.[0]?.to, "provider-b/backup");
@@ -103,7 +104,8 @@ test("流式：首候选中途失败顺延第二候选重放完整请求，done 
   }
   // 已知权衡：首候选已吐出的 text_delta 在重放时重复
   assert.deepEqual(chunks, ["半截", "完整回答"]);
-  assert.equal(finalResponse?.model, "provider-b/backup");
+  assert.equal(finalResponse?.providerId, "provider-b");
+  assert.equal(finalResponse?.model, "backup");
   assert.equal(finalResponse?.text, "完整回答");
   assert.equal(finalResponse?.fallbacks?.[0]?.from, "provider-a/main");
   assert.equal(finalResponse?.fallbacks?.[0]?.to, "provider-b/backup");
