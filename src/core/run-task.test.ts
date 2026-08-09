@@ -88,6 +88,27 @@ test("/run 边界为“不改任何文件”时生成全量写保护", () => {
   assert.equal(projectWide.hardRules.length, 3);
 });
 
+test("--bounds 中文路径与无斜杠文件名生成硬规则，纯裸词仍是语义边界", () => {
+  const task = parseRunCommand(
+    '/run 改代码 --bounds "不改 src/中文字段/，不要改 config.json，不动数据库 schema"',
+  );
+  const patterns = task.hardRules.map((rule) => rule.pattern);
+  assert.ok(
+    patterns.includes("Edit(*src/中文字段/*)"),
+    "中文目录路径应生成硬规则",
+  );
+  assert.ok(
+    patterns.includes("Edit(*config.json*)"),
+    "无斜杠文件名（含扩展名）应生成硬规则",
+  );
+  assert.equal(
+    patterns.filter((p) => p.includes("数据库")).length,
+    0,
+    "纯中文裸词（无路径特征）不应生成硬规则",
+  );
+  assert.deepEqual(task.semanticBounds, ["不动数据库 schema"]);
+});
+
 test("TaskBox 按 30/10/2 分钟阶段收尾并在截止时硬停", () => {
   const deadline = new Date("2026-07-30T13:00:00.000Z");
   const options: RunTaskOptions = {
@@ -638,4 +659,76 @@ test("--auto-allow 任务期放行指定工具，任务结束后回落", async (
   await session.sendInput("再执行一次");
   assert.equal(hasAsk(), true, "任务结束后规则应回落，命令重新要求审批");
   assert.equal(hasDenied(), true, "无响应时按会话级超时拒绝");
+});
+
+test("硬停止回滚只撤销任务期编辑——任务前交互编辑保留", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-rollback-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-rollback-state-"),
+  );
+  await writeFile(path.join(cwd, "keep.txt"), "original\n", "utf8");
+  // 已过期的截止：任务第一轮 beforeTurn 即硬停止（TaskBox 的 final 窗口为截止前 2 分钟，
+  // 真实时间下无法让任务期先执行工具再跨过截止，故本用例聚焦修复核心：
+  // 任务前交互编辑不得被硬停止回滚——旧逻辑 while(entries>0) 会把 keep.txt 一并回滚）
+  const deadline = new Date(Date.now() - 1000).toISOString();
+  const client = new ScriptedClient([
+    // 任务前交互轮：Read 后 Write keep.txt（应保留，不得被回滚）
+    response("", [
+      {
+        id: "read-keep",
+        tool: "Read",
+        target: "keep.txt",
+        args: { file_path: "keep.txt" },
+      },
+    ]),
+    response("", [
+      {
+        id: "write-keep",
+        tool: "Write",
+        target: "keep.txt",
+        args: { file_path: "keep.txt", content: "interactive edit\n" },
+      },
+    ]),
+    response("完成。"),
+  ]);
+  const session = new AgentSession({
+    id: "rollback-test",
+    title: "回滚测试",
+    cwd,
+    mode: "trust",
+    model: new ConversationAgentModel(client, []),
+    stateDir,
+  });
+  const events: AgentEvent[] = [];
+  session.subscribe((record) => events.push(record.event));
+
+  await session.sendInput("请修改 keep.txt");
+  assert.equal(
+    await readFile(path.join(cwd, "keep.txt"), "utf8"),
+    "interactive edit\n",
+    "任务前交互编辑应先成功落盘",
+  );
+
+  await session.runTask({
+    description: "写文件后超时",
+    deadline,
+    permission: "trust",
+    hardRules: [],
+    semanticBounds: [],
+  });
+
+  // 任务前交互编辑保留（旧逻辑 while(entries>0) 会把 keep.txt 一并回滚）
+  assert.equal(
+    await readFile(path.join(cwd, "keep.txt"), "utf8"),
+    "interactive edit\n",
+    "任务前交互编辑不得被硬停止回滚",
+  );
+  const finished = events.find(
+    (event) => event.type === "run_finished",
+  );
+  assert.equal(finished?.type, "run_finished");
+  if (finished?.type === "run_finished") {
+    assert.equal(finished.status, "interrupted");
+    assert.equal(finished.reason, "deadline");
+  }
 });
