@@ -174,6 +174,83 @@ test("AgentSessionManager 通过事件流恢复会话并继续上下文", async 
   );
 });
 
+test("恢复 strict 会话：补发的初始权限模式事件不抢占首条用户消息 seq", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-mode-seq-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-mode-seq-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-mode-seq-home-"),
+  );
+  const configService = new ConfigService({ cwd, homeDir });
+  const manager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    modelFactory: (messages) =>
+      new ConversationAgentModel(
+        new ScriptedClient([response("第一轮完成")]),
+        messages,
+      ),
+  });
+  // 创建时权限档为 normal：事件流不含 permission_mode_changed
+  const session = await manager.createSession({
+    title: "seq 冲突测试",
+    mode: "normal",
+  });
+  await session.sendInput("第一条");
+  await manager.flush();
+  await manager.releaseLock();
+
+  // 项目配置改为 strict：恢复时构造器需补发初始权限模式事件
+  await mkdir(path.join(homeDir, ".myagent"), { recursive: true });
+  await writeFile(
+    path.join(homeDir, ".myagent", "config.jsonc"),
+    JSON.stringify({
+      permissions: { mode: "strict", rules: [], approvalTimeoutMs: 60000 },
+    }),
+    "utf8",
+  );
+
+  const restoredManager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService: new ConfigService({ cwd, homeDir }),
+    modelFactory: (messages) =>
+      new ConversationAgentModel(
+        new ScriptedClient([response("第二轮完成")]),
+        messages,
+      ),
+  });
+  await restoredManager.restore();
+  const restored = restoredManager.get(session.id);
+  assert.ok(restored);
+  assert.equal(restored.summary().permissionMode, "strict");
+  const events = restored.events();
+  // 补发的权限模式事件必须排在恢复事件之后：不能抢占首条事件，
+  // 否则与既有 seq 冲突会被前端按 seq 去重丢弃
+  assert.notEqual(
+    events[0]?.event.type,
+    "permission_mode_changed",
+    "首条事件不应是补发的权限模式事件",
+  );
+  const seqs = events.map((record) => record.seq);
+  assert.equal(new Set(seqs).size, seqs.length, "seq 不应重复");
+  const modeEvents = events.filter(
+    (record) => record.event.type === "permission_mode_changed",
+  );
+  assert.equal(modeEvents.length, 1, "应恰好补发一次权限模式事件");
+  const userSeq =
+    events.find((record) => record.event.type === "user")?.seq ?? 0;
+  assert.ok(
+    (modeEvents[0]?.seq ?? 0) > userSeq,
+    "补发事件 seq 应大于首条用户消息",
+  );
+  await restoredManager.releaseLock();
+});
+
 test("压缩事件持久化成本并从摘要与近期对话恢复", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-compact-cwd-"));
   const stateDir = await mkdtemp(

@@ -61,6 +61,7 @@ interface RunBoundsPreview {
 
 export function SessionApp() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [currentProject, setCurrentProject] = useState("");
@@ -155,6 +156,8 @@ export function SessionApp() {
     if (!response.ok) return;
     const payload = await response.json();
     setSessions((payload.sessions ?? []) as SessionSummary[]);
+    // 首次拉取成功后才把空列表认定为"确实没有会话"（此前显示加载态）
+    setSessionsLoaded(true);
   }
 
   async function deleteSession(id: string) {
@@ -274,7 +277,13 @@ export function SessionApp() {
     setCurrentProject(key);
     setSelectedId("");
     setSessions([]);
+    setSessionsLoaded(false);
     setEvents([]);
+    // 新建面板打开时同步执行环境（面板是模态，正常无法同时操作，防御性同步）
+    if (showNewTask) {
+      setNewTaskEnv(key === "lobby" ? "lobby" : "project");
+      setNewTaskProject(key === "lobby" ? "" : key);
+    }
   }
 
   /** 打开新建会话面板：初始化执行环境（当前项目 or 大厅） */
@@ -344,8 +353,14 @@ export function SessionApp() {
       setShowProjectPicker(false);
       setSelectedId("");
       setSessions([]);
+      setSessionsLoaded(false);
       setEvents([]);
       setCurrentProject(project.key);
+      // 新建面板可能正打开着：同步面板内执行环境，避免下拉停留在旧项目
+      if (showNewTask) {
+        setNewTaskEnv("project");
+        setNewTaskProject(project.key);
+      }
       // 打开后立即拉取该项目的会话列表（值不变时 useEffect 不会触发）
       await refreshSessions();
       // 刷新项目列表（把新项目并入切换器）
@@ -608,6 +623,7 @@ export function SessionApp() {
     <div className="shell">
       <SessionListSidebar
         sessions={sessions}
+        sessionsLoaded={sessionsLoaded}
         selectedId={selectedId}
         onSelect={(id) => {
           setSelectedId(id);
@@ -1184,6 +1200,7 @@ export function SessionApp() {
 
 export function SessionListSidebar(props: {
   sessions: SessionSummary[];
+  sessionsLoaded: boolean;
   selectedId: string;
   onSelect: (id: string) => void;
   onNew: () => void;
@@ -1216,7 +1233,11 @@ export function SessionListSidebar(props: {
       <div className="sidebar-sessions" aria-label="会话列表">
         {visible.length === 0 && (
           <div className="sidebar-empty">
-            {props.sessions.length === 0 ? "还没有会话" : "无匹配会话"}
+            {props.sessions.length === 0
+              ? props.sessionsLoaded
+                ? "还没有会话"
+                : "加载会话…"
+              : "无匹配会话"}
           </div>
         )}
         {visible.map((session) => {

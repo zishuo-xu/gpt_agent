@@ -268,6 +268,48 @@ test("strict 编辑审批在落盘前携带真实 diff", async () => {
   assert.match(await readFile(filePath, "utf8"), /port=8080/);
 });
 
+test("插件/MCP 工具审批风险文案按工具名启发式区分只读与写操作", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-plugin-risk-"));
+  const cases: Array<{
+    tool: string;
+    risk: RegExp;
+  }> = [
+    // snake_case 只读动词（MCP 常见命名）
+    { tool: "sysinfo_list_directory", risk: /只读操作，不修改文件/ },
+    // camelCase 只读动词（WebFetch / WebSearch 形态）
+    { tool: "WebFetch", risk: /只读操作，不修改文件/ },
+    // 写操作动词不命中只读词表
+    { tool: "create_issue", risk: /将修改文件；执行前可查看精确 diff/ },
+    { tool: "fs_write", risk: /将修改文件；执行前可查看精确 diff/ },
+  ];
+  for (const { tool, risk } of cases) {
+    const bus = new AgentEventBus();
+    const events: AgentEvent[] = [];
+    bus.subscribe((event) => events.push(event));
+    const model = new ScriptedModel([
+      {
+        toolCalls: [toolCall("plugin-call", tool, "", {})],
+      },
+      { text: "完成", done: true },
+    ]);
+    const loop = new AgentLoop({
+      bus,
+      model,
+      permissions: new PermissionEngine("normal"),
+      tools: new ToolExecutor(directory),
+      approve: async () => ({ granted: false }),
+    });
+    await loop.run();
+    const approval = events.find(
+      (event) => event.type === "ask_permission",
+    );
+    assert.equal(approval?.type, "ask_permission", `${tool} 应触发审批`);
+    if (approval?.type === "ask_permission") {
+      assert.match(approval.risk ?? "", risk, `${tool} 风险文案`);
+    }
+  }
+});
+
 test("模型 fallback 事件可观测且按实际模型单价计费", async () => {
   const directory = await mkdtemp(
     path.join(os.tmpdir(), "myagent-fallback-event-"),

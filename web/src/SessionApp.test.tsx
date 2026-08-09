@@ -247,6 +247,7 @@ describe("SessionListSidebar（会话列表交互）", () => {
   async function setup(props: {
     sessions: Array<Record<string, unknown>>;
     selectedId: string;
+    sessionsLoaded?: boolean;
   }) {
     const [{ act }, { createRoot }, { SessionListSidebar }] = await Promise.all([
       import("react"),
@@ -261,6 +262,7 @@ describe("SessionListSidebar（会话列表交互）", () => {
       root.render(
         <SessionListSidebar
           sessions={props.sessions as never}
+          sessionsLoaded={props.sessionsLoaded ?? false}
           selectedId={props.selectedId}
           onSelect={(id) => calls.select.push(id)}
           onNew={() => {
@@ -337,9 +339,19 @@ describe("SessionListSidebar（会话列表交互）", () => {
     await act(async () => root.unmount());
   });
 
-  it("无会话时展示空状态提示", async () => {
+  it("无会话时展示空状态提示（首拉完成前显示加载态）", async () => {
     const { container, root, act } = await setup({ sessions: [], selectedId: "" });
     assert.equal(container.querySelector("button.sidebar-session"), null);
+    assert.match(container.querySelector(".sidebar-empty")?.textContent ?? "", /加载会话/);
+    await act(async () => root.unmount());
+  });
+
+  it("首拉完成后无会话显示「还没有会话」", async () => {
+    const { container, root, act } = await setup({
+      sessions: [],
+      selectedId: "",
+      sessionsLoaded: true,
+    });
     assert.match(container.querySelector(".sidebar-empty")?.textContent ?? "", /还没有会话/);
     await act(async () => root.unmount());
   });

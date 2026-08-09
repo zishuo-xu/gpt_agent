@@ -215,15 +215,12 @@ test.describe("新功能：书签 / 导出 / 续跑按钮", () => {
 
   test("用户消息书签：打标 → 书签栏出现 → 移除", async ({ page }) => {
     await startSession(page);
-    // ★ 绝对定位在消息容器左侧（left:-28px），悬停消息卡片才显示；
-    // 真实用户路径为 hover 后点击，点击需 force（元素在容器边界外）
+    // ★ 悬停消息卡片显示星标（真实用户路径），点击打书签
     const bookmark = page.locator("button.stream-bookmark").first();
     await page.locator(".stream-item").first().hover();
     await expect(bookmark).toBeVisible();
     page.once("dialog", (dialog) => void dialog.accept("e2e 书签"));
-    // ★ 绝对定位在消息容器左侧（left:-28px，悬停显示），点击坐标在滚动容器边界外，
-    // 直接派发 DOM 点击事件（React onClick 监听）
-    await bookmark.dispatchEvent("click");
+    await bookmark.click();
     // 书签栏出现该书签
     await expect(
       page.locator(".bookmark-item", { hasText: "e2e 书签" }),

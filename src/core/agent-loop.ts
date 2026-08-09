@@ -12,7 +12,7 @@ import type {
 import type { ToolExecutor } from "../tools/executor.js";
 import { ModelHttpError } from "../model/client.js";
 import { classifyModelError } from "../model/error-policy.js";
-import { TOOL_NAMES } from "../shared/tool-names.js";
+import { isToolName, TOOL_NAMES } from "../shared/tool-names.js";
 import { usageCostCny } from "../utils/cost.js";
 import { abortableSleep } from "../utils/sleep.js";
 
@@ -803,5 +803,25 @@ function riskFor(call: ToolCall): string {
     return "命令副作用未知；中止不能撤销已经发生的副作用";
   }
   if (call.tool === TOOL_NAMES[7]) return "将新建或完整覆盖文件"; // Write
+  // 插件/MCP 工具：按工具名启发式区分只读与写操作（内置 Edit/MultiEdit 保持原文案）。
+  // 注意不能用 \b 词边界：snake_case/camelCase 名称中下划线是 \w，动词没有边界
+  if (!isToolName(call.tool) && looksReadOnlyTool(call.tool)) {
+    return "只读操作，不修改文件；执行前可查看详细参数";
+  }
   return "将修改文件；执行前可查看精确 diff";
+}
+
+/** 工具名按驼峰边界与分隔符切段后，任一动词段命中只读词表即视为只读 */
+function looksReadOnlyTool(toolName: string): boolean {
+  const segments = toolName
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/);
+  const READONLY_VERBS = new Set([
+    "list", "read", "get", "search", "query", "fetch", "lookup", "status",
+    "info", "show", "inspect", "view", "describe", "check", "ping", "stat",
+    "peek", "head", "tail", "whoami", "print", "echo", "find", "ls", "dir",
+    "tree", "schema", "version", "help", "cat",
+  ]);
+  return segments.some((segment) => READONLY_VERBS.has(segment));
 }

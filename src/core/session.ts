@@ -242,19 +242,6 @@ export class AgentSession {
     );
     this.#store.attach(this.#bus, () => this.#branchOps.currentBranchId());
     this.#bus.subscribe((event) => this.#record(event));
-    // 初始权限模式入事件流：恢复时 lastPermissionMode 才能还原初始模式
-    // （否则崩溃续跑会从 trust/strict 降级为配置默认，任务权限上下文丢失）
-    if (
-      options.mode !== "normal" &&
-      !options.restoredEvents?.some(
-        (record) => record.event.type === "permission_mode_changed",
-      )
-    ) {
-      this.#bus.emit({
-        type: "permission_mode_changed",
-        mode: options.mode,
-      });
-    }
     // 恢复时检测中断任务：最近的 run_started 无配对 run_finished（进程崩溃残留）
     this.#interruptedTask = interruptedTaskFrom(options.restoredEvents);
     if (options.compactModelClient) {
@@ -333,6 +320,21 @@ export class AgentSession {
       ) {
         this.#status = "interrupted";
       }
+    }
+    // 初始权限模式入事件流：恢复时 lastPermissionMode 才能还原初始模式
+    // （否则崩溃续跑会从 trust/strict 降级为配置默认，任务权限上下文丢失）。
+    // 必须在恢复事件推入之后发射：seq 取 #events.length + 1，
+    // 提前发射会拿到 seq=1 与首条 user 事件冲突并被前端按 seq 去重丢弃。
+    if (
+      options.mode !== "normal" &&
+      !options.restoredEvents?.some(
+        (record) => record.event.type === "permission_mode_changed",
+      )
+    ) {
+      this.#bus.emit({
+        type: "permission_mode_changed",
+        mode: options.mode,
+      });
     }
   }
 
