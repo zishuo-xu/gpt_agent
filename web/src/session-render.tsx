@@ -279,6 +279,19 @@ export function ItemCard(props: {
     );
   }
 
+  if (item.kind === "thinking") {
+    return (
+      <details className="web-thinking">
+        <summary>
+          <span className="thinking-label">思考过程</span>
+        </summary>
+        <div className="thinking-body">
+          <RichText text={item.text} />
+        </div>
+      </details>
+    );
+  }
+
   if (item.kind === "cost") {
     const { event } = item;
     const cached = Number(event.cached ?? 0);

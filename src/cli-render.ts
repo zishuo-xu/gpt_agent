@@ -23,6 +23,9 @@ export function createEventRenderer(options: {
     if (event.type === "text_delta") {
       output(`\n${event.text}\n`);
     }
+    if (event.type === "thinking_delta") {
+      output(`[思考] ${event.text}\n`);
+    }
     if (event.type === "todo_update") {
       output("\n任务清单：\n");
       for (const todo of event.todos) {

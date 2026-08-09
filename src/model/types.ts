@@ -60,6 +60,7 @@ export interface CompletionRequest {
 
 export type StreamChunk =
   | { type: "text_delta"; text: string }
+  | { type: "thinking_delta"; text: string }
   | { type: "done"; response: ModelResponse };
 
 export interface ModelClient {

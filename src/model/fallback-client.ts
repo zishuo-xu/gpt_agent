@@ -54,7 +54,10 @@ export class FallbackModelClient implements ModelClient {
       attempts += 1;
       try {
         for await (const chunk of candidate.client.stream(request)) {
-          if (chunk.type === "text_delta") {
+          if (
+            chunk.type === "text_delta" ||
+            chunk.type === "thinking_delta"
+          ) {
             yield chunk;
             continue;
           }

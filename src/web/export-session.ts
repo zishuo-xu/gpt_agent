@@ -36,6 +36,8 @@ export function exportSessionHtml(options: {
   .event.tool { border-left: 3px solid #8b5cf6; }
   .event.system { border-left: 3px solid #6b7280; opacity: 0.8; }
   .event.error { border-left: 3px solid #ef4444; }
+  .event.thinking { border-left: 3px solid #64748b; opacity: 0.75; }
+  .thinking-label { font-size: 11px; letter-spacing: 0.08em; color: #94a3b8; }
   .event .body { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
   .event .body code { background: #1c212b; padding: 1px 6px; border-radius: 4px; font-size: 13px; }
   .event .label { font-size: 12px; color: #f2c94c; margin-left: 8px; }
@@ -86,6 +88,13 @@ function renderRecord(record: RecordedEvent): string {
     }
     case "text_delta":
       return item("assistant", seq, ts, escapeHtml(event.text));
+    case "thinking_delta":
+      return item(
+        "thinking",
+        seq,
+        ts,
+        `<span class="thinking-label">思考过程</span>\n${escapeHtml(event.text)}`,
+      );
     case "tool_call": {
       const args = JSON.stringify(event.call.args ?? {}, null, 2);
       return item(

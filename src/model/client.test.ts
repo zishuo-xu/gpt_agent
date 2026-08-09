@@ -970,6 +970,7 @@ test("Anthropic 流式：thinking_delta 累积为 thinking", async () => {
   );
 
   const chunks: string[] = [];
+  const thinkingChunks: string[] = [];
   let finalResponse: any;
   for await (const chunk of client.stream!({
     system: "system",
@@ -978,11 +979,53 @@ test("Anthropic 流式：thinking_delta 累积为 thinking", async () => {
     tools: [],
   })) {
     if (chunk.type === "text_delta") chunks.push(chunk.text);
+    else if (chunk.type === "thinking_delta") thinkingChunks.push(chunk.text);
     else finalResponse = chunk.response;
   }
   assert.deepEqual(chunks, ["答案"], "流式只推送 text_delta");
+  assert.deepEqual(
+    thinkingChunks,
+    ["推理中", "继续推理"],
+    "thinking_delta 应实时逐块推送",
+  );
   assert.equal(finalResponse.thinking, "推理中继续推理", "thinking_delta 累积");
   assert.equal(finalResponse.text, "答案");
+});
+
+test("OpenAI 流式：reasoning_content 增量实时推送为 thinking_delta", async () => {
+  const client = new ConfiguredModelClient(
+    provider("openai-compatible"),
+    "test-model",
+    async () =>
+      new Response(
+        [
+          `data: {"choices":[{"delta":{"reasoning_content":"先"}}]}`,
+          `data: {"choices":[{"delta":{"reasoning_content":"思考"}}]}`,
+          `data: {"choices":[{"delta":{"content":"答案"},"finish_reason":"stop"}]}`,
+          `data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":0}}}`,
+          `data: [DONE]`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+
+  const chunks: string[] = [];
+  const thinkingChunks: string[] = [];
+  let finalResponse: any;
+  for await (const chunk of client.stream!({
+    system: "system",
+    messages: [{ role: "user", content: "问题" }],
+    signal: new AbortController().signal,
+    tools: [],
+  })) {
+    if (chunk.type === "text_delta") chunks.push(chunk.text);
+    else if (chunk.type === "thinking_delta") thinkingChunks.push(chunk.text);
+    else finalResponse = chunk.response;
+  }
+  assert.deepEqual(chunks, ["答案"]);
+  assert.deepEqual(thinkingChunks, ["先", "思考"], "reasoning_content 增量实时推送");
+  assert.equal(finalResponse.thinking, "先思考", "增量累积为 thinking");
 });
 
 test("Anthropic thinking：默认开启（未显式配置即携带 thinking 参数）", async () => {

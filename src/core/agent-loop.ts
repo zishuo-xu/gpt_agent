@@ -23,6 +23,8 @@ export interface ModelTurn {
   question?: string;
   /** 供应商原始终止原因（Anthropic max_tokens / OpenAI length 等） */
   stopReason?: string;
+  /** 推理内容（thinking） */
+  thinking?: string;
   usage?: { input: number; output: number; cached: number };
   usagePricing?: ModelPricing;
   fallbacks?: Array<{
@@ -47,6 +49,7 @@ export interface AgentModel {
   ): void;
   acceptToolDenied?(call: ToolCall, reason: string): void;
   onTextDelta?: ((text: string) => void) | undefined;
+  onThinkingDelta?: ((text: string) => void) | undefined;
 }
 
 export interface AgentLoopOptions {
@@ -312,11 +315,16 @@ export class AgentLoop {
     const signal = this.#abortController.signal;
 
     try {
-      // 设置流式文本回调：逐块发出 text_delta 事件
+      // 设置流式文本回调：逐块发出 text_delta / thinking_delta 事件
       let streamedText = false;
+      let streamedThinking = false;
       this.#model.onTextDelta = (text) => {
         streamedText = true;
         this.#bus.emit({ type: "text_delta", text });
+      };
+      this.#model.onThinkingDelta = (text) => {
+        streamedThinking = true;
+        this.#bus.emit({ type: "thinking_delta", text });
       };
       let turnCount = 0;
       while (!signal.aborted) {
@@ -390,6 +398,11 @@ export class AgentLoop {
           this.#bus.emit({ type: "text_delta", text: turn.text });
         }
         streamedText = false;
+        // 推理内容同理：流式已发出则不重复；非流式/模型只在 done 携带时一次性补发
+        if (turn.thinking && !streamedThinking) {
+          this.#bus.emit({ type: "thinking_delta", text: turn.thinking });
+        }
+        streamedThinking = false;
         if (turn.usage) {
           const now = Date.now();
           // 缓存浪费度量（参照 Pi 的 cache-stats）：上轮已有、本轮本应命中

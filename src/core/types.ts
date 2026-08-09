@@ -119,6 +119,7 @@ export type AgentEvent =
       reason: string;
     }
   | { type: "text_delta"; text: string }
+  | { type: "thinking_delta"; text: string }
   | { type: "todo_update"; todos: TodoItem[] }
   | { type: "tool_call"; call: ToolCall }
   | {

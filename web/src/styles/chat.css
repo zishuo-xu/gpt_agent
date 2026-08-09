@@ -1280,6 +1280,56 @@
   animation: rise-in 240ms var(--ease-out);
 }
 
+/* 思考过程：折叠块，默认收起，与正文明显区分 */
+.web-thinking {
+  max-width: 86%;
+  margin: 0 0 10px;
+  border: 1px dashed #33405a;
+  border-radius: 10px;
+  background: #141b28;
+}
+
+.web-thinking summary {
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.web-thinking summary::before {
+  content: "›";
+  display: inline-block;
+  margin-right: 6px;
+  color: #6b7a96;
+  transition: transform 160ms var(--ease-out);
+}
+
+.web-thinking[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.thinking-label {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: #6b7a96;
+  text-transform: uppercase;
+}
+
+.thinking-body {
+  padding: 4px 14px 12px;
+  color: #9aa8c0;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.thinking-body p {
+  margin: 0 0 8px;
+}
+
+.thinking-body p:last-child {
+  margin-bottom: 0;
+}
+
 .web-message {
   max-width: 86%;
   margin: 0 0 14px;

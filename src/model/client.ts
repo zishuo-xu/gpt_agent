@@ -299,9 +299,10 @@ export class ConfiguredModelClient implements ModelClient {
           text += delta.content;
           yield { type: "text_delta", text: delta.content };
         }
-        // OpenAI reasoning_content 增量（o1 系）：累积为 thinking
+        // OpenAI reasoning_content 增量（o1 系）：累积为 thinking，同时实时外发
         if (typeof delta.reasoning_content === "string" && delta.reasoning_content) {
           thinking += delta.reasoning_content;
+          yield { type: "thinking_delta", text: delta.reasoning_content };
         }
         for (const raw of asArray(delta.tool_calls)) {
           const tc = asRecord(raw);
@@ -434,6 +435,7 @@ export class ConfiguredModelClient implements ModelClient {
           yield { type: "text_delta", text: delta.text };
         } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
           thinkingText += delta.thinking;
+          yield { type: "thinking_delta", text: delta.thinking };
         } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
           const acc = toolCallAccum.get(currentToolIndex);
           if (acc) acc.args += stringValue(delta.partial_json);

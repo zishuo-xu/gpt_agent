@@ -77,6 +77,21 @@ describe("buildDisplayItems（会话回放事件流转换）", () => {
     }
   });
 
+  it("thinking_delta 合并为独立 thinking 展示项", () => {
+    const items = buildDisplayItems([
+      ev(1, { type: "thinking_delta", text: "先" }),
+      ev(2, { type: "thinking_delta", text: "思考" }),
+      ev(3, { type: "text_delta", text: "答案" }),
+    ]);
+    assert.equal(items.length, 2);
+    assert.deepEqual(items[0], {
+      kind: "thinking",
+      seq: 1,
+      text: "先思考",
+    });
+    assert.equal(items[1]?.kind, "message");
+  });
+
   it("tool_call 与后续 tool_result 按 callId 配对", () => {
     const result = { type: "tool_result", callId: "c1", summary: "done" };
     const items = buildDisplayItems([

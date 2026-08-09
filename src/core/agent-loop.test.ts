@@ -268,6 +268,61 @@ test("strict 编辑审批在落盘前携带真实 diff", async () => {
   assert.match(await readFile(filePath, "utf8"), /port=8080/);
 });
 
+test("thinking 推理内容：非流式一次性发射，流式增量逐块发射", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-thinking-"));
+  // 非流式：turn.thinking 在无流式回调时一次性补发
+  const bus1 = new AgentEventBus();
+  const events1: AgentEvent[] = [];
+  bus1.subscribe((event) => events1.push(event));
+  const model1 = new ScriptedModel([
+    { thinking: "先检查目录结构", text: "目录为空", done: true },
+  ]);
+  await new AgentLoop({
+    bus: bus1,
+    model: model1,
+    permissions: new PermissionEngine("trust"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: true }),
+  }).run();
+  const thinking1 = events1.filter(
+    (event) => event.type === "thinking_delta",
+  );
+  assert.equal(thinking1.length, 1, "非流式应恰好发射一次 thinking_delta");
+  assert.equal(
+    (thinking1[0] as { text: string }).text,
+    "先检查目录结构",
+  );
+
+  // 流式：模型经 onThinkingDelta 逐块推送，事件逐块发射且不重复
+  const bus2 = new AgentEventBus();
+  const events2: AgentEvent[] = [];
+  bus2.subscribe((event) => events2.push(event));
+  const model2 = new ScriptedModel([{ text: "回答", done: true }]);
+  // 模拟流式模型：next() 内先推送两段 thinking 增量，再返回带完整 thinking 的回合
+  const streamNext = model2.next.bind(model2);
+  model2.next = (async () => {
+    model2.onThinkingDelta?.("首先考虑");
+    model2.onThinkingDelta?.("再决定");
+    return streamNext(undefined as never);
+  }) as ScriptedModel["next"];
+  await new AgentLoop({
+    bus: bus2,
+    model: model2,
+    permissions: new PermissionEngine("trust"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: true }),
+  }).run();
+  const thinking2 = events2.filter(
+    (event) => event.type === "thinking_delta",
+  );
+  assert.equal(thinking2.length, 2, "流式应逐块发射 thinking_delta");
+  assert.deepEqual(
+    thinking2.map((event) => (event as { text: string }).text),
+    ["首先考虑", "再决定"],
+    "流式增量不应与完整 thinking 重复",
+  );
+});
+
 test("插件/MCP 工具审批风险文案按工具名启发式区分只读与写操作", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-plugin-risk-"));
   const cases: Array<{

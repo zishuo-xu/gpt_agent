@@ -35,7 +35,8 @@ export type DisplayItem =
       end?: Record<string, any>;
     }
   | { kind: "cost"; seq: number; event: Record<string, any> }
-  | { kind: "system"; seq: number; text: string; tone?: string };
+  | { kind: "system"; seq: number; text: string; tone?: string }
+  | { kind: "thinking"; seq: number; text: string };
 
 /**
  * 工具结果显示文本：优先 details.diff（P0-3 后 Edit/Write 的 diff 移入 details，
@@ -122,6 +123,17 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
           nextEvent = events[index + 1]?.event;
         }
         items.push({ kind: "message", seq, ts, author: "assistant", text });
+        break;
+      }
+      case "thinking_delta": {
+        let text = String(event.text);
+        let nextEvent = events[index + 1]?.event;
+        while (nextEvent && nextEvent.type === "thinking_delta") {
+          index += 1;
+          text += nextEvent.text;
+          nextEvent = events[index + 1]?.event;
+        }
+        items.push({ kind: "thinking", seq, text });
         break;
       }
       case "tool_call":

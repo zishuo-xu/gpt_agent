@@ -77,6 +77,8 @@ export class ConversationAgentModel implements AgentModel {
   #messages: ConversationMessage[];
   readonly #context: ContextManager;
   onTextDelta: ((text: string) => void) | undefined;
+  /** 流式推理内容回调（thinking 增量，CLI/Web 实时展示用） */
+  onThinkingDelta: ((text: string) => void) | undefined;
   #compactionCount = 0;
   #compaction:
     | {
@@ -328,6 +330,8 @@ export class ConversationAgentModel implements AgentModel {
     for await (const chunk of this.#client.stream!(request)) {
       if (chunk.type === "text_delta") {
         this.onTextDelta?.(chunk.text);
+      } else if (chunk.type === "thinking_delta") {
+        this.onThinkingDelta?.(chunk.text);
       } else if (chunk.type === "done") {
         finalResponse = chunk.response;
       }
