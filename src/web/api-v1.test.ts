@@ -57,7 +57,6 @@ test("v1 认证：正确 token 不返回 401（完整 200 断言在只读端点�
   const response = await app.request("/api/v1/sessions", {
     headers: { authorization: "Bearer secret-token" },
   });
+  // 路由尚未实现（只读端点任务补全），此时认证放行的标志是 404 而非 401
   assert.notEqual(response.status, 401);
-  const body = await response.json();
-  assert.notEqual(body.code, "unauthorized");
 });
