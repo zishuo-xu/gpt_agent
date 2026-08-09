@@ -38,6 +38,8 @@ test("Web API 暴露 Schema 和脱敏配置", async () => {
       "behavior.enablePlugins",
       "behavior.subagentTimeoutMs",
       "behavior.maxOutputTokens",
+      "behavior.sessionRetentionDays",
+      "behavior.dailyBudgetCny",
     ],
   );
 

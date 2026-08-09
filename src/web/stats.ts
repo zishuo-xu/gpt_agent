@@ -27,7 +27,8 @@ export interface SessionStats {
   sessions: AgentSessionSummary[];
 }
 
-function localDay(iso: string): string {
+/** 本地时区归日（YYYY-MM-DD）；统计分桶与日预算护栏共用 */
+export function localDay(iso: string): string {
   const date = new Date(iso);
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");

@@ -232,6 +232,28 @@ export class AgentSessionManager {
     return true;
   }
 
+  /**
+   * 保留策略：清理超过 days 天未更新的历史会话（保留策略守卫，
+   * 运行中/等待审批的会话跳过）。返回清理数量。
+   */
+  async purgeOldSessions(days: number): Promise<number> {
+    if (!Number.isFinite(days) || days <= 0) return 0;
+    const cutoff = Date.now() - days * 86_400_000;
+    let purged = 0;
+    for (const summary of this.list()) {
+      if (
+        summary.status === "running" ||
+        summary.status === "waiting_permission"
+      ) {
+        continue;
+      }
+      if (Date.parse(summary.updatedAt) < cutoff) {
+        if (await this.deleteSession(summary.id)) purged += 1;
+      }
+    }
+    return purged;
+  }
+
   async restore(): Promise<void> {
     await this.#acquireLock();
     await this.#ensureProjectMetadata();
@@ -314,6 +336,7 @@ export class AgentSessionManager {
           {
             webhookUrl: runtimeConfig.notify.webhook,
             sessionTitle: session.title,
+            getSummary: () => session.summary(),
           },
         );
       }
@@ -394,6 +417,7 @@ export class AgentSessionManager {
         {
           webhookUrl: runtimeConfig.notify.webhook,
           sessionTitle: session.title,
+          getSummary: () => session.summary(),
         },
       );
     }

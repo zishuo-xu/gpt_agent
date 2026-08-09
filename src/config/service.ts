@@ -487,6 +487,17 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
         config.behavior.maxOutputTokens >= 256
           ? config.behavior.maxOutputTokens
           : 8192,
+      sessionRetentionDays:
+        typeof config.behavior?.sessionRetentionDays === "number" &&
+        Number.isInteger(config.behavior.sessionRetentionDays) &&
+        config.behavior.sessionRetentionDays >= 0
+          ? config.behavior.sessionRetentionDays
+          : 30,
+      dailyBudgetCny:
+        typeof config.behavior?.dailyBudgetCny === "number" &&
+        config.behavior.dailyBudgetCny >= 0
+          ? config.behavior.dailyBudgetCny
+          : 0,
     },
   };
   for (const field of CONFIG_SCHEMA) {

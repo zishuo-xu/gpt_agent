@@ -1,12 +1,14 @@
 import { spawn } from "node:child_process";
 import type { AgentEvent } from "./types.js";
+import type { AgentSessionSummary } from "./session.js";
 
 /**
  * 外部 webhook 推送器。
  *
  * 订阅会话事件流，把"需要用户知道"的事件推送到配置的 webhook：
- * - 任务完成（done）
- * - 任务出错（error / notify.error）
+ * - 任务完成（done / run_finished completed）
+ * - 任务出错（error / notify.error / run_finished failed）
+ * - 任务中断（run_finished interrupted）
  * - 审批超时（notify.warn，由会话在超时拒绝时发出）
  *
  * 推送纪律（与设计文档一致）：只推需要知道的，不推主动汇报；
@@ -22,6 +24,12 @@ import type { AgentEvent } from "./types.js";
 const PUSH_PER_HOUR = 2;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 
+const RUN_FINISHED_STATUS = {
+  completed: "已完成",
+  failed: "已失败",
+  interrupted: "已中断",
+} as const;
+
 interface RateWindow {
   start: number;
   count: number;
@@ -30,15 +38,22 @@ interface RateWindow {
 export class WebhookNotifier {
   readonly #webhookUrl: string | undefined;
   readonly #sessionTitle: string;
+  readonly #getSummary: (() => AgentSessionSummary | undefined) | undefined;
   readonly #unsubscribe: () => void;
   #rateWindow: RateWindow = { start: Date.now(), count: 0 };
 
   constructor(
     subscribe: (listener: (event: AgentEvent) => void) => () => void,
-    options: { webhookUrl?: string; sessionTitle: string },
+    options: {
+      webhookUrl?: string;
+      sessionTitle: string;
+      /** 推送任务结果时附带 耗时/费用/tokens（会话 summary 提供） */
+      getSummary?: () => AgentSessionSummary | undefined;
+    },
   ) {
     this.#webhookUrl = options.webhookUrl?.trim() || undefined;
     this.#sessionTitle = options.sessionTitle;
+    this.#getSummary = options.getSummary;
     this.#unsubscribe = this.#webhookUrl
       ? subscribe((event) => void this.#onEvent(event))
       : () => undefined;
@@ -50,7 +65,22 @@ export class WebhookNotifier {
 
   #onEvent(event: AgentEvent): void {
     if (event.type === "done") {
+      // /run 会话的终态由 run_finished 推送（信息更全：状态+耗时+费用），
+      // 会话结束时的 done 与之重复，跳过避免双推（交互会话无 run_finished，照常推送）
+      if (this.#getSummary?.()?.kind === "run") return;
       void this.#push("任务完成", `会话「${this.#sessionTitle}」已完成。`);
+    } else if (event.type === "run_finished") {
+      // 无人值守任务终态：completed / failed / interrupted（含收尾摘要与花费）
+      const status = RUN_FINISHED_STATUS[event.status] ?? "已结束";
+      const reason =
+        event.reason && event.reason !== "done"
+          ? `（${event.reason}）`
+          : "";
+      const detail = this.#summaryDetail();
+      void this.#push(
+        `任务${status}`,
+        `会话「${this.#sessionTitle}」的无人值守任务${status}${reason}。${detail}`,
+      );
     } else if (event.type === "error") {
       void this.#push("任务出错", `会话「${this.#sessionTitle}」出错：${event.message}`);
     } else if (
@@ -62,6 +92,20 @@ export class WebhookNotifier {
         `会话「${this.#sessionTitle}」：${event.message}`,
       );
     }
+  }
+
+  /** 任务结果摘要：耗时 / 费用 / 输入 tokens（summary 缺失时留空） */
+  #summaryDetail(): string {
+    const summary = this.#getSummary?.();
+    if (!summary) return "";
+    const minutes = Math.max(
+      0,
+      Math.round(
+        (Date.parse(summary.updatedAt) - Date.parse(summary.createdAt)) /
+          60_000,
+      ),
+    );
+    return `耗时 ${minutes} 分钟 · 费用 ¥${summary.totalCostCny.toFixed(2)} · 输入 ${summary.totalInputTokens} tokens`;
   }
 
   async #push(title: string, body: string): Promise<void> {
@@ -156,6 +200,12 @@ export class DesktopNotifier {
   #onEvent(event: AgentEvent): void {
     if (event.type === "done") {
       this.#push("任务完成", `会话「${this.#sessionTitle}」已完成。`);
+    } else if (event.type === "run_finished") {
+      const status = RUN_FINISHED_STATUS[event.status] ?? "已结束";
+      this.#push(
+        `任务${status}`,
+        `会话「${this.#sessionTitle}」的无人值守任务${status}。`,
+      );
     } else if (event.type === "error") {
       this.#push("任务出错", `会话「${this.#sessionTitle}」出错：${event.message}`);
     } else if (

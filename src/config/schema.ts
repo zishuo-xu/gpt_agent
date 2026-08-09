@@ -72,6 +72,10 @@ export interface BehaviorConfig {
   subagentTimeoutMs?: number;
   /** 单次模型请求最大输出 tokens；缺省 8192（原硬编码 4096 会截断长输出） */
   maxOutputTokens?: number;
+  /** 会话保留天数（0 = 不清理）；缺省 30 */
+  sessionRetentionDays?: number;
+  /** 每日花费上限（元，0 = 不限制）；超出后定时任务暂停触发并顺延 */
+  dailyBudgetCny?: number;
 }
 
 export interface MyAgentConfig {
@@ -215,6 +219,24 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     description:
       "模型单次请求的输出上限。缺省 8192；长任务输出被截断时可调大（注意输出 token 计费）。",
     default: 8192,
+    hot: true,
+  },
+  {
+    key: "behavior.sessionRetentionDays",
+    type: "number",
+    title: "会话保留天数",
+    description:
+      "Web 服务启动时与每日清理超过该天数未更新的会话（事件流、书签、分支一并删除）。0 = 不清理。缺省 30。",
+    default: 30,
+    hot: true,
+  },
+  {
+    key: "behavior.dailyBudgetCny",
+    type: "number",
+    title: "每日花费上限（元）",
+    description:
+      "按项目当日累计费用（人民币）超过该值时暂停触发定时任务并顺延。0 = 不限制。缺省 0。",
+    default: 0,
     hot: true,
   },
 ];

@@ -146,3 +146,95 @@ test("未配置 webhook 时不推送", async () => {
   notifier.dispose();
   fetch.restore();
 });
+
+test("run_finished 终态推送：completed 附带耗时/费用摘要", async () => {
+  const bus = createBus();
+  const fetch = stubFetch();
+  const notifier = new WebhookNotifier(bus.subscribe, {
+    webhookUrl: "https://example.com/hook",
+    sessionTitle: "巡检任务",
+    getSummary: () => ({
+      id: "s1",
+      title: "巡检任务",
+      status: "done",
+      permissionMode: "normal",
+      createdAt: "2026-08-09T10:00:00.000Z",
+      updatedAt: "2026-08-09T10:35:00.000Z",
+      totalInputTokens: 12345,
+      totalOutputTokens: 600,
+      totalCachedTokens: 0,
+      totalCostCny: 0.42,
+      totalMissedTokens: 0,
+      totalMissedCostCny: 0,
+      todos: [],
+      toolCallCount: 8,
+      kind: "run",
+    }),
+  });
+  bus.emit({
+    type: "run_finished",
+    taskId: "t1",
+    status: "completed",
+    reason: "done",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].body.title, "任务已完成");
+  assert.match(fetch.calls[0].body.body, /「巡检任务」的无人值守任务已完成/);
+  assert.match(fetch.calls[0].body.body, /耗时 35 分钟/);
+  assert.match(fetch.calls[0].body.body, /费用 ¥0\.42/);
+  assert.match(fetch.calls[0].body.body, /输入 12345 tokens/);
+  notifier.dispose();
+  fetch.restore();
+});
+
+test("run_finished failed/interrupted 推送对应终态", async () => {
+  const bus = createBus();
+  const fetch = stubFetch();
+  const notifier = new WebhookNotifier(bus.subscribe, {
+    webhookUrl: "https://example.com/hook",
+    sessionTitle: "任务B",
+  });
+  bus.emit({ type: "run_finished", taskId: "t1", status: "failed", reason: "error" });
+  bus.emit({ type: "run_finished", taskId: "t2", status: "interrupted" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fetch.calls.length, 2);
+  assert.equal(fetch.calls[0].body.title, "任务已失败");
+  assert.match(fetch.calls[0].body.body, /（error）/);
+  assert.equal(fetch.calls[1].body.title, "任务已中断");
+  notifier.dispose();
+  fetch.restore();
+});
+
+test("run 会话的 done 不双推（由 run_finished 覆盖）；交互会话照常", async () => {
+  const bus = createBus();
+  const fetch = stubFetch();
+  const notifier = new WebhookNotifier(bus.subscribe, {
+    webhookUrl: "https://example.com/hook",
+    sessionTitle: "任务C",
+    getSummary: () => ({
+      id: "s1",
+      title: "任务C",
+      status: "done",
+      permissionMode: "normal",
+      createdAt: "2026-08-09T10:00:00.000Z",
+      updatedAt: "2026-08-09T10:00:03.000Z",
+      totalInputTokens: 3893,
+      totalOutputTokens: 37,
+      totalCachedTokens: 0,
+      totalCostCny: 0.001,
+      totalMissedTokens: 0,
+      totalMissedCostCny: 0,
+      todos: [],
+      toolCallCount: 0,
+      kind: "run",
+    }),
+  });
+  bus.emit({ type: "done" });
+  bus.emit({ type: "run_finished", taskId: "t1", status: "completed" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fetch.calls.length, 1, "run 会话只推 run_finished，不推 done");
+  assert.equal(fetch.calls[0].body.title, "任务已完成");
+  notifier.dispose();
+  fetch.restore();
+});

@@ -8,6 +8,7 @@ import { createWebApp } from "./app.js";
 import { WebSessionManager } from "./sessions.js";
 import { SchedulerHub } from "./scheduler-hub.js";
 import { ProjectRegistry } from "./project-registry.js";
+import { localDay } from "./stats.js";
 
 export interface WebServerOptions {
   cwd: string;
@@ -102,9 +103,24 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
 
   // 每 30s 轮询到期任务：解析到目标项目的 sessionManager 后按 /run 路径启动会话。
   // 无人值守场景下 hardRules（deny 规则）由权限引擎强制，无需交互确认，直接放行。
+  // onDue 返回 false 表示预算护栏拒绝（调度器顺延，不视为失败）。
   const schedulerTicker = setInterval(() => {
     void schedulerHub.tick(new Date(), async (projectKey, task) => {
+      const runtimeConfig = await configService.readEffective();
+      const dailyCap = runtimeConfig.behavior.dailyBudgetCny ?? 0;
       const { resources } = await app.registry.resolve(projectKey);
+      if (dailyCap > 0) {
+        const todayCost = resources.sessionManager
+          .list()
+          .filter((summary) => localDay(summary.createdAt) === localDay(new Date().toISOString()))
+          .reduce((sum, summary) => sum + summary.totalCostCny, 0);
+        if (todayCost >= dailyCap) {
+          process.stdout.write(
+            `[scheduler] 今日费用 ¥${todayCost.toFixed(2)} 已达上限 ¥${dailyCap.toFixed(2)}，定时任务 ${task.id} 顺延\n`,
+          );
+          return false;
+        }
+      }
       const session = await resources.sessionManager.create(
         task.command,
         task.options.permission ?? "normal",
@@ -112,9 +128,30 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
       process.stdout.write(
         `[scheduler] 定时任务 ${task.id} 已启动会话 ${session.id}（${session.title}）\n`,
       );
+      return true;
     });
   }, 30_000);
   schedulerTicker.unref();
+
+  // 保留策略：启动时清理一次 + 每日清理（behavior.sessionRetentionDays，0 = 关闭）。
+  // 清理按 updatedAt 判定，运行中/等待审批的会话跳过。
+  const purgeTicker = setInterval(() => {
+    void purgeExpiredSessions();
+  }, 24 * 3600_000);
+  purgeTicker.unref();
+
+  async function purgeExpiredSessions(): Promise<void> {
+    const runtimeConfig = await configService.readEffective();
+    const days = runtimeConfig.behavior.sessionRetentionDays ?? 30;
+    if (days <= 0) return;
+    const purged = await sessionManager.purgeOldSessions(days);
+    if (purged > 0) {
+      process.stdout.write(
+        `[retention] 已清理 ${purged} 个超过 ${days} 天未更新的会话\n`,
+      );
+    }
+  }
+  await purgeExpiredSessions();
 
   const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
 
@@ -134,6 +171,7 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(schedulerTicker);
+    clearInterval(purgeTicker);
     await sessionManager.flush();
     await sessionManager.releaseLock();
     await sessionManager.closeMcp();

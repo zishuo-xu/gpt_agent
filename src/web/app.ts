@@ -19,6 +19,7 @@ import {
   type MemoryDocumentId,
 } from "./memory.js";
 import { parseRunCommand, stripScheduleFlags } from "../core/run-task.js";
+import { extractRunSummary } from "../core/run-summary.js";
 import { exportSessionHtml } from "./export-session.js";
 import {
   LOBBY_KEY,
@@ -639,6 +640,24 @@ export function createWebApp(
     return deleted
       ? context.json({ deleted: true })
       : context.json({ error: "会话不存在" }, 404);
+  });
+
+  app.get("/api/sessions/:id/summary", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
+    if (!session) return context.json({ error: "会话不存在" }, 404);
+    const run = extractRunSummary(session.events());
+    if (!run) return context.json({ run: null });
+    const summary = session.summary();
+    return context.json({
+      run,
+      totals: {
+        totalCostCny: summary.totalCostCny,
+        totalInputTokens: summary.totalInputTokens,
+        totalOutputTokens: summary.totalOutputTokens,
+        status: summary.status,
+      },
+    });
   });
 
   app.get("/api/sessions/:id/stream", async (context) => {

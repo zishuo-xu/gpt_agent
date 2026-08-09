@@ -49,6 +49,24 @@ const STATUS_LABEL: Record<string, string> = {
   interrupted: "中断",
 };
 
+interface RunSummaryView {
+  taskId: string;
+  description: string;
+  status: "completed" | "interrupted" | "failed";
+  reason?: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  summary: string;
+  todos: Array<{ id: string; text: string; status: string }>;
+}
+
+const RUN_STATUS_LABEL: Record<string, string> = {
+  completed: "已完成",
+  interrupted: "已中断",
+  failed: "已失败",
+};
+
 function formatTime(iso: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
     month: "2-digit",
@@ -80,6 +98,40 @@ export function StatsApp() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [summaryFor, setSummaryFor] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const [runDetail, setRunDetail] = useState<{
+    run: RunSummaryView;
+    totals: {
+      totalCostCny: number;
+      totalInputTokens: number;
+      totalOutputTokens: number;
+      status: string;
+    };
+  } | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+
+  async function openSummary(id: string, title: string) {
+    setSummaryFor({ id, title });
+    setRunDetail(null);
+    setLoadingSummary(true);
+    try {
+      const response = await fetch(
+        `/api/sessions/${id}/summary?project=${encodeURIComponent(currentProject)}`,
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "读取收尾总结失败");
+      }
+      setRunDetail(payload.run ? payload : null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取收尾总结失败");
+    } finally {
+      setLoadingSummary(false);
+    }
+  }
 
   useEffect(() => {
     document.title = "任务统计 · MyAgent";
@@ -257,6 +309,7 @@ export function StatsApp() {
                       <th>状态</th>
                       <th>输入 tokens</th>
                       <th>费用</th>
+                      <th>收尾总结</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -274,6 +327,20 @@ export function StatsApp() {
                         </td>
                         <td>{formatTokens(session.totalInputTokens)}</td>
                         <td>{formatCost(session.totalCostCny)}</td>
+                        <td>
+                          {session.kind === "run" ? (
+                            <button
+                              className="stats-summary-button"
+                              onClick={() =>
+                                void openSummary(session.id, session.title)
+                              }
+                            >
+                              查看
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -281,6 +348,99 @@ export function StatsApp() {
               </section>
             )}
           </>
+        )}
+        {summaryFor && (
+          <div
+            className="stats-modal-overlay"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                setSummaryFor(null);
+                setRunDetail(null);
+              }
+            }}
+          >
+            <div className="stats-modal" role="dialog" aria-label="收尾总结">
+              <div className="stats-modal-head">
+                <div>
+                  <p className="eyebrow">RUN SUMMARY</p>
+                  <h2>{summaryFor.title}</h2>
+                </div>
+                <button
+                  className="stats-modal-close"
+                  aria-label="关闭"
+                  onClick={() => {
+                    setSummaryFor(null);
+                    setRunDetail(null);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+              {loadingSummary ? (
+                <div className="chat-waiting">正在读取收尾总结…</div>
+              ) : !runDetail ? (
+                <div className="stats-modal-empty">
+                  该会话没有可展示的收尾总结（可能中断于进程崩溃或 run 事件不完整）。
+                </div>
+              ) : (
+                <>
+                  <div className="stats-modal-meta">
+                    <span
+                      className={`stats-modal-status status-${runDetail.run.status}`}
+                    >
+                      {RUN_STATUS_LABEL[runDetail.run.status] ??
+                        runDetail.run.status}
+                    </span>
+                    <span>
+                      {formatTime(runDetail.run.startedAt)} →{" "}
+                      {formatTime(runDetail.run.finishedAt)}
+                    </span>
+                    <span>
+                      耗时{" "}
+                      {Math.max(
+                        1,
+                        Math.round(runDetail.run.durationMs / 60_000),
+                      )}{" "}
+                      分钟
+                    </span>
+                    <span>
+                      费用 {formatCost(runDetail.totals.totalCostCny)} · 输入{" "}
+                      {formatTokens(runDetail.totals.totalInputTokens)}
+                    </span>
+                    {runDetail.run.reason && (
+                      <span className="stats-modal-reason">
+                        原因：{runDetail.run.reason}
+                      </span>
+                    )}
+                  </div>
+                  <div className="stats-modal-body">
+                    <h3>收尾总结</h3>
+                    <pre className="stats-modal-summary">
+                      {runDetail.run.summary || "（无总结文本）"}
+                    </pre>
+                    {runDetail.run.todos.length > 0 && (
+                      <>
+                        <h3>Todo 快照</h3>
+                        <ul className="stats-modal-todos">
+                          {runDetail.run.todos.map((todo) => (
+                            <li
+                              key={todo.id}
+                              className={
+                                todo.status === "done" ? "todo-done" : ""
+                              }
+                            >
+                              {todo.status === "done" ? "☑ " : "☐ "}
+                              {todo.text}
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         )}
       </main>
     </div>
