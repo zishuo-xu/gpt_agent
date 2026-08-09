@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import type { AgentEvent, RecordedEvent } from "../core/types.js";
 import type { ConfigService } from "../config/service.js";
+import { exportSessionHtml } from "./export-session.js";
 import type { ProjectRegistry } from "./project-registry.js";
 import type { WebSessionManager } from "./sessions.js";
 
@@ -43,6 +44,90 @@ export function createApiV1(options: ApiV1Options): Hono {
       );
     }
     return next();
+  });
+
+  async function resolveV1Project(context: {
+    req: { query: (k: string) => string | undefined };
+  }): Promise<{
+    configService: ConfigService;
+    sessionManager: WebSessionManager | undefined;
+  }> {
+    const key = context.req.query("project");
+    if (!key) {
+      return {
+        configService: options.configService,
+        sessionManager: options.sessionManager,
+      };
+    }
+    const { resources } = await options.registry.resolve(key);
+    return {
+      configService: resources.configService,
+      sessionManager: resources.sessionManager,
+    };
+  }
+
+  app.get("/sessions", async (context) => {
+    const { sessionManager } = await resolveV1Project(context);
+    if (!sessionManager) {
+      return context.json(
+        { ok: false, error: "默认项目未加载", code: "not_found" },
+        404,
+      );
+    }
+    const limit = Math.max(
+      1,
+      Math.min(Number(context.req.query("limit")) || 20, 200),
+    );
+    return context.json({ ok: true, data: sessionManager.list().slice(0, limit) });
+  });
+
+  app.get("/sessions/:id", async (context) => {
+    const { sessionManager } = await resolveV1Project(context);
+    const session = sessionManager?.get(context.req.param("id"));
+    if (!session) {
+      return context.json({ ok: false, error: "会话不存在", code: "not_found" }, 404);
+    }
+    return context.json({ ok: true, data: session.summary() });
+  });
+
+  app.get("/sessions/:id/events", async (context) => {
+    const { sessionManager } = await resolveV1Project(context);
+    const session = sessionManager?.get(context.req.param("id"));
+    if (!session) {
+      return context.json({ ok: false, error: "会话不存在", code: "not_found" }, 404);
+    }
+    const rawAfter = Number(context.req.query("after"));
+    const after = Number.isFinite(rawAfter) && rawAfter >= 0 ? rawAfter : 0;
+    const records = session.events(after);
+    return context.json({
+      ok: true,
+      data: {
+        events: mapV1Events(records),
+        latestSeq:
+          records.length > 0 ? records[records.length - 1]!.seq : after,
+      },
+    });
+  });
+
+  app.get("/sessions/:id/export", async (context) => {
+    const { sessionManager } = await resolveV1Project(context);
+    const session = sessionManager?.get(context.req.param("id"));
+    if (!session) {
+      return context.json({ ok: false, error: "会话不存在", code: "not_found" }, 404);
+    }
+    const summary = session.summary();
+    const html = exportSessionHtml({
+      sessionId: session.id,
+      title: summary.title,
+      createdAt: summary.createdAt,
+      updatedAt: summary.updatedAt,
+      permissionMode: summary.permissionMode,
+      records: session.events(),
+    });
+    return context.body(html, 200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-disposition": `attachment; filename="myagent-${session.id}.html"`,
+    });
   });
 
   return app;
