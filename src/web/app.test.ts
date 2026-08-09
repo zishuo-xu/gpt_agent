@@ -451,3 +451,44 @@ test("认证中间件经 mountBeforeRoutes 在业务路由前生效", async () =
   });
   assert.equal(goodLogin.status, 200);
 });
+
+test("记忆 history API：返回 before/after/diff；越界 400；缺失 404", async () => {
+  const { app, service } = await fixture();
+  const memDir = path.join(service.cwd, ".myagent", "memory");
+  await mkdir(memDir, { recursive: true });
+  const docPath = path.join(memDir, "pitfalls.md");
+  await writeFile(docPath, "- 新内容\n", "utf8");
+  const historyDir = path.join(memDir, ".history");
+  await mkdir(historyDir, { recursive: true });
+  const historyFile = path.join(
+    historyDir,
+    "pitfalls-20260810-120000-000-abcd.md",
+  );
+  await writeFile(historyFile, "- 旧内容\n", "utf8");
+
+  const response = await app.request(
+    `/api/memory/history?path=${encodeURIComponent(historyFile)}`,
+  );
+  assert.equal(response.status, 200);
+  const payload = (await response.json()) as {
+    before: string;
+    after: string;
+    diff: string;
+  };
+  assert.equal(payload.before, "- 旧内容\n");
+  assert.equal(payload.after, "- 新内容\n");
+  assert.match(payload.diff, /- 旧内容/);
+  assert.match(payload.diff, /\+ 新内容/);
+
+  // 越界 path（不在 .history/ 内）→ 400
+  const bad = await app.request(
+    `/api/memory/history?path=${encodeURIComponent("/etc/passwd")}`,
+  );
+  assert.equal(bad.status, 400);
+
+  // 缺失留档 → 404
+  const missing = await app.request(
+    `/api/memory/history?path=${encodeURIComponent(path.join(historyDir, "nope.md"))}`,
+  );
+  assert.equal(missing.status, 404);
+});
