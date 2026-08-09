@@ -51,6 +51,8 @@ export interface ContextConfig {
 export interface ServerConfig {
   host: string;
   password: string;
+  /** /api/v1 无头接口的 Bearer token；空 = 接口未启用 */
+  apiToken: string;
 }
 
 export interface NotifyConfig {

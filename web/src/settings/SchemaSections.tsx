@@ -4,6 +4,18 @@ import type { Config } from "./types";
 
 const SCALAR_TYPES = ["string", "number", "boolean", "select"];
 
+/** 随机 API token：32 字节 Web Crypto → base64url（浏览器安全，无 Node 依赖）。 */
+function randomToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 export function isScalarType(type: string): boolean {
   return SCALAR_TYPES.includes(type);
 }
@@ -176,24 +188,43 @@ export function SchemaDrivenSections(props: {
                       ))}
                     </select>
                   ) : (
-                    <input
-                      type={field.type === "number" ? "number" : "text"}
-                      value={String(value)}
-                      min={field.min}
-                      max={field.max}
-                      step={field.step}
-                      onChange={(event) =>
-                        props.onChange((current) =>
-                          setConfigValue(
-                            current,
-                            field.key,
-                            field.type === "number"
-                              ? Number(event.target.value)
-                              : event.target.value,
-                          ),
-                        )
-                      }
-                    />
+                    <div className="schema-field-input-row">
+                      <input
+                        type={field.type === "number" ? "number" : "text"}
+                        value={String(value)}
+                        min={field.min}
+                        max={field.max}
+                        step={field.step}
+                        onChange={(event) =>
+                          props.onChange((current) =>
+                            setConfigValue(
+                              current,
+                              field.key,
+                              field.type === "number"
+                                ? Number(event.target.value)
+                                : event.target.value,
+                            ),
+                          )
+                        }
+                      />
+                      {field.key === "server.apiToken" && (
+                        <button
+                          type="button"
+                          className="schema-field-generate"
+                          onClick={() =>
+                            props.onChange((current) =>
+                              setConfigValue(
+                                current,
+                                field.key,
+                                randomToken(),
+                              ),
+                            )
+                          }
+                        >
+                          生成
+                        </button>
+                      )}
+                    </div>
                   )}
                 </label>
               );
