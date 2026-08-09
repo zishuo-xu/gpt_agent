@@ -48,9 +48,7 @@ test.describe("插件面板（生产级回归）", () => {
     await expect(
       page.getByRole("heading", { name: "已加载（1）" }),
     ).toBeVisible();
-    await expect(
-      page.locator(".plugin-name", { hasText: "PanelProbe" }),
-    ).toBeVisible();
+    await expect(page.getByText("PanelProbe")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "加载错误（0）" }),
     ).toBeVisible();
