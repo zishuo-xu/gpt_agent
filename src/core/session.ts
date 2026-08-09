@@ -608,7 +608,19 @@ export class AgentSession {
           }
         } finally {
           this.#activeLoop = undefined;
-          await this.flush();
+          try {
+            await this.flush();
+          } catch (error) {
+            // 事件落盘失败：失败可见（事件流内存仍完整）但不崩进程——
+            // 裸 void sendInput 调用点无 catch，未处理的 rejection 会让 Node 直接退出
+            this.#status = "error";
+            this.#bus.emit({
+              type: "error",
+              message: `事件落盘失败：${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            });
+          }
         }
 
         current = this.#queuedInputs.shift();

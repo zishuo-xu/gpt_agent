@@ -25,6 +25,8 @@ export class SessionStore {
   #seq = 0;
   #initialized = false;
   #writeTail: Promise<void> = Promise.resolve();
+  /** 最近一次写盘失败（flush 时显式报告一次后清除） */
+  #writeError: unknown | undefined;
 
   constructor(filePath: string, sessionId: string) {
     this.#filePath = filePath;
@@ -36,23 +38,39 @@ export class SessionStore {
     getBranchId?: () => string,
   ): () => void {
     return bus.subscribe((event) => {
-      this.#writeTail = this.#writeTail.then(async () => {
-        await this.#initializeSequence();
-        const record: RecordedEvent = {
-          seq: ++this.#seq,
-          ts: new Date().toISOString(),
-          sessionId: this.#sessionId,
-          branchId: getBranchId?.() ?? ROOT_BRANCH,
-          event,
-        };
-        await mkdir(path.dirname(this.#filePath), { recursive: true });
-        await appendFile(this.#filePath, `${JSON.stringify(record)}\n`, "utf8");
-      });
+      this.#writeTail = this.#writeTail
+        .then(async () => {
+          await this.#initializeSequence();
+          const record: RecordedEvent = {
+            seq: ++this.#seq,
+            ts: new Date().toISOString(),
+            sessionId: this.#sessionId,
+            branchId: getBranchId?.() ?? ROOT_BRANCH,
+            event,
+          };
+          await mkdir(path.dirname(this.#filePath), { recursive: true });
+          await appendFile(
+            this.#filePath,
+            `${JSON.stringify(record)}\n`,
+            "utf8",
+          );
+        })
+        .catch((error) => {
+          // 单次写失败不断链：记录错误由 flush 显式报告，后续事件照常尝试落盘
+          // （避免整条写链被一次失败毒化，后续事件静默丢写）
+          this.#writeError = error;
+        });
     });
   }
 
   async flush(): Promise<void> {
     await this.#writeTail;
+    // 显式报告最近一次写失败（报告后清除，避免反复抛出；内存事件流仍完整）
+    if (this.#writeError !== undefined) {
+      const error = this.#writeError;
+      this.#writeError = undefined;
+      throw error;
+    }
   }
 
   async readAll(): Promise<RecordedEvent[]> {
@@ -111,22 +129,26 @@ export class TraceStore {
   record(
     trace: Omit<AgentTurnTrace, "turn" | "ts">,
   ): void {
-    this.#writeTail = this.#writeTail.then(async () => {
-      await this.#initializeTurn();
-      const record: AgentTurnTrace = {
-        turn: ++this.#turn,
-        ts: new Date().toISOString(),
-        ...trace,
-      };
-      await mkdir(path.dirname(this.#filePath), {
-        recursive: true,
+    this.#writeTail = this.#writeTail
+      .then(async () => {
+        await this.#initializeTurn();
+        const record: AgentTurnTrace = {
+          turn: ++this.#turn,
+          ts: new Date().toISOString(),
+          ...trace,
+        };
+        await mkdir(path.dirname(this.#filePath), {
+          recursive: true,
+        });
+        await appendFile(
+          this.#filePath,
+          `${JSON.stringify(record)}\n`,
+          "utf8",
+        );
+      })
+      .catch(() => {
+        // TraceStore 属调试数据：写失败静默隔离，不阻断主流程也不让 flush 报错
       });
-      await appendFile(
-        this.#filePath,
-        `${JSON.stringify(record)}\n`,
-        "utf8",
-      );
-    });
   }
 
   async flush(): Promise<void> {

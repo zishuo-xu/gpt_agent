@@ -445,11 +445,19 @@ export function createWebApp(
         return context.json({ accepted: true, queued: false });
       }
       const queued = session.isProcessing();
-      void session.sendInput(
-        task,
-        undefined,
-        body.steer === true ? { steer: true } : undefined,
-      );
+      void session
+        .sendInput(
+          task,
+          undefined,
+          body.steer === true ? { steer: true } : undefined,
+        )
+        .catch((error) => {
+          // 兜底：sendInput 内部已把 loop/flush 错误转为会话 error 事件（SSE 可见），
+          // 此处防未处理 rejection 崩进程
+          if (error instanceof Error) {
+            console.error(`[web] sendInput 未处理错误：${error.message}`);
+          }
+        });
       return context.json({ accepted: true, queued });
     } catch (error) {
       return context.json(
