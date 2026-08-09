@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import type { AgentEvent, RecordedEvent } from "../core/types.js";
 import type { ConfigService } from "../config/service.js";
+import { parseRunCommand } from "../core/run-task.js";
 import { exportSessionHtml } from "./export-session.js";
 import type { ProjectRegistry } from "./project-registry.js";
 import type { WebSessionManager } from "./sessions.js";
@@ -128,6 +129,144 @@ export function createApiV1(options: ApiV1Options): Hono {
       "content-type": "text/html; charset=utf-8",
       "content-disposition": `attachment; filename="myagent-${session.id}.html"`,
     });
+  });
+
+  app.post("/runs", async (context) => {
+    const { sessionManager } = await resolveV1Project(context);
+    if (!sessionManager) {
+      return context.json(
+        { ok: false, error: "默认项目未加载", code: "not_found" },
+        404,
+      );
+    }
+    let body: { command?: unknown; confirmBounds?: unknown };
+    try {
+      body = (await context.req.json()) as typeof body;
+    } catch {
+      return context.json(
+        { ok: false, error: "请求体需为 JSON", code: "invalid" },
+        400,
+      );
+    }
+    const command = typeof body.command === "string" ? body.command.trim() : "";
+    if (!command.startsWith("/run")) {
+      return context.json(
+        { ok: false, error: "command 需为 /run 任务命令", code: "invalid" },
+        400,
+      );
+    }
+    const run = parseRunCommand(command);
+    if (run.hardRules.length > 0 && body.confirmBounds !== true) {
+      return context.json(
+        {
+          ok: false,
+          error: "需要先确认任务硬边界（confirmBounds: true）",
+          code: "conflict",
+          data: { hardRules: run.hardRules, semanticBounds: run.semanticBounds },
+        },
+        409,
+      );
+    }
+    const session = await sessionManager.create(
+      command,
+      run.permission ?? "normal",
+    );
+    return context.json({ ok: true, data: { sessionId: session.id } });
+  });
+
+  app.post("/sessions/:id/messages", async (context) => {
+    const { sessionManager } = await resolveV1Project(context);
+    const session = sessionManager?.get(context.req.param("id"));
+    if (!session) {
+      return context.json({ ok: false, error: "会话不存在", code: "not_found" }, 404);
+    }
+    let body: { message?: unknown; steer?: unknown };
+    try {
+      body = (await context.req.json()) as typeof body;
+    } catch {
+      return context.json(
+        { ok: false, error: "请求体需为 JSON", code: "invalid" },
+        400,
+      );
+    }
+    const message = typeof body.message === "string" ? body.message.trim() : "";
+    if (!message) {
+      return context.json(
+        { ok: false, error: "消息不能为空", code: "invalid" },
+        400,
+      );
+    }
+    if (message.startsWith("/run")) {
+      return context.json(
+        { ok: false, error: "任务发起请用 POST /api/v1/runs", code: "invalid" },
+        400,
+      );
+    }
+    const queued = session.isProcessing();
+    void session.sendInput(
+      message,
+      undefined,
+      body.steer === true ? { steer: true } : undefined,
+    );
+    return context.json({ ok: true, data: { accepted: true, queued } });
+  });
+
+  app.post("/sessions/:id/approvals/:callId", async (context) => {
+    const { sessionManager } = await resolveV1Project(context);
+    const session = sessionManager?.get(context.req.param("id"));
+    if (!session) {
+      return context.json({ ok: false, error: "会话不存在", code: "not_found" }, 404);
+    }
+    let body: { granted?: unknown; scope?: unknown; feedback?: unknown };
+    try {
+      body = (await context.req.json()) as typeof body;
+    } catch {
+      return context.json(
+        { ok: false, error: "请求体需为 JSON", code: "invalid" },
+        400,
+      );
+    }
+    if (typeof body.granted !== "boolean") {
+      return context.json(
+        { ok: false, error: "granted 需为布尔值", code: "invalid" },
+        400,
+      );
+    }
+    const resolved = session.resolvePermission(
+      context.req.param("callId"),
+      {
+        granted: body.granted,
+        ...(typeof body.scope === "string"
+          ? {
+              scope: body.scope as "once" | "session" | "project" | "global",
+            }
+          : {}),
+        ...(typeof body.feedback === "string" && body.feedback.trim()
+          ? { feedback: body.feedback.trim() }
+          : {}),
+      },
+    );
+    if (!resolved) {
+      return context.json(
+        { ok: false, error: "审批已失效或不存在", code: "conflict" },
+        409,
+      );
+    }
+    return context.json({ ok: true, data: { resolved: true } });
+  });
+
+  app.post("/sessions/:id/interrupt", async (context) => {
+    const { sessionManager } = await resolveV1Project(context);
+    const session = sessionManager?.get(context.req.param("id"));
+    if (!session) {
+      return context.json({ ok: false, error: "会话不存在", code: "not_found" }, 404);
+    }
+    return session.interrupt()
+      ? context.json({ ok: true, data: { interrupted: true } })
+      : context.json(
+          { ok: false, error: "会话当前未运行", code: "conflict" },
+          409,
+        );
   });
 
   return app;
