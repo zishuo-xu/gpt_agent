@@ -10,13 +10,13 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^1.19.0
-        version: 1.19.17(hono@4.12.32)
+        version: 1.19.17(hono@4.12.34)
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
       hono:
-        specifier: ^4.9.0
-        version: 4.12.32
+        specifier: ^4.12.34
+        version: 4.12.34
       jsonc-parser:
         specifier: ^3.3.0
         version: 3.3.1
@@ -593,8 +593,8 @@ packages:
     resolution: {integrity: sha512-XSt8tMzbW9ymE7687xztkO1ckR7qJNQ3LywY9vlYGhGi3zXrGBHuUo2Cl1ztZaICW+1eAGdkLbj6iwVqDT33kg==}
     engines: {node: '>=20.0.0'}
 
-  hono@4.12.32:
-    resolution: {integrity: sha512-XcuyW9qE2kJn07PkecMOBd5Vq/hMy7mmGw+idz1yblbg9N17ijJODrvPkn7/dwL3Kulj8LcRJ69DLOWf91dRUg==}
+  hono@4.12.34:
+    resolution: {integrity: sha512-GqXJqY/xJkJmuloTrnV1ZEXG3fqte+VjkUqoRNZXcrUidiUOP4fMSIHHY4tsqZBK++kVyWmt/AAfSUuy57/eSA==}
     engines: {node: '>=16.9.0'}
 
   js-tokens@4.0.0:
@@ -967,9 +967,9 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@hono/node-server@1.19.17(hono@4.12.32)':
+  '@hono/node-server@1.19.17(hono@4.12.34)':
     dependencies:
-      hono: 4.12.32
+      hono: 4.12.34
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -1219,7 +1219,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  hono@4.12.32: {}
+  hono@4.12.34: {}
 
   js-tokens@4.0.0: {}
 
