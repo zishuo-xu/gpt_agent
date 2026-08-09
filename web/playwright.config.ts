@@ -1,4 +1,8 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "@playwright/test";
+
+// 仓库根目录动态解析：主目录与 worktree 均可运行本配置
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 export default defineConfig({
   testDir: "./e2e",
@@ -10,12 +14,22 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:3100",
     headless: true,
-    viewport: { width: 1280, height: 800 },
   },
+  projects: [
+    {
+      name: "desktop",
+      testMatch: /e2e\/(?!mobile\.).*\.spec\.ts/,
+      use: { viewport: { width: 1280, height: 800 } },
+    },
+    {
+      name: "mobile",
+      testMatch: /e2e\/mobile\.spec\.ts/,
+      use: { viewport: { width: 375, height: 812 } },
+    },
+  ],
   // 测试自管理服务器生命周期（globalSetup 在 worker 中启动）
   webServer: {
-    command:
-      "HOME=/tmp/myagent-gui-test-home /Users/xuzishuo/Documents/gpt_agent/node_modules/.bin/tsx /Users/xuzishuo/Documents/gpt_agent/src/cli.ts --web --port 3100",
+    command: `HOME=/tmp/myagent-gui-test-home ${repoRoot}node_modules/.bin/tsx ${repoRoot}src/cli.ts --web --port 3100`,
     url: "http://127.0.0.1:3100/api/health",
     reuseExistingServer: false,
     timeout: 60_000,
