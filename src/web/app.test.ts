@@ -30,6 +30,7 @@ test("Web API 暴露 Schema 和脱敏配置", async () => {
       "context",
       "server.host",
       "server.password",
+      "server.apiToken",
       "notify.webhook",
       "notify.desktop",
       "behavior.showCacheMissNotices",
