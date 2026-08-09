@@ -74,6 +74,9 @@ export class AgentSession {
   readonly #traceStore: TraceStore;
   readonly #events: AgentSessionEvent[] = [];
   readonly #queuedInputs: QueuedInput[] = [];
+  /** 事件 seq 独立计数器：从恢复时的最后合法记录续，与磁盘对齐
+      （崩溃/坏行造成 seq 空洞时不再用 length+1 复用旧号，杜绝前端按 seq 去重丢事件） */
+  #eventSeq = 0;
   #approvalTimeoutMs: number;
   readonly #rememberPermission:
     | ((
@@ -325,6 +328,8 @@ export class AgentSession {
           ...(record.branchId ? { branchId: record.branchId } : {}),
           event: record.event,
         });
+        // 独立计数器从最后合法记录续（磁盘缺号不产生内存空洞）
+        if (record.seq > this.#eventSeq) this.#eventSeq = record.seq;
         this.#applyEventState(record.event);
       }
       if (
@@ -884,7 +889,7 @@ export class AgentSession {
 
   #record(event: AgentEvent): void {
     const record: AgentSessionEvent = {
-      seq: this.#events.length + 1,
+      seq: ++this.#eventSeq,
       ts: new Date().toISOString(),
       // branch_switch 事件属于新分支（此时 currentBranchId 尚未切换）
       branchId:

@@ -851,6 +851,15 @@ test("装配：ensurePluginsLoaded 启动即加载且幂等（报告立即可见
     "utf8",
   );
 
+test("恢复后事件 seq 与磁盘对齐：缺号恢复不产生重复或空洞", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-seqgap-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-seqgap-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-seqgap-home-"),
+  );
+fix(core): 恢复后事件 seq 与磁盘对齐——#eventSeq 从最后合法记录续，杜绝缺号错位)
   const configService = new ConfigService({ cwd, homeDir });
   const manager = new AgentSessionManager({
     cwd,
@@ -874,4 +883,63 @@ test("装配：ensurePluginsLoaded 启动即加载且幂等（报告立即可见
   assert.equal(again.loaded.length, 1);
   pluginToolRegistry.clear();
   await manager.releaseLock();
+    modelFactory: (messages) =>
+      new ConversationAgentModel(
+        new ScriptedClient([response("第一轮完成")]),
+        messages,
+      ),
+  });
+  const session = await manager.createSession({ title: "seq 对齐测试" });
+  await session.sendInput("第一条");
+  await manager.flush();
+  await manager.releaseLock();
+
+  // 模拟磁盘缺号：删除事件流中的 seq=4（cost_update，类似崩溃时某事件分配了 seq 但未落盘）
+  const filePath = path.join(
+    stateDir,
+    "projects",
+    Buffer.from(cwd).toString("base64url"),
+    "sessions",
+    `${session.id}.jsonl`,
+  );
+  const records = (await readFile(filePath, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { seq: number; event: { type: string } });
+  const withGap = records.filter((record) => record.seq !== 4);
+  await writeFile(filePath, withGap.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+  const lastDiskSeq = withGap.at(-1)!.seq;
+  // 恢复后继续发事件：新事件 seq 必须严格递增且不与既有 seq 重复
+  const restoredManager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService: new ConfigService({ cwd, homeDir }),
+    modelFactory: (messages) =>
+      new ConversationAgentModel(
+        new ScriptedClient([response("第二轮完成")]),
+        messages,
+      ),
+  });
+  await restoredManager.restore();
+  const restored = restoredManager.get(session.id);
+  assert.ok(restored);
+  await restored.sendInput("第二条");
+  await restoredManager.flush();
+
+  const events = restored.events();
+  const seqs = events.map((record) => record.seq);
+  assert.equal(new Set(seqs).size, seqs.length, "seq 不应重复");
+  const lastSeq = seqs.at(-1) ?? 0;
+  assert.ok(
+    seqs.every((seq, index) => index === 0 || seq > seqs[index - 1]!),
+    `seq 应严格递增，实际: ${seqs.join(",")}`,
+  );
+  // 与磁盘对齐：新事件 seq 必须续在磁盘最后 seq 之后（缺号不吞新号、不复用旧号）
+  assert.ok(
+    lastSeq > lastDiskSeq,
+    `新事件最后 seq ${lastSeq} 应大于磁盘最后 seq ${lastDiskSeq}`,
+  );
+  await restoredManager.releaseLock();
+fix(core): 恢复后事件 seq 与磁盘对齐——#eventSeq 从最后合法记录续，杜绝缺号错位)
 });
