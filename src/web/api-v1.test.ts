@@ -3,11 +3,19 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { Hono } from "hono";
 import type { RecordedEvent } from "../core/types.js";
 import { ConfigService } from "../config/service.js";
 import { ProjectRegistry } from "./project-registry.js";
 import { WebSessionManager } from "./sessions.js";
 import { createApiV1, mapV1Events } from "./api-v1.js";
+
+/** 模拟生产挂载：app.route("/api/v1", v1App)——v1 内部路由不带前缀 */
+function mounted(app: Hono): Hono {
+  const server = new Hono();
+  server.route("/api/v1", app);
+  return server;
+}
 
 async function fixture(token: string) {
   const root = await mkdtemp(path.join(os.tmpdir(), "myagent-v1-"));
@@ -25,12 +33,14 @@ async function fixture(token: string) {
   );
   await sessionManager.restore();
   registry.seed(path.join(root, "project"), configService, sessionManager);
-  return createApiV1({
-    apiToken: token,
-    registry,
-    configService,
-    sessionManager,
-  });
+  return mounted(
+    createApiV1({
+      apiToken: token,
+      registry,
+      configService,
+      sessionManager,
+    }),
+  );
 }
 
 test("v1 认证：apiToken 未配置返回 404 not_enabled", async () => {
@@ -53,13 +63,15 @@ test("v1 认证：无/错 token 返回 401 unauthorized", async () => {
   assert.equal(body.code, "unauthorized");
 });
 
-test("v1 认证：正确 token 不返回 401（完整 200 断言在只读端点任务补全）", async () => {
+test("v1 认证：正确 token 通过（sessions 空列表）", async () => {
   const app = await fixture("secret-token");
   const response = await app.request("/api/v1/sessions", {
     headers: { authorization: "Bearer secret-token" },
   });
-  // 路由尚未实现（只读端点任务补全），此时认证放行的标志是 404 而非 401
-  assert.notEqual(response.status, 401);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.deepEqual(body.data, []);
 });
 
 function record(seq: number, event: RecordedEvent["event"]): RecordedEvent {
@@ -124,4 +136,85 @@ test("v1 事件映射：tool_result 跨事件补 tool 名；未知类型折叠 s
   assert.equal(events[1]!.type === "tool.result" ? events[1].isError : false, true);
   assert.equal(events[2]!.type, "system.info");
   assert.match((events[2] as { message: string }).message, /压缩/);
+});
+
+function bearer(token = "secret-token") {
+  return { headers: { authorization: `Bearer ${token}` } };
+}
+
+test("v1 只读：创建会话后列表/详情/事件增量/导出", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "myagent-v1-"));
+  const configService = new ConfigService({
+    cwd: path.join(root, "project"),
+    homeDir: path.join(root, "home"),
+  });
+  const registry = new ProjectRegistry({
+    defaultCwd: path.join(root, "project"),
+    homeDir: path.join(root, "home"),
+  });
+  const sessionManager = new WebSessionManager(
+    path.join(root, "project"),
+    configService,
+  );
+  await sessionManager.restore();
+  registry.seed(path.join(root, "project"), configService, sessionManager);
+  const app = mounted(
+    createApiV1({
+      apiToken: "secret-token",
+      registry,
+      configService,
+      sessionManager,
+    }),
+  );
+
+  const session = await sessionManager.create("你好", "normal");
+  const summary = session.summary();
+
+  const listResponse = await app.request("/api/v1/sessions", bearer());
+  assert.equal(listResponse.status, 200);
+  const list = (await listResponse.json()).data as Array<{ id: string }>;
+  assert.equal(list.length, 1);
+  assert.equal(list[0]!.id, session.id);
+
+  const detailResponse = await app.request(
+    `/api/v1/sessions/${session.id}`,
+    bearer(),
+  );
+  assert.equal(detailResponse.status, 200);
+  const detail = (await detailResponse.json()).data as { title: string };
+  assert.equal(detail.title, summary.title);
+
+  const eventsResponse = await app.request(
+    `/api/v1/sessions/${session.id}/events`,
+    bearer(),
+  );
+  assert.equal(eventsResponse.status, 200);
+  const eventsBody = await eventsResponse.json();
+  assert.equal(eventsBody.data.events.length, 1);
+  assert.equal(eventsBody.data.events[0].type, "user.text");
+  assert.equal(eventsBody.data.latestSeq, 1);
+
+  // 增量：after=1 不再返回旧事件
+  const deltaResponse = await app.request(
+    `/api/v1/sessions/${session.id}/events?after=1`,
+    bearer(),
+  );
+  const deltaBody = await deltaResponse.json();
+  assert.deepEqual(deltaBody.data.events, []);
+  assert.equal(deltaBody.data.latestSeq, 1);
+
+  const exportResponse = await app.request(
+    `/api/v1/sessions/${session.id}/export`,
+    bearer(),
+  );
+  assert.equal(exportResponse.status, 200);
+  assert.match(await exportResponse.text(), /<!DOCTYPE html>/);
+});
+
+test("v1 只读：会话不存在返回 404 not_found", async () => {
+  const app = await fixture("secret-token");
+  const response = await app.request("/api/v1/sessions/nope", bearer());
+  assert.equal(response.status, 404);
+  const body = await response.json();
+  assert.equal(body.code, "not_found");
 });
