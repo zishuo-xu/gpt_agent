@@ -1,5 +1,6 @@
 import { definePluginTool } from "../../src/shared/plugin-tool.js";
 import { htmlToMainText } from "../../src/tools/html-text.js";
+import { abortableSleep } from "../../src/utils/sleep.js";
 
 /**
  * WebFetch 示例插件：抓取 URL 并返回可见文本。
@@ -159,16 +160,3 @@ function clampInteger(
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new DOMException("aborted", "AbortError"));
-      },
-      { once: true },
-    );
-  });
-}

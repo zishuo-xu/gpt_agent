@@ -9,10 +9,8 @@
 import { readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import {
-  aggregateTraces,
-  type AgentTurnTraceLike,
-} from "../src/stats/trace-stats.js";
+import type { AgentTurnTrace } from "../src/core/events.js";
+import { aggregateTraces } from "../src/stats/trace-stats.js";
 
 async function collectTraceFiles(args: string[]): Promise<string[]> {
   if (args.length > 0) {
@@ -94,7 +92,7 @@ async function main(): Promise<void> {
     const traces = content
       .split("\n")
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as AgentTurnTraceLike);
+      .map((line) => JSON.parse(line) as AgentTurnTrace);
     const stats = aggregateTraces(traces);
     totals.turns += stats.turns;
     totals.inputTokens += stats.inputTokens;

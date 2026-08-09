@@ -87,7 +87,7 @@ NOISE_FLOOR_TOKENS = 1024           // 低于此的 miss 视为 breakpoint 粒�
 - **「每轮只占一行」的实现**：system prompt 尾部只挂清单——每个 skill 恰好 5 行 XML（`<skill><name>/<description>/<location>`，含绝对路径），**不含 content**；模型匹配 description 后用 read 工具读 `location` 拿全文（懒加载）；`/skill:name` 命令则把全文注入为 **user 消息**（`<skill name=...>` 包裹）。content 永不进 system prompt → 不破坏前缀缓存。
 - 仓库**没有随包内置任何 skill**（测试 fixtures 与示例扩展除外）——机制完整、内容交给社区。
 
-**MyAgent 现状**：无 skills 机制（9 工具 + 记忆常驻 system，全部静态注入）；已做「按角色动态工具集」（main 全量 / explore 只读集），但无「按需加载」。Task 子代理部分承担了"隔离大探索"的角色。**差距**：skill 机制是 MyAgent「记忆复利」之外的另一条能力注入通道，且与缓存前缀工程兼容（清单尾部 + 全文走消息）。
+**MyAgent 现状**：无 skills 机制（9 内置工具 + 记忆常驻 system；插件工具按角色动态注入——main 全量 / explore 只读集），但无「按需加载」的渐进披露。Task 子代理部分承担了"隔离大探索"的角色。**差距**：skill 机制是 MyAgent「记忆复利」之外的另一条能力注入通道，且与缓存前缀工程兼容（清单尾部 + 全文走消息）。
 
 ### 1.4 压缩（compaction）
 
@@ -128,12 +128,12 @@ Pi 注释原文要点（session-manager.ts:844-854）："append-only trees... Ap
 ### 2.2 回溯 / 分支 / 书签
 
 - **Pi**：`branch(branchFromId)` 只是把 `leafId` 改指旧节点，之后追加的新 entry `parentId = 旧节点`——旧分支一行不动，文件天然是树。`label` entry 做书签（可清除）。`createBranchedSession(leafId)` 把 root→leaf 路径复制进新文件（`parentSession` 指向原文件）实现"提取单条对话线"。**`branch-summarization`**：离开分支前把将被放弃的路径（旧 leaf → 公共祖先）压缩成 `branch_summary` entry 挂在**新位置**，tokenBudget = `contextWindow - reserveTokens`，prompt 结构 `BRANCH_SUMMARY_PROMPT`（Goal/Constraints/Progress/Key Decisions/Next Steps）+ `<read-files>/<modified-files>` 清单；恢复时转 `branchSummary` 消息（`<summary>` 标签）。
-- **MyAgent**：`forkBranch(seq, label)` 从任意事件 seq 分裂、`switchBranch` 回溯；`conversationFrom` 按分支链过滤（fork 点之后发生在祖先分支的事件不进入新分支视角）；恢复时 `branchesFromEvents` 重建树。**差距**：① 无书签（label）；② 无分支摘要（切分支丢上下文，回头时只能重新探索）；③ 无"提取单线对话"导出；④ 分支树在事件层重建，粒度 = 事件 seq，与 Pi 的 entry 粒度等价但数据模型不同——改造存储时若要支持"从任意节点继续"的 UI 语义（Pi 的 navigateTree 有 position before/at），事件层方案也够用。
+- **MyAgent**：`forkBranch(seq, label)` 从任意事件 seq 分裂、`switchBranch` 回溯；`conversationFrom` 按分支链过滤（fork 点之后发生在祖先分支的事件不进入新分支视角）；恢复时 `branchesFromEvents` 重建树。**差距**：① 无书签（label）；② ~~无分支摘要~~（已落地：`branch_summarized` 事件 + `summarizeConversation`，fork/switch 后台触发，见 P1-8）；③ 无"提取单线对话"导出；④ 分支树在事件层重建，粒度 = 事件 seq，与 Pi 的 entry 粒度等价但数据模型不同——改造存储时若要支持"从任意节点继续"的 UI 语义（Pi 的 navigateTree 有 position before/at），事件层方案也够用。
 
 ### 2.3 会话恢复
 
 - **Pi**：`open` → 头 4KB 缓冲读 header → 流式按行 parse（坏行跳过）→ 迁移 → `leafId = 最后一条 entry`；`buildContextEntries` = 找路径上最近 compaction → `[compaction] + firstKeptEntryId 之后的旧路径条目 + compaction 之后所有新条目`；`continueRecent` 按 mtime 取最新同 cwd 会话。
-- **MyAgent**：读全部记录 → `conversationFrom(records, branches, branchId)` 重建模型消息（含压缩摘要恢复）→ `applyEventState` 恢复累计 token/todos/状态；标题与权限档从 `index.json` 恢复（Pi 从 entry 流恢复，MyAgent 双源）。恢复语义等价，MyAgent 少一个"坏行容错"（`readRecordedEvents` 直接 `JSON.parse` 每行，坏行会抛）。
+- **MyAgent**：读全部记录 → `conversationFrom(records, branches, branchId)` 重建模型消息（含压缩摘要恢复）→ `applyEventState` 恢复累计 token/todos/状态；标题与权限档从 `index.json` 恢复（Pi 从 entry 流恢复，MyAgent 双源）。恢复语义等价；坏行容错已具备（`readRecordedEvents` 走 `readJsonl`，坏行跳过不抛，`utils/fs.ts`）。
 
 ### 2.4 跨供应商上下文交接（transform-messages.ts）
 
@@ -201,7 +201,7 @@ tool_execution_end(toolCallId, toolName, result, isError)
 - `beforeToolCall`/`afterToolCall` 钩子（拦截/逐字段覆盖），`prepareArguments` 兼容垫片（JSON 字符串参数解析等）。
 - 注意：**工具结果里没有 summary 概念**，`content` 就是给模型的文本；MyAgent 的 summary/output 二元组是等价物。
 
-**MyAgent 现状**：`validateArgs` 手写 if-else（按工具枚举字段），错误文案用 wire 键名（`file_path`）防模型学错 camelCase——思路对但无 schema 驱动；**Edit/MultiEdit 的 diff 走 `output`（进 LLM 上下文）**，与 Pi 相反——每轮编辑的 diff 全文占用上下文（一个 500 行文件的 MultiEdit 就是几 KB 起步），且 diff 只对"修正下一步"有用。**建议**：diff 移出 LLM 上下文（或保留到 20KB 截断），需要时模型用 Read 自行验证——这是立竿见影的 token 节省，同时把 diff 完整放进 details 供 UI 展示（Web 已支持 diff 高亮渲染）。
+**MyAgent 现状**：AJV schema 驱动校验（`args-validate.ts`：编译缓存 + 类型强转 + 字段级报错 + wire 键名回显，见 P2-15）；**Edit/MultiEdit 的 diff 已移出 LLM 上下文**（output 只报替换块数，diff 进 `details.diff` 供 UI 高亮，审批预览 diff 不受影响，见 P0-3）。
 
 ### 3.4 Abort 与重试
 
@@ -210,18 +210,18 @@ tool_execution_end(toolCallId, toolName, result, isError)
 2. **provider 请求级**（provider-retry.ts）：`x-should-retry` 头优先 → retry-after 头 → `min(0.5×2^n, 8)s` 指数退避 + 25% 抖动；`DEFAULT_MAX_RETRY_DELAY_MS = 60s`。
 3. **summarization 重试**（retry.ts:162-211）：`stopReason === "aborted"` 永不重试。
 
-**MyAgent 现状**（resilient-client.ts）：请求级重试 `{maxRetries: 5, initialDelayMs: 1000, maxDelayMs: 60s}`，指数退避，retryable = `429/5xx/TypeError`；`FallbackModelClient` 链式降级（`model_fallback` 事件）。**差距**：① 无 turn 级 auto-retry——模型调用失败后会话停在 `need_user` 等用户说"继续"（无人值守场景直接失败）；② retryable 判定无 pattern 列表（quota 类 429 也会傻重试——Anthropic 429 有不同语义，可参考 Pi 区分）；③ 无抖动（避免同批请求同步重试风暴，MyAgent 单会话影响小）。
+**MyAgent 现状**（2026-08-09 已对齐）：turn 级 `#requestTurn` auto-retry（`agent-loop.ts`）——`error-policy.ts` classifyModelError 三分类（retry/overflow/fatal，quota/认证 fail-closed）+ 指数退避（默认 3 次 2s 起步，可配置）+ **overflow 特例**（上下文超长先 force 压缩再重试一次）+ Retry-After 优先；重试期 abort 立即可中断（见 P1-11）。`FallbackModelClient` 链式降级（complete + **流式**均覆盖，`model_fallback` 事件）。**差距**：无 25% 向下抖动（Pi provider 级公式记录备查，未实现）。
 
 ### 3.5 截断对照
 
 | 维度 | Pi | MyAgent |
 |---|---|---|
-| 策略 | 按工具选方向：`truncateHead`（read/find/grep/ls，保留头部+续读指引）vs `truncateTail`（bash，保留尾部） | 统一头尾（58%/32% 预算 + `[... N lines truncated ...]` 标记） |
+| 策略 | 按工具选方向：`truncateHead`（read/find/grep/ls，保留头部+续读指引）vs `truncateTail`（bash，保留尾部） | 按工具选方向：`preferTail` 头尾预算互换（bash 保尾，其余保头）——已对齐（见 P0-4） |
 | 上限 | bash/read `2000 行 / 50KB`；grep 单行 500 字符截断 + `"[... truncated]"` | bash 150 行/12KB、read 256 行/30KB、grep 200 行/20KB、glob 300 行/8KB |
 | 单行 | `truncateLine` 500 字符 | 2000 字符 |
 | 首行超限 | read 返回空 content + `firstLineExceedsLimit` → 引导 `bash: sed -n 'Np' | head -c` | 头部切片硬截（保留前 58% 预算字符） |
 
-MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）其实比 Pi 更省；差距主要在**方向选择**（bash 保尾）与**续读指引的精准度**（Pi 的 read 截断提示带精确行号区间）。
+MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）其实比 Pi 更省；方向选择已对齐（bash 保尾，P0-4）。剩余差距：**续读指引的精准度**（Pi 的 read 截断提示带精确行号区间）与 **Bash 超限全量落盘**（已实现，P2-16）。
 
 ---
 
@@ -235,20 +235,20 @@ MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）�
 | 通用 agent 运行时 | `pi-agent-core`：AgentLoop（流式函数）+ Agent（状态包装）+ StreamFn 契约 | `src/core/agent-loop.ts` + `src/model/agent-model.ts`（会话消息与循环同层）| 差距：MyAgent 的"循环"与"模型上下文管理"耦合在 agent-model 的 `next()` 里，Pi 拆成纯 loop + 消息组装 |
 | 应用会话 | `coding-agent`：AgentSession（订阅 Agent 事件 → 持久化/扩展/重试/压缩）+ SessionManager | `src/core/session.ts`（AgentSession 兼任 loop 装配 + 审批 + 任务盒 + 分支）+ `session-manager.ts` | MyAgent 单类 896 行承担的职责，Pi 拆在 session/runner/services 三层；**MyAgent 的 AgentSession 是合理的单文件，不建议照搬拆分** |
 | 前端 | pi-tui + modes（interactive/print/rpc） | CLI + Web（Hono/React/SSE） | 事件驱动一致；MyAgent 的事件模型偏 UI 语义是优势（审批/成本/todo 都是事件） |
-| 扩展 | 全量扩展系统（jiti 加载、工具/命令/shortcut/UI 组件/messageRenderer/beforeProvider 钩子） | 无（Task 子代理是唯一"可编程"通道） | 见 4.2 |
+| 扩展 | 全量扩展系统（jiti 加载、工具/命令/shortcut/UI 组件/messageRenderer/beforeProvider 钩子） | 插件工具通道（`.myagent/tools/` 目录发现 + PluginToolRegistry + MCP 桥接 + 插件面板） | tools 注册面已落地；钩子面未做（见 4.2） |
 | 权限 | **无内置**（跑在用户权限下，隔离靠容器） | 三档权限引擎 + 审批流 + 记忆 | MyAgent 的差异化资产，Pi 明确不做 |
 
-### 4.2 扩展机制（Pi 独有，MyAgent 缺）
+### 4.2 扩展机制（Pi 全量 vs MyAgent tools 注册面）
 
 - 加载：项目 `.pi/extensions/` + 全局 `~/.pi/agent/extensions/` + CLI/包 manifest（package.json 的 `"pi"` 字段）；单层目录发现（`*.ts/*.js`、`index.ts`、带 pi 字段的 package.json）；**jiti** 运行时加载 TS；默认导出工厂 `(pi: ExtensionAPI) => void`。
 - 挂载点全部在**会话层钩子**而非侵入 loop：`beforeToolCall/afterToolCall`（经 agent hooks 转发）、`message_end` 链式替换、`tool_execution_end` 字段级合并、`before_provider_request`/`before_provider_headers`、`resources_discover`（skill/prompt/theme 路径）、`before_agent_start`（systemPrompt 覆盖）。
 - 注册面：tools（`ToolDefinition` 含 `promptSnippet`/`renderCall`/`renderResult`）、slash commands、shortcuts、flags、UI 组件、markdown transformer、provider（`ProviderConfigInput` 覆盖层）。
-- **对 MyAgent 的含义**：扩展系统与「全功能 monolith」路线冲突（MyAgent 的定位是开箱即用），不建议现在做；但如果未来要支持"用户自定义工具/命令"，参考 Pi 的**钩子清单**设计（先定钩子面，再定加载机制），特别是 `beforeToolCall/afterToolCall` + 事件转发模式——零侵入。
+- **MyAgent 已落地**（tools 注册面）：`.myagent/tools/` 两层目录发现 + `definePluginTool` + 声明式配置注入 + 热重载（面板「重新加载」）+ 单插件禁用（持久化）+ 超时护栏 + MCP server 桥接（stdio/HTTP）——见 `docs/plugin-tools.md`。**未做**：会话层钩子面（`beforeToolCall/afterToolCall`、message 链式替换、UI 组件渲染），参考 Pi 的钩子清单设计——先定钩子面再定加载机制，零侵入。
 
 ### 4.3 模型层对照
 
 - Pi：`ModelRuntime`（应用侧单例：内置目录 + 扩展 provider + models.json 三层合成，`recomposeProvider`）+ `model-resolver`（纯策略：CLI → scoped → settings → available 的解析优先级，支持 `pattern:thinkingLevel` 后缀与 glob）+ provider-composer（纯函数合成 auth：`apiKey` 支持字面量/`$ENV`/`!command`）。
-- MyAgent：`ConfigService` schema 驱动 + `FallbackModelClient` 链（main/cheap/explore 三角色）+ `/model` 热切换 + 单价计算。**差距**：① 无"模型切换后 thinking 转换"（见 2.4）；② fallback 是整链顺序（Pi 也是顺序，无差距）；③ MyAgent 的三角色（main/cheap/explore）比 Pi 的"任意模型任意时刻切换"更结构化——这反而是优势（角色 = 固定用途，缓存/成本可预测）。
+- MyAgent：`ConfigService` schema 驱动 + `FallbackModelClient` 链（main/cheap/explore 三角色）+ `/model` 热切换 + 单价计算。**差距**：① ~~无"模型切换后 thinking 转换"~~（已落地：transformMessages + thinking 全链路 + 跨模型降级，见 2.4）；② fallback 是整链顺序（Pi 也是顺序，无差距；MyAgent 流式也已覆盖）；③ MyAgent 的三角色（main/cheap/explore）比 Pi 的"任意模型任意时刻切换"更结构化——这反而是优势（角色 = 固定用途，缓存/成本可预测）。
 
 ---
 
@@ -259,7 +259,7 @@ MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）�
 > 剩余未做：P1-7（缓存写入控制，等供应商层支持）、P1-12（rg/fd 引入，待产品决策）、P2-14（书签）、P2 其余。
 > 2026-08-05 第三轮（第一期 5 项）：检索加速（P1-12 的零依赖替代：git ls-files + gitignore 过滤）、stopReason 截断判失败（P1-10 ✅）、session_info 元数据事件（P2-14 前置）、Web 会话搜索（P2-17 ✅）、跨项目记忆开关。
 > 2026-08-05 第四轮：P0-3 diff 移出上下文（测量驱动 ✅）、P2-16 Bash 全量落盘（✅）、P2-15 AJV 参数校验（✅，类型强转 + 字段级报错 + wire 键名回显）。
-> 2026-08-06 第五轮（Pi 对照修正）：缓存隔离（`cacheRetention: "none"` 省略 cache_control，摘要/分支摘要强制隔离 ✅）、provider 级重试 25% 向下抖动（Pi 公式，turn 级不动 ✅）、Write 对齐 Pi（无 diff、只报字节数 ✅）、**wire 键名统一**（消灭 camelCase 层：删 normalizeToolArgs/wireToolArgs/WIRE_TO_CAMEL 映射/validateArgs，全程 wire 键名 + schema minLength/minItems 承接非空规则，未知键由 additionalProperties 拒绝并回显 ✅）。
+> 2026-08-06 第五轮（Pi 对照修正）：缓存隔离（`cacheRetention: "none"` 省略 cache_control——分支摘要已隔离 ✅，**压缩摘要于 2026-08-09 补上隔离**）、Write 对齐 Pi（无 diff、只报字节数 ✅）、**wire 键名统一**（消灭 camelCase 层：删 normalizeToolArgs/wireToolArgs/WIRE_TO_CAMEL 映射/validateArgs，全程 wire 键名 + schema minLength/minItems 承接非空规则，未知键由 additionalProperties 拒绝并回显 ✅）。provider 级 25% 向下抖动**未落地**（回合级重试未做抖动；Pi 公式记录备查，无对应代码）。
 
 ### P0 — 低成本高收益，直接对照改
 
@@ -275,12 +275,12 @@ MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）�
 
 ### P1 — 中期，涉及核心语义
 
-> 状态：**6/8 条已落地**（2026-08-05 第二轮）。
+> 状态：**7/8 条已落地**（P1-7 部分：分支摘要已隔离；压缩摘要 2026-08-09 补 cacheRetention:"none"）。
 
 | # | 改造 | Pi 参照 | 说明 |
 |---|---|---|---|
 | 6 | **压缩对齐 token 预算** | `reserveTokens: 16384, keepRecentTokens: 20000` + `shouldCompact = tokens > window - reserve`（compaction.ts:235-238） | ✅ `keepRecentTurns` → `keepRecentTokens`（默认 20k，旧键 ×5000 迁移）；`findCompactionCutPoint` 从尾累计 token、切点回退轮起点（tool 不与 assistant 拆开）；会话小于预算不压缩 |
-| 7 | **摘要请求缓存隔离** | `cacheRetention: "none"` + 独立 sessionId（compaction.ts:562-581） | 未做：MyAgent 供应商层无缓存写入控制（Anthropic cache_control / OpenAI prompt_cache_key 均未启用），等接入缓存控制后补 |
+| 7 | **摘要请求缓存隔离** | `cacheRetention: "none"` + 独立 sessionId（compaction.ts:562-581） | ✅ 分支摘要（summarizeConversation）与压缩摘要（compact）均传 `cacheRetention: "none"` 省略 cache_control——一次性辅助请求不写缓存，避免短前缀挤掉主会话缓存条目（2026-08-09 补齐压缩摘要） |
 | 8 | **分支摘要（branch-summarization）** | `generateBranchSummary`：切分支前压缩被放弃路径，`<summary>` 注入新分支（branch-summarization.ts:208-280） | ✅ `branch_summarized` 事件 + `summarizeConversation`（独立于压缩管道）+ fork/switch 后台触发（估算 >5k tokens 才摘要）、`conversationFromRaw` 恢复、CLI/Web 渲染；失败不阻断切换 |
 | 9 | **工具并行执行（试点）** | `toolExecution: "parallel"`（agent-loop.ts:411-426） | ✅ `behavior.parallelTools` 开关（默认关，热生效）；**预检退串行**——批次含 ask 时整体串行（审批语义不变），deny/finalOnly 并行路径同步拒绝，结果按原始顺序回灌 |
 | 10 | **stopReason length 判失败** | `failToolCallsFromTruncatedMessage`（agent-loop.ts:381-406） | ✅ client 解析 `stop_reason`/`finish_reason`（非流式 + 流式全覆盖）→ `ModelResponse.stopReason`；截断回合（max_tokens/length）本批全部 toolCall 判失败回灌模型，不执行（2026-08-05 第三轮） |
@@ -300,7 +300,7 @@ MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）�
 ### 明确不做（对照后维持现状）
 
 - **SQLite 落库**：MyAgent 单进程、会话量小，JSONL + 事件重建已够；等搜索/并发写者成为真实需求再说。
-- **扩展系统**：与全功能 monolith 定位冲突；若做，先抄 Pi 的**钩子面设计**（beforeToolCall/afterToolCall + 事件转发）。
+- **扩展系统钩子面**：tools 注册面已落地（`.myagent/tools/` + MCP 桥接 + 插件面板）；未做的是会话层**钩子面**（beforeToolCall/afterToolCall + 事件转发），如未来需要再做。
 - **Lazy skills**：MyAgent 已有"记忆注入 + 动态工具集"，skills 的增量价值依赖生态；若用户要求自定义能力，可先做 `/skill:` 的读文件注入（一行代码级）。
 - **AgentHarness 形态**（Result 非抛错契约、ExecutionEnv 抽象）：工程风格差异，非能力差距。
 - **AGENTS.md 祖先链分层**：MyAgent 单仓库场景，cwd 根 + 全局两层已覆盖。
@@ -313,15 +313,15 @@ MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）�
 |---|---|---|---|
 | 缓存 miss 噪音底 | 1024 tokens | 1024 tokens | 同源 ✓ |
 | 缓存 TTL（idle 归因） | 5 min | 5 min（agent-loop.ts:462） | 同源 ✓ |
-| miss 显示阈值 | <20k && <$0.1 | 无 | P0-5 |
-| 压缩保留量 | keepRecentTokens 20000 / reserveTokens 16384 | keepRecentTurns 4 轮 | P1-6 |
-| 压缩触发 | `tokens > window - 16384` | `estTokens > 90_000`（配置） | P1-6 |
-| 摘要请求缓存 | `cacheRetention:"none"` + 新 sessionId | 同一客户端直发 | P1-7 |
-| Bash 输出上限 | 2000 行 / 50KB + temp file 全量 | 150 行 / 12KB + traceOutput 内存 | MyAgent 更省，缺落盘 |
-| Bash 排空宽限 | 100ms 空闲（data 续期） | 2s 固定 | P0-1 |
-| Bash abort | 返回部分输出 | reject 丢弃 | P0-2 |
-| 工具执行 | 默认并行 | 串行 | P1-9 |
-| 请求重试 | 3 次 2s/4s/8s（turn 级）+ provider 级 0.5×2^n ≤8s + 25% 抖动 | 5 次 1s×2^n ≤60s，无抖动 | P1-11 |
+| miss 显示阈值 | <20k && <$0.1 | 同（`shouldShowCacheMissNotice`，开关默认关） | P0-5 ✅ |
+| 压缩保留量 | keepRecentTokens 20000 / reserveTokens 16384 | keepRecentTokens 20000（旧键 ×5000 迁移） | P1-6 ✅ |
+| 压缩触发 | `tokens > window - 16384` | `estTokens > 90_000`（配置） | P1-6 ✅ |
+| 摘要请求缓存 | `cacheRetention:"none"` + 新 sessionId | 分支摘要 + 压缩摘要均传 `cacheRetention:"none"` | P1-7 ✅ |
+| Bash 输出上限 | 2000 行 / 50KB + temp file 全量 | 150 行 / 12KB + 超限全量落盘（`details.fullOutputPath`） | P2-16 ✅ |
+| Bash 排空宽限 | 100ms 空闲（data 续期） | 空闲窗口 data 续期（原 2s 固定已改） | P0-1 ✅ |
+| Bash abort | 返回部分输出 | abort/超时 kill 后以部分输出 resolve（`aborted`/`details.timedOut`） | P0-2 ✅ |
+| 工具执行 | 默认并行 | `behavior.parallelTools` 开关（默认关，ask 批次退串行） | P1-9 ✅ |
+| 请求重试 | 3 次 2s/4s/8s（turn 级）+ provider 级 0.5×2^n ≤8s + 25% 抖动 | turn 级 3 次 2s 起步（可配置）+ overflow 特例；**无 25% 抖动** | P1-11 ✅（抖动未做） |
 | 行内截断 | grep 500 字符 | 2000 字符 | 差异不大，可不动 |
 
 ---

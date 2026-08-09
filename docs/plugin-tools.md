@@ -255,7 +255,7 @@ MyAgent 内置最小 MCP 客户端（无 SDK，按 2025-06-18 规范实现）：
 
 - **stdio**（本机子进程）：`command` + `args` + `env`（如 `npx -y 某server`）；**HTTP**（远端）：`url` + `headers`（认证等）
 - `enabled: false` 关闭单个 server；`timeoutMs` 覆盖单次工具调用超时（默认 60s）
-- server 连接/握手失败跳过并记日志，不阻塞其他 server 与插件；新增/修改配置需重启 server
+- server 连接/握手失败跳过并记日志，不阻塞其他 server 与插件；新增/修改配置在插件面板「重新加载」后生效（无需重启 server）
 - 权限：MCP 工具是插件工具 → normal 档兜底 ask（首次批准后本会话通配放行）
 - 支持：`tools/list`（分页）、`tools/call`（text/image 摘要/structuredContent）；不支持：resources/prompts、OAuth、进度通知、2026-07-28 modern 协议
 
@@ -264,5 +264,5 @@ MyAgent 内置最小 MCP 客户端（无 SDK，按 2025-06-18 规范实现）：
 - 构建产物（`dist/cli.js` 由 tsc 编译、无 tsx loader）下加载 `.ts` 插件会失败；构建产物运行时请使用 `.mjs`（原生 ESM）
 - 无热重载 → 已支持：插件面板「重新加载」（`POST /api/plugins/reload`），新请求生效
 - explore 只读子代理不注入插件工具；Task 子代理 `writable: true` 时可见
-- 插件禁用为内存态（重启/reload 恢复）；持久化到 plugins.json 为二期候选
-- 二期候选：before/afterToolCall 钩子面、/reload CLI 命令、插件配置（env/密钥注入）、UI 自定义渲染
+- 插件禁用已持久化（见「可观测性」节：`~/.myagent/plugins.json` 的 `pluginDisabled` 段），重启/reload 后保留
+- 二期候选：before/afterToolCall 钩子面、/reload CLI 命令、UI 自定义渲染

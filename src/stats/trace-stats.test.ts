@@ -1,20 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  aggregateTraces,
-  type AgentTurnTraceLike,
-} from "./trace-stats.js";
+import type { AgentTurnTrace } from "../core/events.js";
+import { aggregateTraces } from "./trace-stats.js";
 
 function turn(
-  overrides: Partial<AgentTurnTraceLike> & { tools: AgentTurnTraceLike["tools"] },
-): AgentTurnTraceLike {
+  overrides: Partial<AgentTurnTrace> & { tools: AgentTurnTrace["tools"] },
+): AgentTurnTrace {
   return { turn: 1, ts: "2026-08-05T00:00:00.000Z", ...overrides };
 }
 
 test("aggregateTraces 统计 diff 占比与 bash 截断", () => {
   const editDiff = "diff-1x\n".repeat(400); // 8 字符 × 400 = 3200 字符
   const multiDiff = "diff-2x\n".repeat(200); // 8 字符 × 200 = 1600 字符
-  const traces: AgentTurnTraceLike[] = [
+  const traces: AgentTurnTrace[] = [
     turn({
       usage: { input: 10_000, output: 500, cached: 6_000 },
       tools: [
@@ -81,7 +79,7 @@ test("aggregateTraces 统计 diff 占比与 bash 截断", () => {
 });
 
 test("aggregateTraces 容错：result 缺失 / 无 usage / 空 trace", () => {
-  const traces: AgentTurnTraceLike[] = [
+  const traces: AgentTurnTrace[] = [
     turn({
       tools: [
         {
@@ -104,7 +102,7 @@ test("aggregateTraces 容错：result 缺失 / 无 usage / 空 trace", () => {
 });
 
 test("aggregateTraces 只统计 diff 文本型 output，非字符串忽略", () => {
-  const traces: AgentTurnTraceLike[] = [
+  const traces: AgentTurnTrace[] = [
     turn({
       tools: [
         {

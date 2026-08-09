@@ -1,6 +1,7 @@
 import { definePluginTool, type PluginToolRuntimeConfig } from "../../src/shared/plugin-tool.js";
 import { htmlToMainText, htmlToText } from "../../src/tools/html-text.js";
 import { fetchPageText } from "./web-fetch.js";
+import { abortableSleep } from "../../src/utils/sleep.js";
 
 /**
  * WebSearch 示例插件：网络搜索。
@@ -156,20 +157,6 @@ async function searchSearxng(
     if (attempt === 1) await abortableSleep(800, signal);
   }
   throw new Error(lastError);
-}
-
-function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new DOMException("aborted", "AbortError"));
-      },
-      { once: true },
-    );
-  });
 }
 
 const BROWSER_UA =

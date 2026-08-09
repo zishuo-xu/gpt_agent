@@ -9,7 +9,7 @@ MyAgent 是一个本地编码 agent（local coding agent），面向长时间自
 ```bash
 pnpm install          # 安装依赖
 pnpm run typecheck    # 类型检查（core + web 两个 tsconfig）
-pnpm test             # 运行测试（tsx --test，src 与 tests 下的 *.test.ts）
+pnpm test             # 运行测试（tsx --test：src 下 *.test.ts + web/src 下 *.test.tsx）
 pnpm run build        # 构建（tsc 编译 core + vite 构建 web）
 ```
 
@@ -17,10 +17,10 @@ pnpm run build        # 构建（tsc 编译 core + vite 构建 web）
 
 | 目录 | 职责 |
 | --- | --- |
-| `src/core` | agent 主循环、会话管理、事件流、权限引擎、任务运行 |
-| `src/model` | 模型客户端、多模型路由、工具定义、错误恢复 |
-| `src/tools` | 工具实现与执行器（文件原子编辑、Bash 等） |
-| `src/shared` | 插件工具协议与注册表（PluginToolRegistry） |
+| `src/core` | agent 主循环、会话管理、事件流、权限引擎、任务运行、分支 |
+| `src/model` | 模型客户端（anthropic/openai 双协议 + thinking）、消息转换层、fallback 链、错误分类 |
+| `src/tools` | 工具实现与执行器、插件加载（plugin-loader）、MCP 桥接（mcp-client/mcp-loader）、截断 |
+| `src/shared` | 插件工具协议与注册表（PluginToolRegistry）、工具名枚举 |
 | `src/web` | Web 后端（Hono 服务、会话 API） |
 | `web/src` | Web 前端（React + Vite） |
 | `.myagent/tools` | 项目级插件（WebSearch / WebFetch），协议见 docs/plugin-tools.md |

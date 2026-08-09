@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ToolExecutionResult } from "../core/types.js";
+import { abortError } from "../utils/sleep.js";
 import { TOOL_OUTPUT_LIMITS, truncateToolText } from "./truncate.js";
 
 export interface BashOptions {
@@ -77,10 +78,6 @@ async function spillFullOutput(
     "utf8",
   );
   return filePath;
-}
-
-function abortError(): Error {
-  return new DOMException("The operation was aborted", "AbortError");
 }
 
 export async function runBash(

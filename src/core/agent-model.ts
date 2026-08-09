@@ -170,6 +170,9 @@ export class ConversationAgentModel implements AgentModel {
       ],
       // 压缩不需要工具调用，不携带工具 schema（省 token）
       tools: [],
+      // 一次性辅助请求不写缓存（参照 Pi cacheRetention "none"）：
+      // 避免短前缀挤掉主会话缓存条目，与分支摘要隔离语义一致
+      cacheRetention: "none",
       signal,
     };
     let response: ModelResponse;

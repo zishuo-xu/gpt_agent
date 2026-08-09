@@ -2,7 +2,7 @@
 
 MyAgent 是一个面向长时间自主运行任务的本机编码 Agent：把自然语言任务交给它，它会在你的代码库里自主探索、编辑文件、运行命令、自我修正，需要你决策时才停下来征求批准。无人值守模式下可设时间/预算边界，跑完自动收尾。
 
-**一期开发已通过验收**（19 项核心用例真实验证 + 用户旅程全流程），二期迭代持续进行（工具参数健壮性、配置热生效、标题生成、缓存前缀工程等），远程仓库：https://github.com/zishuo-xu/gpt_agent
+远程仓库：https://github.com/zishuo-xu/gpt_agent
 
 ## 当前能力
 
@@ -33,7 +33,7 @@ MyAgent 是一个面向长时间自主运行任务的本机编码 Agent：把自
 
 ### 记忆复利
 
-- 项目记忆：`AGENTS.md`（/init 生成）+ `.myagent/memory/`（conventions / pitfalls / decisions）
+- 项目记忆：`AGENTS.md`（/init 生成）+ `.myagent/memory/`（conventions / pitfalls / decisions）；全局记忆四类：preferences / conventions / pitfalls / decisions
 - 全局记忆：`~/.myagent/MEMORY.md`；干活中学到的稳定事实自动写入，下次会话自动注入
 - 跨项目联想：新会话注入他项目记忆的标题索引，相关时自动调取全文
 
@@ -48,14 +48,19 @@ MyAgent 是一个面向长时间自主运行任务的本机编码 Agent：把自
 ### 插件扩展（.myagent/tools/）
 
 - **插件通道**：`.myagent/tools/*.ts`（项目）或 `~/.myagent/tools/`（全局，项目覆盖）写一个 `definePluginTool` 即接入——注册、模型可见、执行分发、权限审批、UI 渲染全走通用通道，与内置工具无差别；normal 档首次调用审批后同会话通配放行
-- **WebSearch**：网络搜索。searxng 自托管（本机 Docker）→ HTML 引擎链（bing/ddg/baidu）兜底，零第三方 API Key；**深度模式**默认自动抓取前 2 个结果页正文，一次调用即得素材
+- **WebSearch**：网络搜索。searxng 自托管（本机 Docker）→ tavily（可选云 API）→ HTML 引擎链（bing/ddg/baidu）兜底，原则本地自托管优先、不依赖第三方 API Key；**深度模式**默认自动抓取前 2 个结果页正文，一次调用即得素材
 - **WebFetch**：反爬增强的页面抓取（浏览器级请求头 / 失败重试 / 可选 cookie）
-- **MCP 接入**：`plugins.json` 的 `mcpServers` 段配置后，MCP server 工具自动注册进插件通道，权限与 UI 与普通插件一致
+- **MCP 接入**：`plugins.json` 的 `mcpServers` 段配置后，MCP server 工具自动注册进插件通道（stdio 子进程 / 远端 HTTP 双传输），权限与 UI 与普通插件一致
+- **插件面板**：加载清单 / 加载错误 / 调用统计可视化，热重载（「重新加载」按钮，无需重启 server）、单插件启用/禁用（状态持久化到 `plugins.json` 的 `pluginDisabled` 段，重启保留）
+- **超时护栏**：插件 run 默认 60s 限时，超时返回失败结果不卡死 agent 循环；插件可声明 `timeoutMs` 覆盖
 - 完整协议、架构链路、SearXNG 部署调优见 `docs/plugin-tools.md`
 
 ### 模型与成本
 
-- 多供应商：Anthropic + 任意 OpenAI 兼容端点（DeepSeek / Kimi / GLM）
+- 多供应商：Anthropic + 任意 OpenAI 兼容端点（DeepSeek / Kimi / GLM），每角色可配 fallback 链；`/model` 热切换即时生效
+- **推理内容（thinking）**：默认开启（Anthropic extended thinking / OpenAI reasoning），会话内保留推理、跨供应商切换自动降级为普通文本；模型不支持时自动降级重试（设置页可关闭）
+- **上下文交接**：请求前消息转换（toolCallId 归一化 / 半截回合合并 / 孤儿工具调用补结果），切换供应商不丢质量
+- **流式 fallback**：首候选流式中途失败自动顺延下一候选重放（已输出的文本重复属流式固有限制）
 - 每轮 token 透明：`本轮 12.4k in / 1.8k out · 缓存命中 78% · 累计 89k`
 - 连接测试：真实最小请求验证认证 / 路径 / 模型，错误分类可区分
 
