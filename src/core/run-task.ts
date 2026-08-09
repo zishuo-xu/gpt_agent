@@ -321,10 +321,17 @@ export function compileBounds(
     paths.add("*");
   }
   for (const match of bounds.matchAll(
-    /(?:不改|不要改|禁止修改|不动|排除)\s*([A-Za-z0-9_.*/-]+\/?)/g,
+    /(?:不改|不要改|禁止修改|不动|排除)\s*([^\s，,；;]+)/g,
   )) {
     const value = match[1]?.trim();
-    if (value && (value.includes("/") || value.includes("*"))) {
+    // 含目录分隔、通配符或扩展名（含中文路径如 src/中文字段）才生成硬规则；
+    // 纯裸词（如“数据库”“任何文件”）仍是语义边界，归 semanticBounds
+    if (
+      value &&
+      (value.includes("/") ||
+        value.includes("*") ||
+        value.includes("."))
+    ) {
       paths.add(value.replace(/^\.\//, ""));
     }
   }
