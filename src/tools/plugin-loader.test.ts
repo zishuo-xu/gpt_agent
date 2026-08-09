@@ -231,6 +231,54 @@ test("savePluginDisabled：写入/移除插件名，保留其他段", async () =
   assert.deepEqual(created.pluginDisabled, ["X"]);
 });
 
+const MYAGENT_MODULES: Record<string, string> = {
+  "src/shared/plugin-tool.ts":
+    "export function definePluginTool<T>(tool: T): T { return tool; }\n",
+  "src/tools/html-text.ts":
+    "export function htmlToMainText(html: string): string { return html.replace(/<[^>]+>/g, ''); }\n",
+  "src/utils/sleep.ts":
+    "export async function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> { if (signal?.aborted) return; await new Promise((r) => setTimeout(r, ms)); }\n",
+};
+
+test("加载器：myagent:* 稳定 specifier 解析成功且可调用", async () => {
+  const { home, project, registry } = await fixture();
+  for (const [rel, content] of Object.entries(MYAGENT_MODULES)) {
+    await mkdir(path.dirname(path.join(project, rel)), { recursive: true });
+    await writeFile(path.join(project, rel), content, "utf8");
+  }
+  await writeFile(
+    path.join(project, ".myagent", "tools", "alias.ts"),
+    `import { definePluginTool } from "myagent:protocol";\n` +
+      `import { htmlToMainText } from "myagent:html-text";\n` +
+      `import { abortableSleep } from "myagent:sleep";\n` +
+      `export default definePluginTool({ name: "Alias", description: "别名导入", inputSchema: { type: "object" }, async run() { await abortableSleep(1); return { summary: htmlToMainText("<b>ok</b>") }; } });\n`,
+    "utf8",
+  );
+  const report = await loadPluginTools(home, project, registry);
+  assert.equal(report.errors.length, 0, JSON.stringify(report.errors));
+  assert.deepEqual(report.loaded.map((item) => item.name), ["Alias"]);
+  const result = await registry.execute(
+    "Alias",
+    {},
+    new AbortController().signal,
+  );
+  assert.equal(result.summary, "ok");
+});
+
+test("加载器：未知 myagent:* specifier 报明确错误", async () => {
+  const { home, project, registry } = await fixture();
+  await writeFile(
+    path.join(project, ".myagent", "tools", "bad-alias.ts"),
+    `import { definePluginTool } from "myagent:unknown";\n` +
+      `export default definePluginTool({ name: "BadAlias", description: "未知别名", inputSchema: { type: "object" }, async run() { return { summary: "x" }; } });\n`,
+    "utf8",
+  );
+  const report = await loadPluginTools(home, project, registry);
+  assert.equal(report.loaded.length, 0);
+  assert.equal(report.errors.length, 1);
+  assert.match(report.errors[0]!.message, /未知 myagent/);
+});
+
 test("加载器：插件以项目相对路径 import src 模块可加载（dist 部署回归）", async () => {
   const { home, project, registry } = await fixture();
   // 模拟真实项目结构：插件在 <项目根>/.myagent/tools/，import ../../src/xxx.js
