@@ -106,7 +106,13 @@ const MYAGENT_RESOLVER_DATA_URL = `data:text/javascript,${encodeURIComponent(
     `}\n`,
 )}`;
 
-async function ensureSpecifierResolver(): Promise<void> {
+/**
+ * 幂等注册 myagent:* 解析器（进程级）。loadOne 会隐式调用；
+ * 直接 import 插件源文件的场景（如单测）需先显式调用：
+ *   await ensureSpecifierResolver();
+ *   const mod = await import("../../.myagent/tools/xx.js");
+ */
+export async function ensureSpecifierResolver(): Promise<void> {
   if (specifierResolverReady) return;
   try {
     const moduleApi = (await import("node:module")) as {
