@@ -827,3 +827,51 @@ rl.on('line', (line) => {
     await manager.releaseLock();
   }
 });
+
+test("装配：ensurePluginsLoaded 启动即加载且幂等（报告立即可见）", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-plug-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-plug-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-plug-home-"),
+  );
+  // 真实项目结构：插件以相对路径 import src 模块（与 dist 部署回归同源）
+  await mkdir(path.join(cwd, "src", "shared"), { recursive: true });
+  await writeFile(
+    path.join(cwd, "src", "shared", "plugin-tool.ts"),
+    "export function definePluginTool<T>(tool: T): T { return tool; }\n",
+    "utf8",
+  );
+  await mkdir(path.join(cwd, ".myagent", "tools"), { recursive: true });
+  await writeFile(
+    path.join(cwd, ".myagent", "tools", "startup.ts"),
+    `import { definePluginTool } from "../../src/shared/plugin-tool.js";\n` +
+      `export default definePluginTool({ name: "Startup", description: "启动加载", inputSchema: { type: "object" }, async run() { return { summary: "ok" }; } });\n`,
+    "utf8",
+  );
+
+  const configService = new ConfigService({ cwd, homeDir });
+  const manager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    skipLock: true,
+  });
+  await manager.restore();
+
+  // 启动即加载：不触发任何模型请求，报告直接可见
+  await manager.ensurePluginsLoaded();
+  const status = manager.pluginStatus();
+  assert.equal(status.errors.length, 0, JSON.stringify(status.errors));
+  assert.deepEqual(status.loaded.map((item) => item.name), ["Startup"]);
+
+  // 幂等：再次调用不重复加载（报告与注册表状态不变）
+  await manager.ensurePluginsLoaded();
+  const again = manager.pluginStatus();
+  assert.deepEqual(again.loaded.map((item) => item.name), ["Startup"]);
+  assert.equal(again.loaded.length, 1);
+  pluginToolRegistry.clear();
+  await manager.releaseLock();
+});
