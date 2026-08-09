@@ -101,6 +101,19 @@ export async function startWebServer(options: WebServerOptions): Promise<void> {
   // 主实例注册进 registry（共享锁），disposeAll 也会释放主实例的锁
   app.registry.seed(options.cwd, configService, sessionManager);
 
+  // /api/v1 无头接口：Bearer token 认证，供飞书机器人等外部系统集成。
+  // apiToken 未配置时认证中间件返回 404 not_enabled（接口整体未启用）。
+  const { createApiV1 } = await import("./api-v1.js");
+  app.route(
+    "/api/v1",
+    createApiV1({
+      apiToken: serverConfig.apiToken?.trim() ?? "",
+      registry: app.registry,
+      configService,
+      sessionManager,
+    }),
+  );
+
   // 每 30s 轮询到期任务：解析到目标项目的 sessionManager 后按 /run 路径启动会话。
   // 无人值守场景下 hardRules（deny 规则）由权限引擎强制，无需交互确认，直接放行。
   // onDue 返回 false 表示预算护栏拒绝（调度器顺延，不视为失败）。

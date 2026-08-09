@@ -644,3 +644,28 @@
   color: #6b7787;
   line-height: 1.5;
 }
+
+/* API Token 输入行（设置页 schema 驱动生成） */
+.schema-field-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.schema-field-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+.schema-field-generate {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 1px solid #2a3450;
+  border-radius: 6px;
+  background: #1a2030;
+  color: #9fb6e0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.schema-field-generate:hover {
+  background: #24365c;
+  color: #e7ebf1;
+}

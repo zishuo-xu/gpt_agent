@@ -462,6 +462,12 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
           : typeof rawConfig["server.password"] === "string"
             ? String(rawConfig["server.password"])
             : "",
+      apiToken:
+        typeof config.server?.apiToken === "string"
+          ? config.server.apiToken
+          : typeof rawConfig["server.apiToken"] === "string"
+            ? String(rawConfig["server.apiToken"])
+            : "",
     },
     notify: {
       webhook:
