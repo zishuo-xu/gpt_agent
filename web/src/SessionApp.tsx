@@ -59,7 +59,8 @@ interface RunBoundsPreview {
 }
 
 
-export function SessionApp() {
+export function SessionApp(props: { initialSessionId?: string }) {
+  const { initialSessionId } = props;
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState("");
@@ -161,6 +162,23 @@ export function SessionApp() {
     // 首次拉取成功后才把空列表认定为"确实没有会话"（此前显示加载态）
     setSessionsLoaded(true);
   }
+
+  // 记忆面板「打开会话」跳转：列表加载后自动选中目标会话（仅首次；找不到静默回退列表视图）
+  const appliedInitialSessionRef = useRef(false);
+  useEffect(() => {
+    if (
+      appliedInitialSessionRef.current ||
+      !sessionsLoaded ||
+      !initialSessionId
+    ) {
+      return;
+    }
+    appliedInitialSessionRef.current = true;
+    if (sessions.some((session) => session.id === initialSessionId)) {
+      setSelectedId(initialSessionId);
+      setShowNewTask(false);
+    }
+  }, [sessionsLoaded, sessions, initialSessionId]);
 
   async function deleteSession(id: string) {
     const response = await fetch(

@@ -209,6 +209,45 @@
   white-space: nowrap;
 }
 
+/* 审计深化：操作区（查看改动/打开会话）+ 展开的 diff */
+.timeline-actions {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.timeline-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #6f93d9;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.timeline-link:hover:not(:disabled) {
+  color: #9db8ec;
+  text-decoration: underline;
+}
+
+.timeline-link:disabled {
+  color: #556071;
+  cursor: default;
+}
+
+.timeline-hint {
+  color: #556071;
+}
+
+.timeline-entry .diff-output,
+.timeline-entry .tool-output {
+  grid-column: 1 / -1;
+  margin: 2px 0 4px;
+  max-height: 260px;
+  overflow: auto;
+}
+
 @media (max-width: 1180px) {
   .session-workspace.with-rail {
     grid-template-columns: minmax(0, 1fr) 248px;

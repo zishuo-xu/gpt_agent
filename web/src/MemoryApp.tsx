@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { SettingsSidebar } from "./SettingsSidebar";
+import { DiffOrOutput } from "./session-render";
 import type {
   MemoryDocument,
   MemoryDocumentId,
   MemoryTimelineEntry,
 } from "@shared/types.js";
+
+/** 某条自动写入展开的留档内容（before/after/diff） */
+interface HistoryDiff {
+  before: string;
+  after: string;
+  diff: string;
+}
 
 export function MemoryApp() {
   const [documents, setDocuments] = useState<MemoryDocument[]>([]);
@@ -14,6 +22,12 @@ export function MemoryApp() {
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [expandedHistory, setExpandedHistory] = useState<
+    Record<string, HistoryDiff>
+  >({});
+  const [loadingHistoryKey, setLoadingHistoryKey] = useState<string | null>(
+    null,
+  );
   const [notice, setNotice] = useState<{
     tone: "ok" | "error";
     text: string;
@@ -100,6 +114,38 @@ export function MemoryApp() {
       });
     } finally {
       setSaving(false);
+    }
+  }
+
+  /** 展开/收起某条时间线的「自动写入 diff」（按需拉取留档，不随列表下发） */
+  async function toggleHistory(entry: MemoryTimelineEntry, key: string) {
+    if (expandedHistory[key]) {
+      setExpandedHistory((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
+    if (!entry.historyPath) return;
+    setLoadingHistoryKey(key);
+    setNotice(null);
+    try {
+      const response = await fetch(
+        `/api/memory/history?path=${encodeURIComponent(entry.historyPath)}`,
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "读取改动失败");
+      }
+      setExpandedHistory((current) => ({ ...current, [key]: payload }));
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : "读取改动失败",
+      });
+    } finally {
+      setLoadingHistoryKey(null);
     }
   }
 
@@ -198,21 +244,63 @@ export function MemoryApp() {
                         (entry) =>
                           entry.documentId === selected.id,
                       )
-                      .map((entry, index) => (
-                        <div className="timeline-entry" key={`${entry.ts}-${index}`}>
-                          <time>
-                            {new Intl.DateTimeFormat("zh-CN", {
-                              month: "2-digit",
-                              day: "2-digit",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            }).format(new Date(entry.ts))}
-                            {" · "}会话 #{entry.sessionId}
-                          </time>
-                          <strong>{entry.sessionTitle}</strong>
-                          <span>{entry.summary}</span>
-                        </div>
-                      ))
+                      .map((entry, index) => {
+                        const key = `${entry.sessionId}-${entry.ts}`;
+                        const diff = expandedHistory[key];
+                        return (
+                          <div
+                            className="timeline-entry"
+                            key={`${entry.ts}-${index}`}
+                          >
+                            <time>
+                              {new Intl.DateTimeFormat("zh-CN", {
+                                month: "2-digit",
+                                day: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              }).format(new Date(entry.ts))}
+                              {" · "}会话 #{entry.sessionId}
+                            </time>
+                            <strong>{entry.sessionTitle}</strong>
+                            <span>{entry.summary}</span>
+                            <div className="timeline-actions">
+                              {entry.historyPath ? (
+                                <button
+                                  className="timeline-link"
+                                  disabled={loadingHistoryKey === key}
+                                  onClick={() =>
+                                    void toggleHistory(entry, key)
+                                  }
+                                >
+                                  {diff
+                                    ? "收起改动"
+                                    : loadingHistoryKey === key
+                                      ? "读取中…"
+                                      : "查看改动"}
+                                </button>
+                              ) : (
+                                <span className="timeline-hint">
+                                  本次改动发生在本功能上线前，无留档可对比
+                                </span>
+                              )}
+                              <button
+                                className="timeline-link"
+                                onClick={() => {
+                                  window.location.hash = `#sessions/${entry.sessionId}`;
+                                }}
+                              >
+                                打开会话
+                              </button>
+                            </div>
+                            {diff && (
+                              <DiffOrOutput
+                                text={diff.diff}
+                                forceDiff
+                              />
+                            )}
+                          </div>
+                        );
+                      })
                   )}
                 </div>
               </>

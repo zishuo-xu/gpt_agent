@@ -25,6 +25,14 @@ function Router() {
   if (route === "plugins") return <PluginApp />;
   if (route === "scheduled") return <ScheduledApp />;
   if (route === "stats") return <StatsApp />;
+  // 记忆面板「打开会话」直达：#sessions/<id>
+  if (route.startsWith("sessions/")) {
+    return (
+      <SessionApp
+        initialSessionId={route.slice("sessions/".length)}
+      />
+    );
+  }
   return <SessionApp />;
 }
 
