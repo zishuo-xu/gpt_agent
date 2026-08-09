@@ -263,6 +263,7 @@ describe("SessionListSidebar（会话列表交互）", () => {
     sessions: Array<Record<string, unknown>>;
     selectedId: string;
     sessionsLoaded?: boolean;
+    open?: boolean;
   }) {
     const [{ act }, { createRoot }, { SessionListSidebar }] = await Promise.all([
       import("react"),
@@ -279,6 +280,7 @@ describe("SessionListSidebar（会话列表交互）", () => {
           sessions={props.sessions as never}
           sessionsLoaded={props.sessionsLoaded ?? false}
           selectedId={props.selectedId}
+          open={props.open}
           onSelect={(id) => calls.select.push(id)}
           onNew={() => {
             calls.create += 1;
@@ -337,6 +339,18 @@ describe("SessionListSidebar（会话列表交互）", () => {
       target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
     assert.deepEqual(calls.select, ["s2"]);
+    await act(async () => root.unmount());
+  });
+
+  it("open 时侧栏根元素挂 open className（移动端抽屉态）", async () => {
+    const { container, root, act } = await setup({
+      sessions: [makeSession("s1", "甲")],
+      selectedId: "s1",
+      open: true,
+    });
+    const aside = container.querySelector("aside.sidebar");
+    assert.ok(aside, "应存在侧栏");
+    assert.equal(aside.classList.contains("open"), true);
     await act(async () => root.unmount());
   });
 

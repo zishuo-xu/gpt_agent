@@ -87,6 +87,8 @@ export function SessionApp() {
   const [newTaskProject, setNewTaskProject] = useState("");
   /** 详情区右栏（任务清单/消耗/会话信息）展开/收起 */
   const [showDetail, setShowDetail] = useState(false);
+  /** 移动端侧栏抽屉开合（≤768px 生效） */
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [resolvedPermissions, setResolvedPermissions] =
     useState<Set<string>>(new Set());
@@ -625,9 +627,12 @@ export function SessionApp() {
         sessions={sessions}
         sessionsLoaded={sessionsLoaded}
         selectedId={selectedId}
+        open={sidebarOpen}
         onSelect={(id) => {
           setSelectedId(id);
           setShowNewTask(false);
+          // 移动端：选中会话后收起抽屉
+          setSidebarOpen(false);
         }}
         onNew={startNewSession}
       />
@@ -636,6 +641,14 @@ export function SessionApp() {
         {selected ? (
           <>
             <header className="page-header sessions-header">
+              <button
+                className="sidebar-toggle"
+                onClick={() => setSidebarOpen(true)}
+                title="会话列表"
+                aria-label="打开会话列表"
+              >
+                ☰
+              </button>
               <div>
                 <p className="eyebrow">AGENT / SESSION</p>
                 <div className="title-with-status">
@@ -1204,6 +1217,8 @@ export function SessionListSidebar(props: {
   selectedId: string;
   onSelect: (id: string) => void;
   onNew: () => void;
+  /** 移动端抽屉开合（≤768px 生效；桌面恒展开） */
+  open?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const keyword = search.trim().toLowerCase();
@@ -1215,7 +1230,9 @@ export function SessionListSidebar(props: {
       )
     : props.sessions;
   return (
-    <aside className="sidebar session-list-sidebar">
+    <aside
+      className={`sidebar session-list-sidebar${props.open ? " open" : ""}`}
+    >
       <div className="brand">
         <span className="brand-mark">◆</span>
         <span>MyAgent</span>
