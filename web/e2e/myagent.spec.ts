@@ -102,7 +102,7 @@ test.describe("会话页", () => {
       page.locator(".session-list-sidebar"),
     ).toBeVisible();
     await expect(
-      page.getByLabel("会话列表"),
+      page.getByLabel("会话列表", { exact: true }),
     ).toBeVisible();
     // 新建会话
     await page

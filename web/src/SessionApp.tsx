@@ -638,17 +638,18 @@ export function SessionApp() {
       />
 
       <main className="sessions-main">
+        {/* 移动端侧栏抽屉开关：无条件渲染（未选中会话时也要能打开列表） */}
+        <button
+          className="sidebar-toggle"
+          onClick={() => setSidebarOpen(true)}
+          title="会话列表"
+          aria-label="打开会话列表"
+        >
+          ☰
+        </button>
         {selected ? (
           <>
             <header className="page-header sessions-header">
-              <button
-                className="sidebar-toggle"
-                onClick={() => setSidebarOpen(true)}
-                title="会话列表"
-                aria-label="打开会话列表"
-              >
-                ☰
-              </button>
               <div>
                 <p className="eyebrow">AGENT / SESSION</p>
                 <div className="title-with-status">
