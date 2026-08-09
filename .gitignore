@@ -11,3 +11,4 @@ test-todo-api/
 # 本地产物（测试结果、编辑器状态）
 test-results/
 .zcode/
+gui-test-screenshots/
