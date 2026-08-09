@@ -15,7 +15,7 @@ export default defineConfig({
   // 测试自管理服务器生命周期（globalSetup 在 worker 中启动）
   webServer: {
     command:
-      "HOME=/tmp/myagent-gui-test-home tsx /Users/xuzishuo/Documents/gpt_agent/src/cli.ts --web --port 3100",
+      "HOME=/tmp/myagent-gui-test-home /Users/xuzishuo/Documents/gpt_agent/node_modules/.bin/tsx /Users/xuzishuo/Documents/gpt_agent/src/cli.ts --web --port 3100",
     url: "http://127.0.0.1:3100/api/health",
     reuseExistingServer: false,
     timeout: 60_000,

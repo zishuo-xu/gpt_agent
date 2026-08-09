@@ -267,3 +267,60 @@ test.describe("新功能：书签 / 导出 / 续跑按钮", () => {
     expect(resumeResponse.status()).toBe(409);
   });
 });
+
+test.describe("新功能：定时任务 / 统计面板", () => {
+  test("定时任务：注册 → 列表显示干净命令 → 确认删除", async ({ page }) => {
+    await page.goto("/#scheduled");
+    await expect(
+      page.getByRole("heading", { name: "定时任务" }),
+    ).toBeVisible();
+    // 选择第一个非大厅项目（隔离 workspace 的默认项目）
+    await page.getByRole("combobox", { name: "项目" }).selectOption({ index: 1 });
+    const input = page.getByRole("textbox", {
+      name: "/run 任务描述 [--at HH:mm] [--every N 分钟] [--permission …]",
+    });
+    // --at 23:59：今天已过则顺延明天，测试期间不会触发
+    await input.fill("/run e2e 定时任务验证 --at 23:59 --permission normal");
+    await page.getByRole("button", { name: "注册定时任务" }).click();
+    // 列表显示剥离 --at 后的干净命令
+    await expect(
+      page.locator(".scheduler-item code", {
+        hasText: "/run e2e 定时任务验证 --permission normal",
+      }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(
+      page.locator(".scheduler-item small", { hasText: "一次性" }),
+    ).toBeVisible();
+    // 删除（确认框接受）
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.locator("button.scheduler-remove").click();
+    await expect(
+      page.getByText("当前项目暂无定时任务", { exact: false }),
+    ).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("统计面板：总量卡 / 图表 / 明细表渲染", async ({ page }) => {
+    await page.goto("/#stats");
+    await expect(
+      page.getByRole("heading", { name: "任务统计" }),
+    ).toBeVisible();
+    await page.getByRole("combobox", { name: "项目" }).selectOption({ index: 1 });
+    // 总量卡与图表
+    await expect(page.locator(".stats-card").first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByText("会话总数", { exact: false })).toBeVisible();
+    // 明细表（表头 + 至少一行）
+    await expect(page.locator(".stats-table tbody tr").first()).toBeVisible();
+    // 若存在无人值守会话：点「查看」打开收尾总结模态并关闭（不依赖历史数据）
+    const viewButtons = page.locator("button.stats-summary-button");
+    if ((await viewButtons.count()) > 0) {
+      await viewButtons.first().click();
+      const modal = page.locator(".stats-modal");
+      await expect(modal).toBeVisible();
+      await expect(modal.getByText("收尾总结", { exact: false })).toBeVisible();
+      await modal.getByRole("button", { name: "关闭" }).click();
+      await expect(modal).toHaveCount(0);
+    }
+  });
+});
