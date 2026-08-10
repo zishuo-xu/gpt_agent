@@ -71,12 +71,17 @@ export class MemoryService {
   }
 
   /**
-   * 读取某次自动写入的留档：before（写时快照）与 after（文档当前内容）
-   * 及统一格式 diff。path 必须位于某记忆文档的 .history/ 目录内（防越界）。
+   * 读取某次自动写入的留档：before（写时快照）与 after（文档当前内容）、
+   * 统一格式 diff 及变更行统计。path 必须位于某记忆文档的 .history/ 目录内（防越界）。
    */
   async getHistory(
     rawPath: string,
-  ): Promise<{ before: string; after: string; diff: string }> {
+  ): Promise<{
+    before: string;
+    after: string;
+    diff: string;
+    stats: { added: number; removed: number };
+  }> {
     const resolved = path.resolve(rawPath);
     const resolvedBase = path.basename(resolved, ".md");
     const definition = memoryDefinitions(this.#cwd, this.#homeDir).find(
@@ -101,10 +106,12 @@ export class MemoryService {
       throw new MemoryHistoryError("留档文件不存在", 404);
     }
     const after = (await readOptional(definition.path)) ?? "";
+    const diff = createDiffPreview(definition.path, before, after);
     return {
       before,
       after,
-      diff: createDiffPreview(definition.path, before, after),
+      diff,
+      stats: countDiffStats(diff),
     };
   }
 
@@ -151,6 +158,14 @@ export class MemoryService {
           pathToDocument.get(path.resolve(call.target));
         if (!documentId) continue;
         const historyPath = await this.#historyPathFor(absolute, record.ts);
+        // 变更统计：留档（before）vs 文档当前内容（list 已读），与展开 diff 口径一致
+        const historyStats = historyPath
+          ? await this.#historyStatsFor(
+              historyPath,
+              documents.find((document) => document.id === documentId)
+                ?.content ?? "",
+            )
+          : undefined;
         timeline.push({
           ts: record.ts,
           sessionId: summary.id,
@@ -158,10 +173,26 @@ export class MemoryService {
           documentId,
           summary: event.summary,
           ...(historyPath ? { historyPath } : {}),
+          ...(historyStats ? { historyStats } : {}),
         });
       }
     }
     return timeline.sort((a, b) => b.ts.localeCompare(a.ts));
+  }
+
+  /** 留档 vs 文档当前内容的变更行统计（与展开 diff 同一口径） */
+  async #historyStatsFor(
+    historyPath: string,
+    currentContent: string,
+  ): Promise<{ added: number; removed: number } | undefined> {
+    const before = await readOptional(historyPath);
+    if (before === null) return undefined;
+    const diff = createDiffPreview(
+      path.basename(historyPath),
+      before,
+      currentContent,
+    );
+    return countDiffStats(diff);
   }
 
   /**
@@ -169,8 +200,7 @@ export class MemoryService {
    * 窗口匹配对手动编辑免疫：手动编辑不产生对应会话事件，无事件则无条目；
    * 同一窗口内若恰好有手动编辑的留档（无事件对应），不影响本条目命中。
    */
-  async #historyPathFor(
-    filePath: string,
+  async #historyPathFor(    filePath: string,
     ts: string,
   ): Promise<string | undefined> {
     const dir = path.join(path.dirname(filePath), HISTORY_DIR);
@@ -207,6 +237,25 @@ export class MemoryHistoryError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+/**
+ * 从统一格式 diff 统计变更行数（排除 ---/+++ 头，口径与 DiffOrOutput 展示一致）。
+ * 记忆文件为 markdown 列表时内容行以 "- " 开头——此处统计的是 diff 前缀符号
+ * （行首第一个字符），与内容无关。
+ */
+export function countDiffStats(diff: string): {
+  added: number;
+  removed: number;
+} {
+  let added = 0;
+  let removed = 0;
+  for (const line of diff.split(/\r?\n/)) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+")) added += 1;
+    else if (line.startsWith("-")) removed += 1;
+  }
+  return { added, removed };
 }
 
 export function memoryDefinitions(cwd: string, homeDir: string) {

@@ -82,6 +82,8 @@ test("时间线：条目 ts 前 60s 窗口内存在留档时填充 historyPath",
   assert.equal(timeline.length, 1);
   assert.equal(timeline[0]!.documentId, "pitfalls");
   assert.equal(timeline[0]!.historyPath, historyFile);
+  // 变更统计：留档「旧内容」vs 当前「当前内容」→ 修改 1 行
+  assert.deepEqual(timeline[0]!.historyStats, { added: 1, removed: 1 });
   await rm(root, { recursive: true, force: true });
 });
 

@@ -14,6 +14,22 @@ interface HistoryDiff {
   diff: string;
 }
 
+/** 展开 diff 时只保留变更行（@@ 头 / +/- 行），丢弃上下文行——记忆文件小，全上下文=整文件 */
+function filterChangedLines(diff: string): string {
+  return diff
+    .split(/\r?\n/)
+    .filter((line) => {
+      if (line.startsWith("@@") || line.startsWith("diff --git")) {
+        return true;
+      }
+      return line.startsWith("+") || line.startsWith("-");
+    })
+    .join("\n");
+}
+
+/** 时间线筛选：全部文档或单个文档 */
+type TimelineFilter = "all" | MemoryDocumentId;
+
 export function MemoryApp() {
   const [documents, setDocuments] = useState<MemoryDocument[]>([]);
   const [timeline, setTimeline] = useState<MemoryTimelineEntry[]>([]);
@@ -29,6 +45,7 @@ export function MemoryApp() {
   const [loadingHistoryKey, setLoadingHistoryKey] = useState<string | null>(
     null,
   );
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("all");
   const [notice, setNotice] = useState<{
     tone: "ok" | "error";
     text: string;
@@ -252,25 +269,61 @@ export function MemoryApp() {
                   />
                 )}
                 <div className="memory-timeline">
-                  <h3>它学到了什么</h3>
-                  {timeline.filter(
-                    (entry) => entry.documentId === selected.id,
-                  ).length === 0 ? (
-                    <p>尚无 Agent 自动写入记录。</p>
-                  ) : (
-                    timeline
+                  <div className="memory-timeline-header">
+                    <h3>自动写入记录</h3>
+                    <div className="timeline-chips">
+                      <button
+                        className={`timeline-chip${
+                          timelineFilter === "all" ? " active" : ""
+                        }`}
+                        onClick={() => setTimelineFilter("all")}
+                      >
+                        全部
+                      </button>
+                      {documents.map((document) => (
+                        <button
+                          className={`timeline-chip doc-${document.id}${
+                            timelineFilter === document.id
+                              ? " active"
+                              : ""
+                          }`}
+                          key={document.id}
+                          onClick={() =>
+                            setTimelineFilter(document.id)
+                          }
+                        >
+                          {document.id}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {(() => {
+                    const visible = timeline
                       .filter(
                         (entry) =>
-                          entry.documentId === selected.id,
+                          timelineFilter === "all" ||
+                          entry.documentId === timelineFilter,
                       )
-                      .map((entry, index) => {
-                        const key = `${entry.sessionId}-${entry.ts}`;
-                        const diff = expandedHistory[key];
-                        return (
-                          <div
-                            className="timeline-entry"
-                            key={`${entry.ts}-${index}`}
-                          >
+                      .sort((a, b) => b.ts.localeCompare(a.ts));
+                    if (visible.length === 0) {
+                      return (
+                        <p>尚无 Agent 自动写入记录。</p>
+                      );
+                    }
+                    return visible.map((entry, index) => {
+                      const key = `${entry.sessionId}-${entry.ts}`;
+                      const diff = expandedHistory[key];
+                      const stats = entry.historyStats;
+                      return (
+                        <div
+                          className="timeline-entry"
+                          key={`${entry.ts}-${index}`}
+                        >
+                          <div className="timeline-main">
+                            <span className={`timeline-doc-badge doc-${entry.documentId}`}>
+                              {entry.documentId}
+                            </span>
+                            <strong>{entry.sessionTitle}</strong>
                             <time>
                               {new Intl.DateTimeFormat("zh-CN", {
                                 month: "2-digit",
@@ -278,49 +331,57 @@ export function MemoryApp() {
                                 hour: "2-digit",
                                 minute: "2-digit",
                               }).format(new Date(entry.ts))}
-                              {" · "}会话 #{entry.sessionId}
                             </time>
-                            <strong>{entry.sessionTitle}</strong>
-                            <span>{entry.summary}</span>
-                            <div className="timeline-actions">
-                              {entry.historyPath ? (
-                                <button
-                                  className="timeline-link"
-                                  disabled={loadingHistoryKey === key}
-                                  onClick={() =>
-                                    void toggleHistory(entry, key)
-                                  }
-                                >
-                                  {diff
-                                    ? "收起改动"
-                                    : loadingHistoryKey === key
-                                      ? "读取中…"
-                                      : "查看改动"}
-                                </button>
-                              ) : (
-                                <span className="timeline-hint">
-                                  本次改动发生在本功能上线前，无留档可对比
-                                </span>
-                              )}
-                              <button
-                                className="timeline-link"
-                                onClick={() => {
-                                  window.location.hash = `#sessions/${entry.sessionId}`;
-                                }}
-                              >
-                                打开会话
-                              </button>
-                            </div>
-                            {diff && (
-                              <DiffOrOutput
-                                text={diff.diff}
-                                forceDiff
-                              />
+                          </div>
+                          <div className="timeline-stats">
+                            {stats ? (
+                              <>
+                                本次写入：新增 {stats.added} 行
+                                {" · "}修改 {stats.removed} 行
+                              </>
+                            ) : (
+                              <span className="timeline-hint">
+                                本次改动发生在本功能上线前，无留档可对比
+                              </span>
                             )}
                           </div>
-                        );
-                      })
-                  )}
+                          <div className="timeline-actions">
+                            {entry.historyPath ? (
+                              <button
+                                className="timeline-link"
+                                disabled={loadingHistoryKey === key}
+                                onClick={() =>
+                                  void toggleHistory(entry, key)
+                                }
+                              >
+                                {diff
+                                  ? "收起改动"
+                                  : loadingHistoryKey === key
+                                    ? "读取中…"
+                                    : "查看改动"}
+                              </button>
+                            ) : (
+                              <span className="timeline-spacer" />
+                            )}
+                            <button
+                              className="timeline-link"
+                              onClick={() => {
+                                window.location.hash = `#sessions/${entry.sessionId}`;
+                              }}
+                            >
+                              打开会话
+                            </button>
+                          </div>
+                          {diff && (
+                            <DiffOrOutput
+                              text={filterChangedLines(diff.diff)}
+                              forceDiff
+                            />
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </>
             )}
