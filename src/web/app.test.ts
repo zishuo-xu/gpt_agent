@@ -479,6 +479,7 @@ test("记忆 history API：返回 before/after/diff；越界 400；缺失 404", 
   assert.equal(payload.after, "after line\n");
   assert.match(payload.diff, /-before line/);
   assert.match(payload.diff, /\+after line/);
+  assert.deepEqual(payload.stats, { added: 1, removed: 1 });
 
   // 越界 path（不在 .history/ 内）→ 400
   const bad = await app.request(

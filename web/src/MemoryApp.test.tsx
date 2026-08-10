@@ -36,6 +36,7 @@ const TIMELINE_PAYLOAD = {
       documentId: "preferences",
       summary: "已替换 1 块",
       historyPath: "/proj/.myagent/memory/.history/pitfalls-20260810-120000-000-abcd.md",
+      historyStats: { added: 1, removed: 0 },
     },
     {
       ts,
@@ -62,6 +63,16 @@ function stubFetch(history: Record<string, unknown>) {
   };
 }
 
+/** 展开后应只剩变更行：上下文行（空格前缀）被过滤 */
+const HISTORY_DIFF = [
+  "--- a/pitfalls.md",
+  " context line 不应显示",
+  "  context-two",
+  "-before line",
+  "+after line",
+  " tail context",
+].join("\n");
+
 describe("记忆面板增强：时间线 diff 展开与会话跳转", () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof import("react-dom/client").createRoot>;
@@ -71,7 +82,12 @@ describe("记忆面板增强：时间线 diff 展开与会话跳转", () => {
 
   before(async () => {
     GlobalRegistrator.register();
-    stubFetch({ before: "before line\n", after: "after line\n", diff: "--- a\n-before line\n+after line\n" });
+    stubFetch({
+      before: "before line\n",
+      after: "after line\n",
+      diff: HISTORY_DIFF,
+      stats: { added: 1, removed: 1 },
+    });
     const [{ act: a }, { createRoot: c }, { MemoryApp: M }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
@@ -95,23 +111,31 @@ describe("记忆面板增强：时间线 diff 展开与会话跳转", () => {
     });
   }
 
-  it("有 historyPath 的条目显示「查看改动」并可展开 diff，无 historyPath 显示上线前提示", async () => {
+  it("结构化记录：变更统计可见、展开只显示变更行、无留档显示上线前提示", async () => {
     await render();
     const entries = Array.from(
       container.querySelectorAll(".timeline-entry"),
     );
     assert.equal(entries.length, 2);
-    // 第一条（s1）：有留档 → 查看改动按钮
-    const firstActions = entries[0]!.querySelectorAll(".timeline-actions button");
-    assert.equal(firstActions.length, 2);
+    // 第一条（s1）：有留档 → 变更统计 + 查看改动按钮
+    const first = entries[0]!;
+    assert.match(
+      first.querySelector(".timeline-stats")?.textContent ?? "",
+      /新增 1 行/,
+    );
+    assert.ok(
+      Array.from(first.querySelectorAll("button")).some((b) =>
+        b.textContent?.includes("查看改动"),
+      ),
+    );
     // 第二条（s2）：无留档 → 上线前提示
     const hint = entries[1]!.querySelector(".timeline-hint");
     assert.ok(hint, "无留档条目应有上线前提示");
     assert.match(hint!.textContent ?? "", /上线前/);
 
-    // 展开 diff
+    // 展开 diff：只显示变更行，上下文行被过滤
     const viewButton = Array.from(
-      entries[0]!.querySelectorAll("button"),
+      first.querySelectorAll("button"),
     ).find((button) => button.textContent?.includes("查看改动"));
     assert.ok(viewButton, "查看改动按钮存在");
     await act(async () => {
@@ -120,6 +144,48 @@ describe("记忆面板增强：时间线 diff 展开与会话跳转", () => {
     const diffText = container.textContent ?? "";
     assert.match(diffText, /before line/);
     assert.match(diffText, /after line/);
+    assert.ok(
+      !diffText.includes("context line 不应显示"),
+      "上下文行应被过滤",
+    );
+  });
+
+  it("筛选 chips：默认全部显示，切换文档过滤时间线", async () => {
+    await render();
+    // 默认「全部」：2 条都显示
+    assert.equal(
+      container.querySelectorAll(".timeline-entry").length,
+      2,
+    );
+    // 切到 pitfalls（timeline 条目都是 preferences → 空）
+    const chips = Array.from(
+      container.querySelectorAll(".timeline-chip"),
+    );
+    const pitfallsChip = chips.find((chip) =>
+      chip.textContent?.includes("pitfalls"),
+    );
+    assert.ok(pitfallsChip, "pitfalls chip 存在");
+    await act(async () => {
+      pitfallsChip!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    assert.equal(
+      container.querySelectorAll(".timeline-entry").length,
+      0,
+    );
+    // 切回全部
+    const allChip = Array.from(
+      container.querySelectorAll(".timeline-chip"),
+    ).find((chip) => chip.textContent?.includes("全部"));
+    assert.ok(allChip, "全部 chip 存在");
+    await act(async () => {
+      allChip!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    assert.equal(
+      container.querySelectorAll(".timeline-entry").length,
+      2,
+    );
   });
 
   it("「打开会话」跳转 #sessions/<id>", async () => {

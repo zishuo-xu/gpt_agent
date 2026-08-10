@@ -23,7 +23,9 @@ test.describe("记忆面板（生产级回归）", () => {
     await rm(WORKSPACE_MEMORY, { recursive: true, force: true });
   });
 
-  test("面板加载：文档列表 + 时间线空态渲染", async ({ page }) => {
+  test("面板加载：文档列表 + 时间线结构渲染（chips + 空态或记录）", async ({
+    page,
+  }) => {
     await page.goto("/#memory");
     await expect(
       page.getByRole("heading", { name: "记忆面板" }),
@@ -33,8 +35,16 @@ test.describe("记忆面板（生产级回归）", () => {
     await expect(list.getByText("preferences（全局）")).toBeVisible();
     await expect(list.getByText(/\/ conventions/)).toBeVisible();
     await expect(list.getByText(/\/ pitfalls/)).toBeVisible();
-    // 时间线空态
-    await expect(page.getByText("尚无 Agent 自动写入记录。")).toBeVisible();
+    // 时间线结构：标题 + 筛选 chips 渲染
+    await expect(
+      page.getByRole("heading", { name: "自动写入记录" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "全部" })).toBeVisible();
+    // 记录区要么空态要么有条目（e2e 工作区可能有历史会话事件）
+    const emptyOrList = page
+      .getByText("尚无 Agent 自动写入记录。")
+      .or(page.locator(".timeline-entry"));
+    await expect(emptyOrList.first()).toBeVisible();
   });
 
   test("编辑保存 + 预览切换（标题/列表/代码块渲染，切回不丢草稿）", async ({

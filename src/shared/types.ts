@@ -82,6 +82,8 @@ export interface MemoryTimelineEntry {
   summary: string;
   /** 该次自动写入的留档文件（写时快照，供 diff 展示）；无留档数据时缺省 */
   historyPath?: string;
+  /** 留档 vs 文档当前的变更行统计（不展开即可见写入规模） */
+  historyStats?: { added: number; removed: number };
 }
 
 export interface ConnectionTestResult {
