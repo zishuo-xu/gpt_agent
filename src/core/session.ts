@@ -37,7 +37,6 @@ import type {
   RecordedEvent,
   SessionBranch,
   TodoItem,
-  ToolCall,
 } from "./types.js";
 
 import type {

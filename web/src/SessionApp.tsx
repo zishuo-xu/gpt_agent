@@ -1,5 +1,4 @@
 import {
-  Fragment,
   type ReactNode,
   useEffect,
   useMemo,
@@ -12,22 +11,13 @@ import type {
   SessionBranch,
   SessionStatus,
   SessionSummary,
-  TodoItem,
 } from "@shared/types.js";
+import { buildDisplayItems } from "./session-display";
 import {
-  buildDisplayItems,
-  type DisplayItem,
-  statusLabel,
-} from "./session-display";
-import {
-  DiffOrOutput,
   ItemCard,
-  RichText,
   StatusTag,
-  formatDuration,
   formatTime,
   formatTokens,
-  renderInline,
   statusMeta,
   type ApprovalScope,
 } from "./session-render";

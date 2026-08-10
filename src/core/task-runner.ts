@@ -18,7 +18,6 @@ import {
   READONLY_DENY_RULES,
 } from "./permissions.js";
 import type {
-  ApprovalAnswer,
   ApprovalHandler,
   PermissionMode,
   PermissionRule,
