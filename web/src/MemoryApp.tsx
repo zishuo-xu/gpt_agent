@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { SettingsSidebar } from "./SettingsSidebar";
-import { DiffOrOutput, RichText } from "./session-render";
+import { DiffOrOutput, RichText } from "./session-rich-text";
 import type {
   MemoryDocument,
   MemoryDocumentId,

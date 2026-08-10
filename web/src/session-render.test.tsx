@@ -25,7 +25,7 @@ describe("RichText（markdown 渲染）", () => {
     const [{ act }, { createRoot }, { RichText }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
-      import("./session-render"),
+      import("./session-rich-text"),
     ]);
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -284,24 +284,25 @@ describe("ItemCard（会话展示组件全分支）", () => {
   });
 
   it("StatusTag 与格式化纯函数", async () => {
-    const [{ act }, { createRoot }, render] = await Promise.all([
+    const [{ act }, { createRoot }, { StatusTag }, format] = await Promise.all([
       import("react"),
       import("react-dom/client"),
       import("./session-render"),
+      import("./session-format"),
     ]);
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
     mountedRoots.push(root);
     await act(async () => {
-      root.render(<render.StatusTag status="running" />);
+      root.render(<StatusTag status="running" />);
     });
     assert.match(container.textContent ?? "", /运行中/);
-    assert.equal(render.formatTokens(1234), "1.2k");
-    assert.equal(render.formatTokens(2_500_000), "2.5m");
-    assert.equal(render.formatTokens(999), "999");
-    assert.equal(render.formatDuration(90_000), "1.5 分");
-    assert.ok(render.formatTime("2026-08-09T10:00:00.000Z").length > 0);
+    assert.equal(format.formatTokens(1234), "1.2k");
+    assert.equal(format.formatTokens(2_500_000), "2.5m");
+    assert.equal(format.formatTokens(999), "999");
+    assert.equal(format.formatDuration(90_000), "1.5 分");
+    assert.ok(format.formatTime("2026-08-09T10:00:00.000Z").length > 0);
   });
 });
 

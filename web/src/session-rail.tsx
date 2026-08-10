@@ -1,5 +1,6 @@
 import type { SessionBranch, SessionSummary, TodoItem } from "@shared/types.js";
-import { formatTime, formatTokens, statusMeta } from "./session-render";
+import { formatTime, formatTokens } from "./session-format";
+import { statusMeta } from "./session-render";
 import { BranchTree, KeyValue, RailCard } from "./session-branch";
 
 /** 对话链路：每轮用户提问的目录项（点击定位到对应消息） */
