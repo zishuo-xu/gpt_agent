@@ -9,7 +9,7 @@ export function ItemCard(props: {
   item: DisplayItem;
   /** 缓存 miss 提示开关（behavior.showCacheMissNotices；默认关） */
   showCacheMissNotices: boolean;
-  locallyResolved: Set<string>;
+  locallyResolved: ReadonlySet<string>;
   /** 正在提交审批的 callId（按钮 loading 态，防重复点击） */
   pendingPermissionCallId?: string | null;
   feedback: string;
