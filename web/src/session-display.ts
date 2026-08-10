@@ -18,6 +18,8 @@ export type DisplayItem =
       seq: number;
       call: Record<string, any>;
       result?: Record<string, any>;
+      /** Bash 执行期实时输出累积（tool_execution_update 流式 partial） */
+      partial?: string;
     }
   | {
       kind: "approval";
@@ -69,6 +71,8 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
   const deniedReasons = new Map<string, string>();
   const startedQueues = new Set<string>();
   const taskEnds = new Map<string, Record<string, any>>();
+  // tool_execution_update 流式输出累积（callId → 已拼接的 partial）
+  const toolPartials = new Map<string, string>();
   for (const { event } of events) {
     if (event.type === "tool_result") {
       toolResults.set(String(event.callId), event);
@@ -77,6 +81,11 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
       if (event.call?.id) {
         deniedReasons.set(String(event.call.id), event.reason);
       }
+    } else if (event.type === "tool_execution_update") {
+      toolPartials.set(
+        String(event.callId),
+        (toolPartials.get(String(event.callId)) ?? "") + event.partial,
+      );
     } else if (event.type === "user" && event.queueId) {
       startedQueues.add(String(event.queueId));
     } else if (event.type === "task_end") {
@@ -142,6 +151,7 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
           seq,
           call: event.call,
           result: toolResults.get(String(event.call.id)),
+          partial: toolPartials.get(String(event.call.id)),
         });
         break;
       case "ask_permission":

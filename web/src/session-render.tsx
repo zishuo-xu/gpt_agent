@@ -48,7 +48,7 @@ export function ItemCard(props: {
   }
 
   if (item.kind === "tool") {
-    const { call, result } = item;
+    const { call, result, partial } = item;
     const toolStateClass = !result
       ? "tool-running"
       : result.type === "permission_denied"
@@ -75,6 +75,11 @@ export function ItemCard(props: {
           </span>
         </summary>
         <div className="tool-detail">
+          {/* Bash 执行期实时输出（tool_execution_update 流式 partial；
+              命令结束后仍保留供查看，与最终 tool_result 不重复展示） */}
+          {partial && !result && (
+            <pre className="tool-partial-output">{partial}</pre>
+          )}
           {call.purpose && <p>目的：{call.purpose}</p>}
           {result?.summary && <p>{result.summary}</p>}
           {result?.reason && <p>{result.reason}</p>}

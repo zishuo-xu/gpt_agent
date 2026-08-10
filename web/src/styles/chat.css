@@ -1564,6 +1564,23 @@
   background: #0e141c;
 }
 
+/* Bash 执行期实时输出（tool_execution_update 流式 partial） */
+.tool-partial-output {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #0b1017;
+  border: 1px solid #1d2733;
+  border-radius: 5px;
+  color: #8ee6a0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .tool-detail > p {
   margin: 0 0 8px;
   color: #7e8b9c;
