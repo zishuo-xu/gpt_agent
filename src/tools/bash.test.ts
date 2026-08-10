@@ -246,3 +246,17 @@ test("cleanupStaleBashLogs：仅清理超过保留期的 myagent-bash 落盘日�
   const remaining = (await readdir(dir)).sort();
   assert.deepEqual(remaining, ["myagent-bash-123-1.log", "other.log"]);
 });
+
+test("onData 回调实时收到输出分片，最终 tool_result 输出完整", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-ondata-"));
+  const chunks: string[] = [];
+  const result = await runBash("printf 'line1\\n'; printf 'line2\\n'", {
+    cwd,
+    onData: (chunk) => chunks.push(chunk),
+  });
+  assert.ok(chunks.length >= 1, "onData 应至少收到一次输出分片");
+  assert.equal(chunks.join(""), "line1\nline2\n");
+  // 最终结果完整（流式不影响 tool_result 内容）
+  const stdout = (result.output as { stdout: string }).stdout;
+  assert.equal(stdout, "line1\nline2\n");
+});

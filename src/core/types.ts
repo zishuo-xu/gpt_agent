@@ -123,6 +123,12 @@ export type AgentEvent =
   | { type: "todo_update"; todos: TodoItem[] }
   | { type: "tool_call"; call: ToolCall }
   | {
+      type: "tool_execution_update";
+      callId: string;
+      /** 实时增量输出（仅 UI 展示，不进模型上下文；对齐 Pi 的流式 partial） */
+      partial: string;
+    }
+  | {
       type: "tool_result";
       callId: string;
       summary: string;

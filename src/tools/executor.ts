@@ -100,7 +100,9 @@ export class ToolExecutor {
   async execute(
     call: ToolCall,
     signal: AbortSignal,
+    options?: { onData?: (chunk: string) => void },
   ): Promise<ToolExecutionResult> {
+    const onData = options?.onData;
     // schema 单层校验（参照 Pi：TypeBox/JSON Schema 校验 + 类型强转 + 字段级报错，
     // 非空规则已用 minLength/minItems 表达在 schema 中）
     const schemaCheck = validateToolArgs(call);
@@ -317,6 +319,9 @@ export class ToolExecutor {
           timeoutMs: args.timeout_ms ?? 120_000,
           signal,
           ...(args.background ? { background: true } : {}),
+          ...(onData
+            ? { onData }
+            : {}),
         });
       }
       default: {

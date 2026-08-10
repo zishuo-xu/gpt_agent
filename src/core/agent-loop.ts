@@ -198,6 +198,36 @@ export class AgentLoop {
     }
   }
 
+  /**
+   * Bash 实时输出 → tool_execution_update 事件（100ms 节流，对齐 Pi）。
+   * 仅 UI 展示，不进模型上下文；最终结果仍由 tool_result 承载。
+   */
+  #makeOnToolData(callId: string): (chunk: string) => void {
+    let lastEmitAt = 0;
+    let pending = "";
+    let timer: NodeJS.Timeout | undefined;
+    const flush = () => {
+      if (!pending) return;
+      const partial = pending;
+      pending = "";
+      this.#bus.emit({ type: "tool_execution_update", callId, partial });
+    };
+    return (chunk) => {
+      pending += chunk;
+      const now = Date.now();
+      if (now - lastEmitAt >= 100) {
+        lastEmitAt = now;
+        flush();
+      } else if (!timer) {
+        timer = setTimeout(() => {
+          timer = undefined;
+          lastEmitAt = Date.now();
+          flush();
+        }, 100);
+      }
+    };
+  }
+
   #recordModelError(error: unknown): void {
     const trace = modelErrorTrace(error);
     this.#recordTrace?.({
@@ -254,7 +284,9 @@ export class AgentLoop {
         return { call, verdict, state: "denied" as const, reason };
       }
       try {
-        const result = await this.#tools.execute(call, signal);
+        const result = await this.#tools.execute(call, signal, {
+          onData: this.#makeOnToolData(call.id),
+        });
         return { call, verdict, state: "done" as const, result, toolStartedAt };
       } catch (error) {
         const result: ToolExecutionResult = {
@@ -619,7 +651,9 @@ export class AgentLoop {
           }
 
           try {
-            const result = await this.#tools.execute(call, signal);
+            const result = await this.#tools.execute(call, signal, {
+              onData: this.#makeOnToolData(call.id),
+            });
             this.#bus.emit({
               type: "tool_result",
               callId: call.id,
