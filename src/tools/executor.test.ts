@@ -52,7 +52,9 @@ test("Read 返回行号并支持 offset/limit 续读", async () => {
   );
 
   assert.match(String(result.output), /^2\tbeta\n3\tgamma/);
-  assert.match(String(result.output), /Read offset=4 继续/);
+  // 续读指引带精确行号区间：已读区间 + 下一段区间
+  assert.match(String(result.output), /已读第 2-3 行/);
+  assert.match(String(result.output), /继续读第 4-4 行，使用 Read offset=4 limit=2 继续/);
 });
 
 test("Grep 与 Glob 返回文件行号证据并跳过依赖目录", async () => {
