@@ -884,3 +884,54 @@ test("截断回合（stopReason=max_tokens）工具调用全部判失败且不�
   );
   assert.equal(events.at(-1)?.type, "done");
 });
+
+test("Bash 执行时发射 tool_execution_update 流式事件，tool_result 仍完整", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-partial-"));
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+
+  const model = new ScriptedModel([
+    {
+      text: "运行命令。",
+      toolCalls: [
+        toolCall("bash-partial", "Bash", "echo hello-partial", {
+          command: "echo hello-partial",
+        }),
+      ],
+    },
+    { text: "完成。", done: true },
+  ]);
+
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: true }),
+  });
+  await loop.run();
+
+  const updates = events.filter(
+    (event) => event.type === "tool_execution_update",
+  );
+  assert.ok(updates.length >= 1, "应发射至少一条 tool_execution_update");
+  const partials = updates
+    .map((event) =>
+      event.type === "tool_execution_update" ? event.partial : "",
+    )
+    .join("");
+  assert.ok(partials.includes("hello-partial"), `流式输出应含命令输出，实际: ${partials}`);
+
+  // tool_result 仍正常发射且输出完整（流式不破坏最终结果）
+  const results = events.filter((event) => event.type === "tool_result");
+  assert.equal(results.length, 1);
+  const result = results[0];
+  assert.ok(result && result.type === "tool_result");
+  const stdout =
+    result.output && typeof result.output === "object"
+      ? (result.output as { stdout?: string }).stdout ?? ""
+      : String(result.output);
+  assert.ok(stdout.includes("hello-partial"), "tool_result 输出应完整包含命令输出");
+  assert.equal(events.at(-1)?.type, "done");
+});

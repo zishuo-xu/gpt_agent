@@ -11,6 +11,8 @@ export interface BashOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   background?: boolean;
+  /** 实时输出回调（100ms 节流由调用方控制；供 tool_execution_update 流式事件） */
+  onData?: (chunk: string) => void;
 }
 
 /**
@@ -128,9 +130,11 @@ export async function runBash(
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
       stdout += chunk;
+      options.onData?.(chunk);
     });
     child.stderr?.on("data", (chunk: string) => {
       stderr += chunk;
+      options.onData?.(chunk);
     });
 
     /**
