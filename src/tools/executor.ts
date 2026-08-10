@@ -128,28 +128,32 @@ export class ToolExecutor {
         const nextOffset = offset - 1 + limit < lines.length
           ? offset + limit
           : undefined;
-        const paged =
+        const endLine = Math.min(offset + limit - 1, lines.length);
+        // 截断提示带精确行号区间：已读区间 + 下一段区间（对齐 Pi 续读指引）
+        const nextEndLine =
           nextOffset === undefined
+            ? undefined
+            : Math.min(nextOffset + limit - 1, lines.length);
+        const paged =
+          nextOffset === undefined || nextEndLine === undefined
             ? selected
-            : `${selected}\n[... 其余内容已省略，使用 Read offset=${nextOffset} 继续 ...]`;
+            : `${selected}\n[... 已读第 ${offset}-${endLine} 行，剩余内容已省略；继续读第 ${nextOffset}-${nextEndLine} 行，使用 Read offset=${nextOffset} limit=${limit} 继续 ...]`;
         const bounded = truncateToolText(paged, {
           ...TOOL_OUTPUT_LIMITS.read,
-          continuationHint: `use Read offset=${Math.max(
-            offset + 1,
-            offset + Math.floor(limit * 0.6),
-          )} to continue`,
+          ...(nextOffset === undefined || nextEndLine === undefined
+            ? {}
+            : {
+                continuationHint: `use Read offset=${nextOffset} limit=${limit} to read lines ${nextOffset}-${nextEndLine}`,
+              }),
         });
         return {
-          summary: `已读取 ${args.file_path} 第 ${offset}-${Math.min(
-            offset + limit - 1,
-            lines.length,
-          )} 行（共 ${lines.length} 行）`,
+          summary: `已读取 ${args.file_path} 第 ${offset}-${endLine} 行（共 ${lines.length} 行）`,
           output: bounded.text,
           traceOutput: paged,
           details: {
             filePath: args.file_path,
             startLine: offset,
-            endLine: Math.min(offset + limit - 1, lines.length),
+            endLine,
             totalLines: lines.length,
             truncated: bounded.truncated,
             ...(nextOffset === undefined ? {} : { nextOffset }),

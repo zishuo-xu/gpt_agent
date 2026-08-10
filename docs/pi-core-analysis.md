@@ -118,7 +118,7 @@ estimateTokens: Math.ceil(chars / 4)；图片按 4800 字符/张
 | 位置 | `~/.pi/agent/sessions/--<cwd编码>--/<ts>_<uuid>.jsonl` | WAL 单文件 + `migrations` 记账 | `~/.myagent/projects/<base64url>/sessions/<id>.jsonl` + `index.json` + `<id>.trace.jsonl` |
 | 树结构 | entry `{type,id,parentId,timestamp}` + `leafId` 指针，**append-only 树** | `entries.parent_id` 权威 + `lanes`/`branch_tips` 派生缓存 | 事件 `seq` 单调 + 事件级 `branchId` 字段，branch_switch 事件即真相 |
 | 头部 | `{type:"session",version,id,timestamp,cwd,parentSession}`，v1→v3 原地迁移 | `sessions` 表 + `facts`（标题/书签） | 无头部；元数据在 `index.json` |
-| 特殊 entry | `compaction`/`branch_summary`/`custom`（不进上下文）/`custom_message`（进上下文）/`label`（书签）/`session_info`（标题） | 同左 + `records` 运行日志 + `session_stats` 聚合 | 全部是事件（`context_compacted` 等），无书签、无会话内标题 |
+| 特殊 entry | `compaction`/`branch_summary`/`custom`（不进上下文）/`custom_message`（进上下文）/`label`（书签）/`session_info`（标题） | 同左 + `records` 运行日志 + `session_stats` 聚合 | 事件流：`context_compacted`、`label`（书签，`session.ts:425`）、`session_info`（标题）已实现 |
 | 搜索 | 流式扫描 + 内存过滤 | **FTS5**（trigram） | 无 |
 | 并发 | 单进程 | 租约 + fence（防过期写者复写） | 单进程 |
 | 写入 | 首个 assistant 前不落盘（避免半截用户消息文件） | 事务 + seq 单调分配 | 事件即写（JSONL 每行一个事件，追加写） |
@@ -128,7 +128,7 @@ Pi 注释原文要点（session-manager.ts:844-854）："append-only trees... Ap
 ### 2.2 回溯 / 分支 / 书签
 
 - **Pi**：`branch(branchFromId)` 只是把 `leafId` 改指旧节点，之后追加的新 entry `parentId = 旧节点`——旧分支一行不动，文件天然是树。`label` entry 做书签（可清除）。`createBranchedSession(leafId)` 把 root→leaf 路径复制进新文件（`parentSession` 指向原文件）实现"提取单条对话线"。**`branch-summarization`**：离开分支前把将被放弃的路径（旧 leaf → 公共祖先）压缩成 `branch_summary` entry 挂在**新位置**，tokenBudget = `contextWindow - reserveTokens`，prompt 结构 `BRANCH_SUMMARY_PROMPT`（Goal/Constraints/Progress/Key Decisions/Next Steps）+ `<read-files>/<modified-files>` 清单；恢复时转 `branchSummary` 消息（`<summary>` 标签）。
-- **MyAgent**：`forkBranch(seq, label)` 从任意事件 seq 分裂、`switchBranch` 回溯；`conversationFrom` 按分支链过滤（fork 点之后发生在祖先分支的事件不进入新分支视角）；恢复时 `branchesFromEvents` 重建树。**差距**：① 无书签（label）；② ~~无分支摘要~~（已落地：`branch_summarized` 事件 + `summarizeConversation`，fork/switch 后台触发，见 P1-8）；③ 无"提取单线对话"导出；④ 分支树在事件层重建，粒度 = 事件 seq，与 Pi 的 entry 粒度等价但数据模型不同——改造存储时若要支持"从任意节点继续"的 UI 语义（Pi 的 navigateTree 有 position before/at），事件层方案也够用。
+- **MyAgent**：`forkBranch(seq, label)` 从任意事件 seq 分裂、`switchBranch` 回溯；`conversationFrom` 按分支链过滤（fork 点之后发生在祖先分支的事件不进入新分支视角）；恢复时 `branchesFromEvents` 重建树。**差距**：① ~~无书签~~（已落地：`addBookmark`/`bookmarks()` + `label` 事件，`session.ts:425-439`）；② ~~无分支摘要~~（已落地：`branch_summarized` 事件 + `summarizeConversation`，fork/switch 后台触发，见 P1-8）；③ 无"提取单线对话"导出；④ 分支树在事件层重建，粒度 = 事件 seq，与 Pi 的 entry 粒度等价但数据模型不同——改造存储时若要支持"从任意节点继续"的 UI 语义（Pi 的 navigateTree 有 position before/at），事件层方案也够用。
 
 ### 2.3 会话恢复
 
@@ -256,7 +256,8 @@ MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）�
 
 > 落地记录：P0 五条（2026-08-05 第一轮）+ 本轮（2026-08-05 第二轮）——
 > 新增 trace 分析器（`scripts/analyze-traces.ts`，统计 diff 占比 / bash 截断率 / 缓存命中率，为 P0-3 观察项提供数据）、P1 六条、P2 一条。
-> 剩余未做：P1-7（缓存写入控制，等供应商层支持）、P1-12（rg/fd 引入，待产品决策）、P2-14（书签）、P2 其余。
+> 剩余未做：P1-7（缓存写入控制，等供应商层支持）、P1-12（rg/fd 引入，待产品决策）、P2 其余。
+> 2026-08-10：P2-14 书签已落地（`addBookmark`/`bookmarks()` + `label` 事件，`session.ts:425-439`）；续读指引精确化（Read 截断提示带精确行号区间，`executor.ts`）。
 > 2026-08-05 第三轮（第一期 5 项）：检索加速（P1-12 的零依赖替代：git ls-files + gitignore 过滤）、stopReason 截断判失败（P1-10 ✅）、session_info 元数据事件（P2-14 前置）、Web 会话搜索（P2-17 ✅）、跨项目记忆开关。
 > 2026-08-05 第四轮：P0-3 diff 移出上下文（测量驱动 ✅）、P2-16 Bash 全量落盘（✅）、P2-15 AJV 参数校验（✅，类型强转 + 字段级报错 + wire 键名回显）。
 > 2026-08-06 第五轮（Pi 对照修正）：缓存隔离（`cacheRetention: "none"` 省略 cache_control——分支摘要已隔离 ✅，**压缩摘要于 2026-08-09 补上隔离**）、Write 对齐 Pi（无 diff、只报字节数 ✅）、**wire 键名统一**（消灭 camelCase 层：删 normalizeToolArgs/wireToolArgs/WIRE_TO_CAMEL 映射/validateArgs，全程 wire 键名 + schema minLength/minItems 承接非空规则，未知键由 additionalProperties 拒绝并回显 ✅）。provider 级 25% 向下抖动**未落地**（回合级重试未做抖动；Pi 公式记录备查，无对应代码）。
@@ -292,7 +293,7 @@ MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）�
 | # | 改造 | Pi 参照 | 说明 |
 |---|---|---|---|
 | 13 | **消息转换层（transform）** | transform-messages.ts：跳过 error/aborted 回合 + 孤儿 toolCall 补结果 + toolCallId 归一化 | ✅ 完整版已落地（2026-08-09）：`transformMessages`（src/model/transform-messages.ts）——toolCallId 重写 + 空 content 兜底 + **相邻 assistant 合并**（半截回合聚合）+ **孤儿 toolCall 补结果**（中断批次不再缺配对）+ **空 assistant 丢弃**（Anthropic 400 修复）；恢复路径 conversationFromRaw 同步聚合连续 text_delta；并行模式补发 tool_call 事件 |
-| 14 | **书签（label）与会话标题 entry** | `label`/`session_info` entry（session-manager.ts:1232-1253） | 长会话导航；MyAgent 标题在 index.json（重启可恢复），书签无 |
+| 14 | **书签（label）与会话标题 entry** | `label`/`session_info` entry（session-manager.ts:1232-1253） | ✅ `addBookmark`/`bookmarks()` + `label` 事件（`session.ts:425-439`，2026-08-10 校准）；标题经 `session_info` 事件恢复（index.json 已废除） |
 | 15 | **TypeBox 参数校验** | AJV + Value.Convert + coercer（validation.ts:285-317） | ✅ `args-validate.ts`（AJV 编译缓存 + coerceTypes 强转 + 字段级报错）：参数全程 wire 键名直接校验 inputSchema（2026-08-05 第四轮）；2026-08-06 第五轮随 wire 统一删除映射层，非空规则以 minLength/minItems 进 schema，未知键 additionalProperties 拒绝并回显 Received | 替代手写 validateArgs；报错更精确可定位字段；补"类型强转"语义（模型常发 string 数字） |
 | 16 | **Bash 超限全量落盘** | `/tmp/pi-bash-*.log` + `fullOutputPath`（bash-executor.ts:64-87） | ✅ 输出截断时全量 stdout/stderr 落盘 `<tmp>/myagent-bash-<pid>-<seq>.log`，details.fullOutputPath + summary 附路径（模型可 Read 查看）；abort/超时路径同样覆盖（2026-08-05 第四轮） | `traceOutput` 内存常驻的兜底；配合 P0-4 |
 | 17 | **会话搜索** | FTS5 / 流式扫描 + allMessagesText（session-manager.ts:687-765） | ✅ Web 端会话列表搜索：`firstMessage` 进 summary + 侧栏标题/首条消息过滤（不引 SQLite，2026-08-05 第三轮）；全文搜索仍可选 |
