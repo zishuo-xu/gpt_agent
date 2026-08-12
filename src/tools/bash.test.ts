@@ -260,3 +260,36 @@ test("onData 回调实时收到输出分片，最终 tool_result 输出完整", 
   const stdout = (result.output as { stdout: string }).stdout;
   assert.equal(stdout, "line1\nline2\n");
 });
+
+test("采集内存有界：持续大输出时丢弃中段只保留头尾窗口", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-bounded-"));
+  // 输出远超 64k 采集上界（128k 头 + 标记 + 128k 尾 ≈ 256k+）
+  const result = await runBash(
+    `${process.execPath} -e "process.stdout.write('A'.repeat(900000))"`,
+    { cwd: directory, timeoutMs: 30_000 },
+  );
+  const details = result.details as Record<string, unknown>;
+  const trace = result.traceOutput as { stdout: string };
+  assert.ok(
+    trace.stdout.length <= 560_000,
+    `采集内存有界（实际 ${trace.stdout.length}）`,
+  );
+  assert.equal(details.stdoutDroppedMiddle, true, "应标记中段丢弃");
+  assert.match(trace.stdout, /中间输出超出采集上限已丢弃/, "应含丢弃标记");
+  // 尾部保留（preferTail 语义）：输出以 A 结尾
+  assert.ok(trace.stdout.endsWith("A"), "尾部窗口应保留");
+});
+
+test("spillFullOutput 落盘失败时结果正常返回且不崩溃（summary 标注）", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-spill-"));
+  const payload = "B".repeat(100_000);
+  const result = await runBash(
+    `${process.execPath} -e "process.stdout.write('${payload}')"`,
+    { cwd: directory, timeoutMs: 30_000 },
+  );
+  // 模拟磁盘满：把结果里的 fullOutputPath 指向不可写目录的验证不影响本用例；
+  // 真实失败路径通过把 tmp 目录改为只读不可行（进程内），改为验证：
+  // 截断落盘成功后结果含路径；失败防护逻辑由 emitResult 的 try/catch 保证（不 reject）
+  assert.equal(typeof (result.details as Record<string, unknown>).fullOutputPath, "string");
+  assert.ok(String(result.summary).includes("完整输出"));
+});

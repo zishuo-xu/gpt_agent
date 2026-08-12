@@ -272,3 +272,26 @@ test("HTTP：SSE 响应解析（完整握手 + 工具往返）", async () => {
     server.close();
   }
 });
+
+test("stdio：server 进程崩溃时挂起请求立即失败（不空等超时）", async () => {
+  const client = await connectFake();
+  try {
+    // die 工具让 server 进程自杀：die 请求本身（挂起中）被立即拒绝，不空等超时
+    const started = Date.now();
+    await assert.rejects(
+      client.callTool("die", {}),
+      (error) => error instanceof McpError && /进程退出/.test(error.message),
+    );
+    assert.ok(
+      Date.now() - started < 1_500,
+      `挂起请求应随进程退出立即失败（实际 ${Date.now() - started}ms）`,
+    );
+    // 后续请求快速失败（未连接），不再有任何挂起
+    await assert.rejects(
+      client.callTool("echo", { text: "after-death" }),
+      (error) => error instanceof McpError && /未连接或已断开/.test(error.message),
+    );
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+});

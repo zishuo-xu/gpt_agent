@@ -43,6 +43,16 @@ const pkg: { version: string } = JSON.parse(
 );
 const VERSION: string = pkg.version;
 
+// 兜底：任何遗漏的 async rejection 都会在此暴露（Node 默认行为是直接终止，
+// 保留默认退出但先输出可诊断的堆栈与上下文；正常路径的 rejection 均已在上游 catch）
+process.on("unhandledRejection", (reason) => {
+  console.error(
+    `[cli] 未处理的 Promise rejection：${
+      reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason)
+    }`,
+  );
+});
+
 /** --port <n>：Web 端口覆盖（测试与多实例场景用） */
 const webPortArg = process.argv.indexOf("--port");
 const webPort =

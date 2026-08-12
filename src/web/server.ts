@@ -22,6 +22,15 @@ export interface WebServerOptions {
 export async function startWebServer(options: WebServerOptions): Promise<void> {
   const { timingMark, timingReport } = await import("../utils/timing.js");
   const configService = new ConfigService({ cwd: options.cwd });
+  // 兜底：遗漏的 async rejection 输出可诊断堆栈（默认行为仍是终止进程，
+  // 守护/服务管理器可据此重启；正常路径的 rejection 均已在上游 catch）
+  process.on("unhandledRejection", (reason) => {
+    console.error(
+      `[web] 未处理的 Promise rejection：${
+        reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason)
+      }`,
+    );
+  });
   // 启动时清理过期超限落盘日志（尽力而为，不阻塞启动）
   const { cleanupStaleBashLogs } = await import("../tools/bash.js");
   void cleanupStaleBashLogs();

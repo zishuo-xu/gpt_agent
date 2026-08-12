@@ -169,11 +169,7 @@ export class McpClient {
     if (this.#closed) return;
     this.#closed = true;
     this.#connected = false;
-    for (const [id, pending] of this.#pending) {
-      clearTimeout(pending.timer);
-      pending.reject(new McpError("MCP 连接已关闭"));
-      this.#pending.delete(id);
-    }
+    this.#failPending(new McpError("MCP 连接已关闭"));
     const child = this.#child;
     if (child) {
       this.#child = undefined;
@@ -227,15 +223,33 @@ export class McpClient {
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => this.#onStdoutData(chunk));
     child.on("error", (error) => {
+      // spawn 失败（ENOENT/EMFILE 等）：挂起请求立即失败，不空等超时
+      this.#connected = false;
+      this.#failPending(
+        new McpError(`MCP server“${this.name}”进程启动失败：${error.message}`),
+      );
       this.#emitter.emit("disconnected", error);
     });
     child.on("exit", (code) => {
       if (!this.#closed) {
-        // 崩溃/被杀：后续调用快速失败（#connected 已复位）
+        // 崩溃/被杀：挂起请求立即失败（原为空等 60s 超时，无人值守会假死数分钟），
+        // 后续调用快速失败（#connected 已复位）
         this.#connected = false;
+        this.#failPending(
+          new McpError(`MCP server“${this.name}”进程退出（code=${code}）`),
+        );
         this.#emitter.emit("disconnected", new Error(`进程退出（code=${code}）`));
       }
     });
+  }
+
+  /** 进程崩溃/关闭时让全部挂起请求立即失败（清定时器，防悬挂） */
+  #failPending(error: Error): void {
+    for (const [id, pending] of this.#pending) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+      this.#pending.delete(id);
+    }
   }
 
   #onStdoutData(chunk: string): void {

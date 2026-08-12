@@ -24,6 +24,28 @@ export interface BashOptions {
  */
 const OUTPUT_DRAIN_TIMEOUT_MS = 2_000;
 
+/**
+ * 输出采集内存上界（字符）。命令在截断判定（12k 字符）生效前可能持续输出，
+ * 无界拼接会被 `cat /dev/zero` 类命令打爆内存；达到上界后丢弃中段，
+ * 只保留头尾窗口（truncate 的 preferTail 语义仍可用尾部）。
+ * 256k 覆盖正常命令的完整落盘（旧测试 100k 输出仍全量），仅爆输出命令受限。
+ */
+const MAX_COLLECT_CHARS = 256_000;
+
+/** 滚动截断：拼接后超限则保留头尾窗口，丢弃中段（内存有界） */
+function appendBounded(
+  existing: string,
+  chunk: string,
+  onDropped: () => void,
+): string {
+  const next = existing + chunk;
+  if (next.length <= MAX_COLLECT_CHARS) return next;
+  onDropped();
+  const head = next.slice(0, MAX_COLLECT_CHARS / 2);
+  const tail = next.slice(-(MAX_COLLECT_CHARS / 2));
+  return `${head}\n…[中间输出超出采集上限已丢弃]…\n${tail}`;
+}
+
 /** 全量输出落盘序号（进程内自增，配合 pid 保证文件唯一） */
 let spillSequence = 0;
 
@@ -100,18 +122,34 @@ export async function runBash(
       stdio: "ignore",
     });
     child.unref();
-    const pid = child.pid ?? 0;
-    return {
-      summary: `命令已在后台启动（pid ${pid}）`,
-      output: {
-        background: true,
-        pid,
-        hint: "后台进程不阻塞当前循环；如需查看状态或输出请另行运行 ps / 日志命令。",
-      },
-      aborted: false,
-      isError: false,
-      details: { command, background: true, pid },
-    };
+    // spawn 失败（EMFILE/ENOENT 等）触发 error 事件；无监听器会崩进程。
+    // 成功时 pid 同步就绪、error 永不触发；失败时仅 error 回调 resolve。
+    return await new Promise<ToolExecutionResult>((resolve) => {
+      child.once("error", (error) => {
+        resolve({
+          summary: `后台命令启动失败：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          output: "",
+          aborted: false,
+          isError: true,
+        });
+      });
+      const pid = child.pid ?? 0;
+      if (pid > 0) {
+        resolve({
+          summary: `命令已在后台启动（pid ${pid}）`,
+          output: {
+            background: true,
+            pid,
+            hint: "后台进程不阻塞当前循环；如需查看状态或输出请另行运行 ps / 日志命令。",
+          },
+          aborted: false,
+          isError: false,
+          details: { command, background: true, pid },
+        });
+      }
+    });
   }
 
   return await new Promise<ToolExecutionResult>((resolve, reject) => {
@@ -123,36 +161,51 @@ export async function runBash(
     });
     let stdout = "";
     let stderr = "";
+    /** 采集滚动截断状态：超限时丢弃中段，只保留头尾窗口（内存有界，防 OOM） */
+    let stdoutDroppedMiddle = false;
+    let stderrDroppedMiddle = false;
     let settled = false;
     let drainTimer: NodeJS.Timeout | undefined;
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
+      stdout = appendBounded(stdout, chunk, () => {
+        stdoutDroppedMiddle = true;
+      });
       options.onData?.(chunk);
     });
     child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
+      stderr = appendBounded(stderr, chunk, () => {
+        stderrDroppedMiddle = true;
+      });
       options.onData?.(chunk);
     });
 
     /**
      * 统一出口：截断时把全量输出落盘并把路径带进 summary/details。
-     * 异步写盘不阻塞采集流程（resolve 前 await 保证结果与文件一致）。
+     * 异步写盘不阻塞采集流程（resolve 前 await 保证结果与文件一致）；
+     * 落盘失败（磁盘满等）降级为 summary 标注，绝不让 emitResult 拒绝
+     * （调用点为 void 无 catch，rejection 会直接崩掉整个进程）。
      */
     const emitResult = async (result: ToolExecutionResult): Promise<void> => {
       const details = result.details as
         | { truncated?: boolean }
         | undefined;
       if (details?.truncated) {
-        const fullPath = await spillFullOutput(stdout, stderr);
-        if (fullPath) {
-          result.details = {
-            ...(result.details as Record<string, unknown>),
-            fullOutputPath: fullPath,
-          };
-          result.summary = `${result.summary}，完整输出：${fullPath}`;
+        try {
+          const fullPath = await spillFullOutput(stdout, stderr);
+          if (fullPath) {
+            result.details = {
+              ...(result.details as Record<string, unknown>),
+              fullOutputPath: fullPath,
+            };
+            result.summary = `${result.summary}，完整输出：${fullPath}`;
+          }
+        } catch (error) {
+          result.summary = `${result.summary}（完整输出落盘失败：${
+            error instanceof Error ? error.message : String(error)
+          }）`;
         }
       }
       resolve(result);
@@ -212,9 +265,11 @@ export async function runBash(
           stderrChars: stderr.length,
           truncated: boundedStdout.truncated || boundedStderr.truncated,
           outputIncomplete: true,
+          ...(stdoutDroppedMiddle ? { stdoutDroppedMiddle: true } : {}),
+          ...(stderrDroppedMiddle ? { stderrDroppedMiddle: true } : {}),
           ...(reason === "timeout" ? { timedOut: true } : {}),
         },
-      });
+      }).catch(() => undefined);
     };
     const onAbort = (): void => terminateAndResolve("abort");
 
@@ -268,8 +323,10 @@ export async function runBash(
           stderrChars: stderr.length,
           truncated,
           outputIncomplete,
+          ...(stdoutDroppedMiddle ? { stdoutDroppedMiddle: true } : {}),
+          ...(stderrDroppedMiddle ? { stderrDroppedMiddle: true } : {}),
         },
-      });
+      }).catch(() => undefined);
     };
 
     // 以主进程退出为准（不依赖 close：孙进程持有 pipe 句柄时 close 永不触发）；
