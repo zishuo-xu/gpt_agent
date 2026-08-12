@@ -1949,6 +1949,25 @@
   font-size: 11px;
 }
 
+/* 无人值守任务模式开关（Composer 底部左侧） */
+.run-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #8d99a8;
+  font-size: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.run-mode-toggle input {
+  accent-color: #5369b7;
+}
+
+.composer-footer .run-mode-toggle + span {
+  margin-left: auto;
+}
+
 /* ========== 会话页：任务边界确认卡 ========== */
 
 .run-bounds-card {

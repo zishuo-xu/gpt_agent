@@ -52,6 +52,9 @@ export function Composer(props: {
   busy: boolean;
   submitting: boolean;
   selected: boolean;
+  /** 无人值守任务模式：提交时自动加 /run 前缀（走任务边界确认链路） */
+  runMode: boolean;
+  onRunModeChange: (runMode: boolean) => void;
   onSubmit: (
     boundsConfirmed?: boolean,
     steer?: boolean,
@@ -87,6 +90,19 @@ export function Composer(props: {
         rows={3}
       />
       <div className="composer-footer">
+        <label
+          className="run-mode-toggle"
+          title="开启后以无人值守任务运行（自动加 /run，可设边界/预算/截止）"
+        >
+          <input
+            type="checkbox"
+            checked={props.runMode}
+            onChange={(event) =>
+              props.onRunModeChange(event.target.checked)
+            }
+          />
+          无人值守任务
+        </label>
         <span>
           {props.busy
             ? "排队发送 · 插队打断会中断剩余工具调用"
@@ -112,11 +128,13 @@ export function Composer(props: {
         >
           {props.submitting
             ? "发送中…"
-            : props.selected
-              ? props.busy
-                ? "排队发送"
-                : "发送"
-              : "启动任务"}
+            : props.runMode
+              ? "启动任务"
+              : props.selected
+                ? props.busy
+                  ? "排队发送"
+                  : "发送"
+                : "启动任务"}
         </button>
       </div>
     </div>

@@ -741,6 +741,78 @@ describe("TaskScopeTemplates（新建面板范围建议）", () => {
   });
 });
 
+describe("Composer（无人值守任务模式开关）", () => {
+  before(() => {
+    try {
+      GlobalRegistrator.register();
+    } catch {
+      // 已注册：忽略
+    }
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  async function renderComposer(runMode: boolean) {
+    const [{ act }, { createRoot }, { Composer }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./session-composer"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const changed: boolean[] = [];
+    await act(async () => {
+      root.render(
+        <Composer
+          message=""
+          setMessage={() => undefined}
+          busy={false}
+          submitting={false}
+          selected
+          runMode={runMode}
+          onRunModeChange={(value) => {
+            changed.push(value);
+          }}
+          onSubmit={async () => undefined}
+        />,
+      );
+    });
+    return { container, root, act, changed };
+  }
+
+  it("任务模式开关渲染且可切换；开启后按钮文案变为「启动任务」", async () => {
+    const off = await renderComposer(false);
+    const toggle = off.container.querySelector(
+      ".run-mode-toggle input",
+    ) as HTMLInputElement | null;
+    assert.ok(toggle, "应渲染无人值守任务开关");
+    assert.equal(toggle!.checked, false);
+    assert.match(off.container.textContent ?? "", /无人值守任务/);
+    // 关闭时：已有会话按钮为「发送」
+    const sendButton = Array.from(
+      off.container.querySelectorAll("button.save-button"),
+    ).at(-1);
+    assert.match(sendButton?.textContent ?? "", /发送/);
+    // 点击开关 → 通知上层切换
+    await off.act(async () => {
+      toggle!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    assert.deepEqual(off.changed, [true], "点击开关应通知上层");
+    await off.act(async () => off.root.unmount());
+
+    // 开启时：按钮文案变为「启动任务」
+    const on = await renderComposer(true);
+    const onSendButton = Array.from(
+      on.container.querySelectorAll("button.save-button"),
+    ).at(-1);
+    assert.match(onSendButton?.textContent ?? "", /启动任务/);
+    assert.match(on.container.textContent ?? "", /无人值守任务/);
+    await on.act(async () => on.root.unmount());
+  });
+});
+
 describe("ItemCard（subtask 卡片）", () => {
   before(() => {
     try {

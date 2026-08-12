@@ -92,6 +92,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
     useState(false);
   const [runBoundsPreview, setRunBoundsPreview] =
     useState<RunBoundsPreview | null>(null);
+  /** 无人值守任务模式：提交自动加 /run 前缀（任务边界确认链路） */
+  const [runMode, setRunMode] = useState(false);
   const chatStreamRef = useRef<HTMLDivElement>(null);
   const previousStatuses = useRef<Record<string, SessionStatus>>({});
   const seenSeqs = useRef<Set<number>>(new Set());
@@ -458,8 +460,12 @@ export function SessionApp(props: { initialSessionId?: string }) {
   }
 
   async function submitMessage(boundsConfirmed = false, steer = false) {
-    const content = message.trim();
+    let content = message.trim();
     if (!content) return;
+    // 无人值守任务模式：自动加 /run 前缀（用户已手动输入时不再重复）
+    if (runMode && !content.startsWith("/run")) {
+      content = `/run ${content}`;
+    }
     setSubmitting(true);
     setError("");
     try {
@@ -719,6 +725,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
                       busy={busy}
                       submitting={submitting}
                       selected
+                      runMode={runMode}
+                      onRunModeChange={setRunMode}
                       onSubmit={submitMessage}
                     />
                   </>
@@ -774,6 +782,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   runBoundsPreview={runBoundsPreview}
                   submitting={submitting}
                   message={message}
+                  runMode={runMode}
+                  onRunModeChange={setRunMode}
                   onEnvChange={setNewTaskEnv}
                   onProjectChange={setNewTaskProject}
                   onPermissionMode={setPermissionMode}
