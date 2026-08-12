@@ -402,3 +402,22 @@ test("v1 写：approvals 审批 + interrupt 中断", async () => {
   const interruptBody = await interrupt.json();
   assert.equal(interruptBody.data.interrupted, true);
 });
+
+test("v1 增量拉取：tool_result 跨批次仍能映射出 tool 名（模块级缓存）", () => {
+  // 批次 1：只有 tool_call
+  const first = mapV1Events([
+    record(1, {
+      type: "tool_call",
+      call: { id: "cross-batch", tool: "Write", target: "x.txt", args: { file_path: "x.txt" } },
+    }),
+  ]);
+  assert.equal(first[0]?.type, "tool.call");
+  // 批次 2：after=1 增量只有 tool_result——tool 名必须从缓存补全（原恒为空串）
+  const second = mapV1Events([
+    record(2, { type: "tool_result", callId: "cross-batch", summary: "已写入" }),
+  ]);
+  assert.equal(second[0]?.type, "tool.result");
+  if (second[0]?.type === "tool.result") {
+    assert.equal(second[0].tool, "Write", "跨批次 tool_result 应带 tool 名");
+  }
+});

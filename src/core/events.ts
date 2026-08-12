@@ -27,10 +27,17 @@ export class SessionStore {
   #writeTail: Promise<void> = Promise.resolve();
   /** 最近一次写盘失败（flush 时显式报告一次后清除） */
   #writeError: unknown | undefined;
+  /** 关闭后事件不再落盘（会话删除场景：文件 unlink 后不得被重建） */
+  #closed = false;
 
   constructor(filePath: string, sessionId: string) {
     this.#filePath = filePath;
     this.#sessionId = sessionId;
+  }
+
+  /** 关闭写链：后续事件静默丢弃（删除会话时调用，防 unlink 后文件被重建） */
+  close(): void {
+    this.#closed = true;
   }
 
   attach(
@@ -38,6 +45,7 @@ export class SessionStore {
     getBranchId?: () => string,
   ): () => void {
     return bus.subscribe((event) => {
+      if (this.#closed) return;
       this.#writeTail = this.#writeTail
         .then(async () => {
           await this.#initializeSequence();
@@ -121,14 +129,22 @@ export class TraceStore {
   #turn = 0;
   #initialized = false;
   #writeTail: Promise<void> = Promise.resolve();
+  /** 关闭后不再落盘（会话删除场景） */
+  #closed = false;
 
   constructor(filePath: string) {
     this.#filePath = filePath;
   }
 
+  /** 关闭写链：后续 trace 静默丢弃 */
+  close(): void {
+    this.#closed = true;
+  }
+
   record(
     trace: Omit<AgentTurnTrace, "turn" | "ts">,
   ): void {
+    if (this.#closed) return;
     this.#writeTail = this.#writeTail
       .then(async () => {
         await this.#initializeTurn();

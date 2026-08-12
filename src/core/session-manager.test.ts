@@ -950,3 +950,64 @@ test("恢复后事件 seq 与磁盘对齐：缺号恢复不产生重复或空洞
   await restoredManager.releaseLock();
 });
 
+
+test("deleteSession 在会话运行中删除：中断后等待收尾，文件不被重建", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-del-running-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-del-running-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-del-running-home-"),
+  );
+  const configService = new ConfigService({ cwd, homeDir });
+  const manager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    modelFactory: (messages) =>
+      new ConversationAgentModel(
+        new ScriptedClient([
+          // 真实执行 1s 的 bash：制造"工具执行中删除"窗口
+          {
+            text: "",
+            toolCalls: [
+              {
+                id: "slow-bash",
+                tool: "Bash",
+                target: "sleep 1",
+                args: { command: "sleep 1" },
+              },
+            ],
+            usage: { input: 12, output: 3, cached: 2 },
+          },
+          { text: "已中止。", toolCalls: [], usage: { input: 12, output: 3, cached: 2 } },
+        ]),
+        messages,
+      ),
+  });
+  const session = await manager.createSession({
+    title: "运行中删除",
+    mode: "trust",
+  });
+  const projectKey = Buffer.from(cwd).toString("base64url");
+  const jsonlPath = path.join(
+    stateDir,
+    "projects",
+    projectKey,
+    "sessions",
+    `${session.id}.jsonl`,
+  );
+
+  const sendPromise = session.sendInput("开始");
+  // 等 bash 进入执行窗口（processing 中）
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(session.isProcessing(), true, "删除前应在处理中");
+
+  const deleted = await manager.deleteSession(session.id);
+  assert.equal(deleted, true);
+  await sendPromise.catch(() => undefined);
+  // 残留写链排空后，文件必须不存在且不再出现
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await assert.rejects(() => readFile(jsonlPath, "utf8"), "jsonl 不应复活");
+});

@@ -483,6 +483,15 @@ export class AgentSession {
     return this.#processing;
   }
 
+  /**
+   * 会话删除前的收尾标记：关闭事件/追踪落盘写链（文件 unlink 后不得被重建），
+   * 内存事件流保留（当前订阅者仍可读到已记录内容）。
+   */
+  markClosed(): void {
+    this.#store.close();
+    this.#traceStore.close();
+  }
+
   applyConfigChange(config: MyAgentConfig): void {
     this.#permissions.setMode(config.permissions.mode);
     this.#permissions.setRules([

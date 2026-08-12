@@ -189,9 +189,16 @@ export class AgentSessionManager {
     const session = this.#sessions.get(id);
     if (!session) return false;
     if (session.isProcessing()) {
-      // 运行中的会话先硬中止，避免删除后仍向磁盘追加写入
+      // 运行中的会话先硬中止，并等待工具轮结束（中断异步生效）；
+      // 否则 tool_result(aborted) 会在 unlink 后落盘 → 文件被重建 → 会话"复活"
       session.interrupt();
+      const deadline = Date.now() + 5_000;
+      while (session.isProcessing() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
     }
+    // 关闭写链：unlink 后残留事件（如中止中的工具结果）不再重建文件
+    session.markClosed();
     this.#sessions.delete(id);
     await this.flush();
     for (const suffix of [".jsonl", ".trace.jsonl"]) {

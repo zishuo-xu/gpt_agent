@@ -305,13 +305,20 @@ export type V1Event =
 
 /**
  * 内部事件 → v1 白名单契约（多对一折叠；未知类型永不破坏契约，折叠为 system.info）。
- * tool_result 的 tool 名依赖同流内前置 tool_call，跨批次增量拉取由调用方按需全量重扫。
+ * tool_result 的 tool 名依赖同流内前置 tool_call；增量拉取（after=N 轮询）跨批次
+ * 时经模块级缓存补全（原每次调用新建 Map，跨批 tool 名恒为空串，消费者被迫全量重扫）。
  */
+const v1ToolNameCache = new Map<string, string>();
+/** 缓存上限：超限整体清空（防御性；正常会话远达不到） */
+const V1_TOOL_CACHE_MAX = 10_000;
+
 export function mapV1Events(records: RecordedEvent[]): V1Event[] {
-  const toolNames = new Map<string, string>();
   const out: V1Event[] = [];
   for (const record of records) {
-    out.push(mapV1Event(record, toolNames));
+    out.push(mapV1Event(record, v1ToolNameCache));
+  }
+  if (v1ToolNameCache.size > V1_TOOL_CACHE_MAX) {
+    v1ToolNameCache.clear();
   }
   return out;
 }
