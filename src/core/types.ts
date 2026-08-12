@@ -12,6 +12,29 @@ export interface TodoItem {
   status: TodoStatus;
 }
 
+/** 任务执行账本单元状态（系统自动记账 + 模型显式确认双通道合并） */
+export type LedgerStatus =
+  | "pending"
+  | "in_progress"
+  | "done"
+  | "verified"
+  | "blocked";
+
+/** 任务执行账本单元：文件或逻辑子任务的显式进度记录 */
+export interface LedgerUnit {
+  /** 稳定标识：规范化相对路径（文件）或任务项 slug */
+  id: string;
+  kind: "file" | "task";
+  /** 人类可读（文件相对路径） */
+  label: string;
+  status: LedgerStatus;
+  /** 完成说明 / 卡点原因 */
+  note?: string;
+  /** 验证证据（命令 + 关键输出摘要） */
+  evidence?: string;
+  updatedAt: string;
+}
+
 export interface PermissionRule {
   effect: PermissionEffect;
   pattern: string;
@@ -121,6 +144,12 @@ export type AgentEvent =
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "todo_update"; todos: TodoItem[] }
+  | {
+      type: "ledger_update";
+      taskId: string;
+      /** 增量变更的单元（恢复时按 taskId 投影重建账本） */
+      unit: LedgerUnit;
+    }
   | { type: "tool_call"; call: ToolCall }
   | {
       type: "tool_execution_update";

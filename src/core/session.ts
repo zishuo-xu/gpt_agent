@@ -37,6 +37,7 @@ import {
   interruptedTaskFrom,
   resumePrompt,
 } from "./session-restore.js";
+import { TaskLedger, normalizeLedgerPath } from "./task-ledger.js";
 import type {
   AgentEvent,
   ApprovalAnswer,
@@ -67,6 +68,7 @@ interface QueuedInput {
 
 export class AgentSession {
   readonly id: string;
+  readonly #cwd: string;
   title: string;
   readonly createdAt: string;
   readonly #bus = new AgentEventBus();
@@ -113,6 +115,8 @@ export class AgentSession {
   #taskBox: TaskBox | undefined;
   #taskStopReason: "deadline" | "budget" | undefined;
   #taskHardStopped = false;
+  /** 任务执行账本（按 taskId 索引；事件流投影 + 运行期记账双入口，保留至会话结束供续跑取用） */
+  readonly #ledgerByTask = new Map<string, TaskLedger>();
   /** /run 任务期审批超时（--approve-timeout；任务期覆盖会话级配置，结束恢复） */
   #taskApprovalTimeoutMs: number | undefined;
   /** /run 任务期间模型重试+fallback 全部耗尽（sendInput 捕获后置位；
@@ -157,6 +161,7 @@ export class AgentSession {
     files?: AtomicFileTools;
   }) {
     this.id = options.id;
+    this.#cwd = options.cwd;
     this.title = options.title;
     this.createdAt =
       options.restoredEvents?.[0]?.ts ?? new Date().toISOString();
@@ -335,6 +340,10 @@ export class AgentSession {
         });
         // 独立计数器从最后合法记录续（磁盘缺号不产生内存空洞）
         if (record.seq > this.#eventSeq) this.#eventSeq = record.seq;
+        // 账本投影与运行期记账共用同一入口（事件流是唯一事实源）
+        if (record.event.type === "ledger_update") {
+          this.#applyLedgerEvent(record.event);
+        }
         this.#state.apply(record.event, this.#stateDeps);
       }
       if (
@@ -662,6 +671,23 @@ export class AgentSession {
       resumeTaskId,
     );
     this.#taskBox = taskBox;
+    // 任务执行账本：续跑复用已投影的账本（同一进程内 interrupt 后 / 崩溃恢复后），新任务新建
+    const ledger =
+      this.#ledgerByTask.get(taskBox.id) ?? new TaskLedger(taskBox.id);
+    this.#ledgerByTask.set(taskBox.id, ledger);
+    // 系统自动记账通道：Edit/MultiEdit/Write 实际写入后标记 done（事件流增量记录）
+    this.#tools.setFileWrittenListener(async (absPath) => {
+      const unit = ledger.markFileWritten(
+        normalizeLedgerPath(this.#cwd, absPath),
+      );
+      if (unit) {
+        this.#bus.emit({
+          type: "ledger_update",
+          taskId: ledger.taskId,
+          unit,
+        });
+      }
+    });
     this.#taskStopReason = undefined;
     this.#taskHardStopped = false;
     this.#taskModelFailed = false;
@@ -776,6 +802,7 @@ export class AgentSession {
         mode: previousMode,
       });
       this.#taskBox = undefined;
+      this.#tools.setFileWrittenListener(undefined);
       this.#bus.emit({
         type: "run_finished",
         taskId: taskBox.id,
@@ -808,6 +835,11 @@ export class AgentSession {
       taskId: this.#interruptedTask.taskId,
       description: this.#interruptedTask.description,
     };
+  }
+
+  /** 任务执行账本只读访问（Web 面板展示 / 续跑注入用）；无则 undefined */
+  ledgerFor(taskId: string): TaskLedger | undefined {
+    return this.#ledgerByTask.get(taskId);
   }
 
   /**
@@ -903,7 +935,23 @@ export class AgentSession {
     };
     this.#events.push(record);
     this.#updatedAt = record.ts;
+    if (event.type === "ledger_update") {
+      // 账本投影：恢复重放 + 运行期记账共用同一入口（事件流是唯一事实源）
+      this.#applyLedgerEvent(event);
+    }
     this.#state.apply(event, this.#stateDeps);
+  }
+
+  #applyLedgerEvent(event: Extract<AgentEvent, { type: "ledger_update" }>): void {
+    const ledger = this.#ledgerByTask.get(event.taskId);
+    if (ledger) {
+      ledger.applyUpdate(event.unit);
+    } else {
+      this.#ledgerByTask.set(
+        event.taskId,
+        new TaskLedger(event.taskId, [event.unit]),
+      );
+    }
   }
 
   async #checkTaskBox(): Promise<{

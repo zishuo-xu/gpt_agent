@@ -82,6 +82,14 @@ export class ToolExecutor {
   readonly #cwd: string;
   readonly #taskHandler: TaskHandler | undefined;
   readonly #plugins: PluginToolRegistry;
+  /**
+   * 文件实际写入监听（任务执行账本用）：Edit/MultiEdit/Write 成功后回调
+   * **解析后的绝对路径**。由会话层在 /run 任务期注入、任务结束清除；
+   * 未注入时零行为变化。回调抛错不得影响工具结果（记账失败仅记录，不阻断执行）。
+   */
+  #fileWrittenListener:
+    | ((filePath: string) => void | Promise<void>)
+    | undefined;
 
   constructor(
     cwd: string,
@@ -95,6 +103,13 @@ export class ToolExecutor {
     this.todos = todos;
     this.#taskHandler = taskHandler;
     this.#plugins = plugins;
+  }
+
+  /** 设置/清除文件写入监听（任务级，由会话层管理生命周期） */
+  setFileWrittenListener(
+    listener: ((filePath: string) => void | Promise<void>) | undefined,
+  ): void {
+    this.#fileWrittenListener = listener;
   }
 
   async execute(
@@ -272,6 +287,7 @@ export class ToolExecutor {
           args.replace_all,
           signal,
         );
+        await this.#notifyFileWritten(this.#resolve(args.file_path));
         // diff 移出 LLM 上下文（Pi：content 只报"替换 N 处"，diff 进 details 供 UI）
         return {
           summary: `已编辑 ${args.file_path}`,
@@ -289,6 +305,7 @@ export class ToolExecutor {
           args.edits,
           signal,
         );
+        await this.#notifyFileWritten(this.#resolve(args.file_path));
         return {
           summary: `已完成 ${args.file_path} 的 ${args.edits.length} 项编辑`,
           output: `已完成 ${args.file_path} 的 ${args.edits.length} 项编辑`,
@@ -306,6 +323,7 @@ export class ToolExecutor {
           args.content,
           signal,
         );
+        await this.#notifyFileWritten(this.#resolve(args.file_path));
         // 参照 Pi write.ts：Write 不带 diff（模型知道写入内容），只报字节数；
         // 大文件不产生 details.diff，避免事件流持久化膨胀
         return {
@@ -381,6 +399,17 @@ export class ToolExecutor {
 
   #resolve(filePath: string): string {
     return path.isAbsolute(filePath) ? filePath : path.join(this.#cwd, filePath);
+  }
+
+  /** 文件写入成功后通知监听（错误隔离：记账失败不影响工具结果与主循环） */
+  async #notifyFileWritten(filePath: string): Promise<void> {
+    const listener = this.#fileWrittenListener;
+    if (!listener) return;
+    try {
+      await listener(filePath);
+    } catch {
+      // 记账失败静默：执行账本是可观测性增强，不阻断编码主流程
+    }
   }
 }
 

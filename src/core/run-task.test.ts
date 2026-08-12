@@ -732,3 +732,116 @@ test("硬停止回滚只撤销任务期编辑——任务前交互编辑保留",
     assert.equal(finished.reason, "deadline");
   }
 });
+
+test("任务执行账本：/run 中 Write 触发 ledger_update（系统自动记账链路）", async () => {
+  const cwd = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-ledger-"),
+  );
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-ledger-state-"),
+  );
+  const client = new ScriptedClient([
+    response("", [
+      {
+        id: "w1",
+        tool: "Write",
+        target: "out.txt",
+        args: { file_path: "out.txt", content: "ledger" },
+      },
+    ]),
+    response("任务完成"),
+  ]);
+  const session = new AgentSession({
+    id: "ledger-test",
+    title: "账本任务",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(client, []),
+    stateDir,
+  });
+  const events: AgentEvent[] = [];
+  session.subscribe((record) => events.push(record.event));
+
+  await session.runTask({
+    description: "写一个文件",
+    permission: "trust",
+    hardRules: [],
+    semanticBounds: [],
+  });
+
+  // 文件确实写入
+  assert.equal(await readFile(path.join(cwd, "out.txt"), "utf8"), "ledger");
+
+  // ledger_update 事件出现且单元为规范化相对路径 + done 状态
+  const updates = events.filter(
+    (event): event is Extract<AgentEvent, { type: "ledger_update" }> =>
+      event.type === "ledger_update",
+  );
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0]?.unit.id, "out.txt");
+  assert.equal(updates[0]?.unit.kind, "file");
+  assert.equal(updates[0]?.unit.status, "done");
+  assert.match(updates[0]?.unit.note ?? "", /待验证/);
+});
+
+test("账本恢复：进程重启后 restore 重放 ledger_update 事件重建账本", async () => {
+  const cwd = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-ledger-restore-"),
+  );
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-ledger-restore-state-"),
+  );
+  const client = new ScriptedClient([
+    response("", [
+      {
+        id: "w1",
+        tool: "Write",
+        target: "src/one.ts",
+        args: { file_path: "src/one.ts", content: "// one" },
+      },
+    ]),
+    response("任务完成"),
+  ]);
+  const first = new AgentSession({
+    id: "restore-a",
+    title: "第一段",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(client, []),
+    stateDir,
+  });
+  const records: Array<{ seq: number; ts: string; event: AgentEvent }> = [];
+  first.subscribe((record) => records.push(record));
+
+  await first.runTask({
+    description: "写文件",
+    permission: "trust",
+    hardRules: [],
+    semanticBounds: [],
+  });
+  const started = records.find(
+    (record) => record.event.type === "run_started",
+  );
+  assert.ok(started);
+  const taskId =
+    started?.event.type === "run_started" ? started.event.taskId : "";
+
+  // 模拟进程重启：用事件流记录重建会话（restore 路径）
+  const second = new AgentSession({
+    id: "restore-b",
+    title: "第二段",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(new ScriptedClient([]), []),
+    stateDir,
+    restoredEvents: records as Parameters<typeof AgentSession>[0]["restoredEvents"],
+  });
+
+  // 账本从事件流投影重建：单元为 done（系统自动记录）
+  const ledger = second.ledgerFor(taskId);
+  assert.ok(ledger, "restore 后应能从事件流重建账本");
+  const snapshot = ledger?.snapshot();
+  assert.equal(snapshot?.units.length, 1);
+  assert.equal(snapshot?.units[0]?.id, "src/one.ts");
+  assert.equal(snapshot?.units[0]?.status, "done");
+});
