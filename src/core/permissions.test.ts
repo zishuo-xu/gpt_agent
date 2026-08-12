@@ -149,3 +149,63 @@ test("remember：内置工具维持精确签名记忆", () => {
     "不同命令不放行",
   );
 });
+
+test("Bash 只读链：全段 allow 放行，段级 deny/ask 拦截", () => {
+  const engine = new PermissionEngine("normal", DEFAULT_PERMISSION_RULES);
+  const bash = (target: string): ToolCall => ({
+    id: target,
+    tool: "Bash",
+    target,
+    args: { command: target },
+  });
+  // 全段只读 → 放行
+  assert.equal(engine.judge(bash("pwd && ls -la")), "allow");
+  assert.equal(engine.judge(bash("ls -la; pwd")), "allow");
+  assert.equal(engine.judge(bash("git status && git diff")), "allow");
+  assert.equal(engine.judge(bash("pwd")), "allow", "单段 pwd 由整串规则放行");
+  assert.equal(engine.judge(bash("ls -la 2>&1 | head && pwd")), "allow", "重定向/管道留在段内");
+  assert.equal(engine.judge(bash("find . -maxdepth 3 -not -path './node_modules*' | sort")), "allow", "只读 find 放行");
+  assert.equal(engine.judge(bash("cat package.json && ls")), "allow", "cat 链放行");
+  assert.equal(engine.judge(bash("ls node_modules | head -50")), "allow", "ls 管道 head 放行");
+  // find 的执行形态必须拦截（删除通道）
+  assert.equal(engine.judge(bash("find . -exec rm -rf {} \\;")), "deny");
+  assert.equal(engine.judge(bash("find . -delete")), "deny");
+  // 段级 deny 拦截——前缀 allow 规则（Bash(pwd*)/Bash(ls*)）绕不过去
+  assert.equal(engine.judge(bash("pwd && rm -rf build")), "deny");
+  assert.equal(engine.judge(bash("ls && rm -fr build")), "deny");
+  assert.equal(engine.judge(bash("ls && git reset --hard HEAD")), "deny");
+  // 段级 ask 拦截——修复整串前缀 allow 绕过显式 ask 的洞
+  assert.equal(engine.judge(bash("ls && git push origin main")), "ask");
+  assert.equal(engine.judge(bash("pwd && git commit -m x")), "ask");
+  // 含未知命令的链不因前缀放行
+  assert.equal(engine.judge(bash("pwd && node script.js")), "ask");
+  assert.equal(engine.judge(bash("pwd && whatever")), "ask");
+});
+
+test("Bash 只读链：引号内操作符不切分", () => {
+  const engine = new PermissionEngine("normal", DEFAULT_PERMISSION_RULES);
+  const bash = (target: string): ToolCall => ({
+    id: target,
+    tool: "Bash",
+    target,
+    args: { command: target },
+  });
+  assert.equal(engine.judge(bash('ls "a && b" && pwd')), "allow", "双引号内 && 不切分");
+  assert.equal(engine.judge(bash("ls 'x; y' && pwd")), "allow", "单引号内 ; 不切分");
+  assert.equal(engine.judge(bash("ls -la 2>&1")), "allow", "重定向 & 不切分");
+});
+
+test("Bash 只读链：strict 全询问；trust 尊重段级 ask/deny", () => {
+  const bash = (target: string): ToolCall => ({
+    id: target,
+    tool: "Bash",
+    target,
+    args: { command: target },
+  });
+  const strict = new PermissionEngine("strict", DEFAULT_PERMISSION_RULES);
+  assert.equal(strict.judge(bash("pwd && ls -la")), "ask", "strict 下 Bash 链一律询问");
+  const trust = new PermissionEngine("trust", DEFAULT_PERMISSION_RULES);
+  assert.equal(trust.judge(bash("pwd && ls")), "allow");
+  assert.equal(trust.judge(bash("pwd && git push origin main")), "ask", "trust 尊重段级显式 ask");
+  assert.equal(trust.judge(bash("ls && rm -rf x")), "deny", "trust 也拒绝段级危险命令");
+});
