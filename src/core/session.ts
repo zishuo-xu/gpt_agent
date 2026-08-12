@@ -45,7 +45,6 @@ import type {
   PermissionRule,
   RecordedEvent,
   SessionBranch,
-  TodoItem,
 } from "./types.js";
 
 import type {

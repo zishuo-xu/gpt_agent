@@ -17,7 +17,6 @@ import type {
   ToolExecutionResult,
 } from "./types.js";
 import type { ToolExecutor } from "../tools/executor.js";
-import { ModelHttpError } from "../model/client.js";
 import {
   classifyModelError,
   errorMessageOf,
