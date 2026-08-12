@@ -7,7 +7,8 @@ import type { WebSessionManager } from "./sessions.js";
 /** 解析请求指向的项目资源（未传 project 时用启动目录项目，向后兼容） */
 export interface ResolvedProject {
   configService: ConfigService;
-  sessionManager: WebSessionManager;
+  /** 无会话管理器（未启用 Web 会话服务）时为 undefined，调用方需防御 */
+  sessionManager: WebSessionManager | undefined;
   memoryService: MemoryService;
 }
 

@@ -4,7 +4,7 @@ import { MemoryService } from "./memory.js";
 import { ProjectRegistry } from "./project-registry.js";
 import { SchedulerHub } from "./scheduler-hub.js";
 import { registerConfigRoutes } from "./routes-config.js";
-import type { WebRouteDeps } from "./routes-context.js";
+import type { ResolvedProject, WebRouteDeps } from "./routes-context.js";
 import { registerMiscRoutes } from "./routes-misc.js";
 import { registerProjectRoutes } from "./routes-projects.js";
 import { registerScheduledRoutes } from "./routes-scheduled.js";
@@ -35,18 +35,14 @@ export function createWebApp(
   /** 解析请求指向的项目资源；未传 project 时用启动目录项目（向后兼容）。 */
   async function resolveProject(context: {
     req: { query: (k: string) => string | undefined };
-  }): Promise<{
-    configService: ConfigService;
-    sessionManager: WebSessionManager;
-    memoryService: MemoryService;
-  }> {
+  }): Promise<ResolvedProject> {
     const key = context.req.query("project");
     if (!key) {
       // 未指定项目：默认（启动目录）单例
       if (!sessionManager) {
         return {
           configService,
-          sessionManager: undefined as unknown as WebSessionManager,
+          sessionManager: undefined,
           memoryService,
         };
       }
