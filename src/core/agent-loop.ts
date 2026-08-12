@@ -3,6 +3,13 @@ import {
   PermissionEngine,
   type PermissionVerdict,
 } from "./permissions.js";
+import { computeMissedTokens, missedCost } from "./cache-stats.js";
+import {
+  emitDeniedTool,
+  emitToolResult,
+  executeTool,
+  type ToolTraceItem,
+} from "./tool-batch.js";
 import type {
   ApprovalHandler,
   ModelPricing,
@@ -11,7 +18,11 @@ import type {
 } from "./types.js";
 import type { ToolExecutor } from "../tools/executor.js";
 import { ModelHttpError } from "../model/client.js";
-import { classifyModelError } from "../model/error-policy.js";
+import {
+  classifyModelError,
+  errorMessageOf,
+  retryAfterMsOf,
+} from "../model/error-policy.js";
 import { isToolName, TOOL_NAMES } from "../shared/tool-names.js";
 import { usageCostCny } from "../utils/cost.js";
 import { abortableSleep } from "../utils/sleep.js";
@@ -250,12 +261,7 @@ export class AgentLoop {
     verdicts: Array<{ call: ToolCall; verdict: PermissionVerdict }>,
     turnPolicy: { stop?: boolean; finalOnly?: boolean } | undefined,
     signal: AbortSignal,
-    traceTools: Array<{
-      call: ToolCall;
-      permission: string;
-      result?: unknown;
-      ms: number;
-    }>,
+    traceTools: ToolTraceItem[],
   ): Promise<void> {
     // 先统一 emit tool_call（与串行路径一致）：事件流完整，崩溃恢复时
     // tool_result 按 callId 配对不丢（此前并行路径缺 tool_call 事件导致恢复丢失）
@@ -268,20 +274,22 @@ export class AgentLoop {
         return { call, verdict, state: "skipped" as const };
       }
       if (verdict === "deny") {
-        const reason = "命中 deny 规则，不能临时强制放行";
-        this.#bus.emit({ type: "permission_denied", call, reason });
-        this.#model.acceptToolDenied?.(call, reason);
-        return { call, verdict, state: "denied" as const, reason };
+        emitDeniedTool(this.#bus, this.#model, traceTools, {
+          call,
+          reason: "命中 deny 规则，不能临时强制放行",
+          permission: "deny",
+          ms: 0,
+        });
+        return { call, verdict, state: "denied" as const };
       }
       if (turnPolicy?.finalOnly) {
-        const reason = "任务盒已进入纯总结阶段，禁止继续调用工具";
-        this.#bus.emit({
-          type: "permission_denied",
+        emitDeniedTool(this.#bus, this.#model, traceTools, {
           call,
-          reason,
+          reason: "任务盒已进入纯总结阶段，禁止继续调用工具",
+          permission: "task_box_deny",
+          ms: 0,
         });
-        this.#model.acceptToolDenied?.(call, reason);
-        return { call, verdict, state: "denied" as const, reason };
+        return { call, verdict, state: "denied" as const };
       }
       try {
         const result = await this.#tools.execute(call, signal, {
@@ -300,45 +308,11 @@ export class AgentLoop {
     for (const item of settled) {
       const { call, verdict } = item;
       if (item.state === "skipped") continue;
-      if (item.state === "denied") {
-        traceTools.push({
-          call,
-          permission: verdict === "deny" ? "deny" : "task_box_deny",
-          result: { error: item.reason },
-          ms: 0,
-        });
-        continue;
-      }
-      const result = item.result!;
-      this.#bus.emit({
-        type: "tool_result",
-        callId: call.id,
-        summary: result.summary,
-        ...(result.output === undefined ? {} : { output: result.output }),
-        ...(result.details === undefined
-          ? {}
-          : { details: result.details }),
-        ...(result.aborted === undefined ? {} : { aborted: result.aborted }),
-        ...(result.isError === undefined ? {} : { isError: result.isError }),
-      });
-      if (result.todoSnapshot) {
-        this.#bus.emit({
-          type: "todo_update",
-          todos: result.todoSnapshot,
-        });
-      }
-      this.#model.acceptToolResult?.(
+      if (item.state === "denied") continue; // trace 已在 executions 内记录
+      emitToolResult(this.#bus, this.#model, traceTools, {
         call,
-        result,
-        result.isError ?? false,
-      );
-      traceTools.push({
-        call,
+        result: item.result!,
         permission: verdict,
-        result: {
-          ...result,
-          output: result.traceOutput ?? result.output,
-        },
         ms: Date.now() - item.toolStartedAt,
       });
     }
@@ -403,12 +377,7 @@ export class AgentLoop {
           });
           throw error;
         }
-        const traceTools: Array<{
-          call: ToolCall;
-          permission: string;
-          result?: unknown;
-          ms: number;
-        }> = [];
+        const traceTools: ToolTraceItem[] = [];
         const recordTurn = () => {
           this.#recordTrace?.({
             ...(turn.trace?.request === undefined
@@ -572,47 +541,30 @@ export class AgentLoop {
           if (this.#steerRequested) {
             // 打断点一：当前工具已完成，拒绝本批剩余调用
             //（模型协议要求每个 tool_use 都有 tool_result 回应）
-            const reason = "用户插入新指令（steer），跳过剩余工具调用";
-            this.#bus.emit({ type: "permission_denied", call, reason });
-            this.#model.acceptToolDenied?.(call, reason);
-            traceTools.push({
+            emitDeniedTool(this.#bus, this.#model, traceTools, {
               call,
+              reason: "用户插入新指令（steer），跳过剩余工具调用",
               permission: "steered",
-              result: { error: reason },
               ms: Date.now() - toolStartedAt,
             });
             continue;
           }
           this.#bus.emit({ type: "tool_call", call });
           if (turnPolicy?.finalOnly) {
-            const reason = "任务盒已进入纯总结阶段，禁止继续调用工具";
-            this.#bus.emit({
-              type: "permission_denied",
+            emitDeniedTool(this.#bus, this.#model, traceTools, {
               call,
-              reason,
-            });
-            this.#model.acceptToolDenied?.(call, reason);
-            traceTools.push({
-              call,
+              reason: "任务盒已进入纯总结阶段，禁止继续调用工具",
               permission: "task_box_deny",
-              result: { error: reason },
               ms: Date.now() - toolStartedAt,
             });
             continue;
           }
           const verdict = this.#permissions.judge(call);
           if (verdict === "deny") {
-            const reason = "命中 deny 规则，不能临时强制放行";
-            this.#bus.emit({
-              type: "permission_denied",
+            emitDeniedTool(this.#bus, this.#model, traceTools, {
               call,
-              reason,
-            });
-            this.#model.acceptToolDenied?.(call, reason);
-            traceTools.push({
-              call,
+              reason: "命中 deny 规则，不能临时强制放行",
               permission: "deny",
-              result: { error: reason },
               ms: Date.now() - toolStartedAt,
             });
             continue;
@@ -632,16 +584,10 @@ export class AgentLoop {
               const reason = answer.feedback?.trim()
                 ? `用户拒绝：${answer.feedback.trim()}`
                 : "用户拒绝或审批超时";
-              this.#bus.emit({
-                type: "permission_denied",
+              emitDeniedTool(this.#bus, this.#model, traceTools, {
                 call,
                 reason,
-              });
-              this.#model.acceptToolDenied?.(call, reason);
-              traceTools.push({
-                call,
                 permission: "user_denied",
-                result: { error: reason },
                 ms: Date.now() - toolStartedAt,
               });
               // 拒绝来自 steer 取消挂起审批：直接结束本批，不再执行剩余工具
@@ -650,60 +596,13 @@ export class AgentLoop {
             }
           }
 
-          try {
-            const result = await this.#tools.execute(call, signal, {
-              onData: this.#makeOnToolData(call.id),
-            });
-            this.#bus.emit({
-              type: "tool_result",
-              callId: call.id,
-              summary: result.summary,
-              ...(result.output === undefined ? {} : { output: result.output }),
-              ...(result.details === undefined
-                ? {}
-                : { details: result.details }),
-              ...(result.aborted === undefined ? {} : { aborted: result.aborted }),
-              ...(result.isError === undefined ? {} : { isError: result.isError }),
-            });
-            if (result.todoSnapshot) {
-              this.#bus.emit({
-                type: "todo_update",
-                todos: result.todoSnapshot,
-              });
-            }
-            this.#model.acceptToolResult?.(
-              call,
-              result,
-              result.isError ?? false,
-            );
-            traceTools.push({
-              call,
-              permission: verdict,
-              result: {
-                ...result,
-                output: result.traceOutput ?? result.output,
-              },
-              ms: Date.now() - toolStartedAt,
-            });
-          } catch (error) {
-            const result: ToolExecutionResult = {
-              summary:
-                error instanceof Error ? error.message : "工具执行发生未知错误",
-            };
-            this.#bus.emit({
-              type: "tool_result",
-              callId: call.id,
-              summary: result.summary,
-              isError: true,
-            });
-            this.#model.acceptToolResult?.(call, result, true);
-            traceTools.push({
-              call,
-              permission: verdict,
-              result: { error: result.summary },
-              ms: Date.now() - toolStartedAt,
-            });
-          }
+          await executeTool(this.#bus, this.#model, this.#tools, traceTools, {
+            call,
+            permission: verdict,
+            signal,
+            ms: toolStartedAt,
+            onData: this.#makeOnToolData(call.id),
+          });
         }
 
         recordTurn();
@@ -725,75 +624,7 @@ export class AgentLoop {
   }
 }
 
-/**
- * 缓存浪费度量（参照 Pi 的 cache-stats）：上轮 prompt 在本轮应已命中缓存，
- * 若 cacheRead 低于上轮总量说明前缀被破坏（浪费重新计费的 token）。
- *
- * 原因分类（优先级）：
- * - compaction：压缩后缓存必然失效 → 合法，仅标记原因不视为异常
- * - model_switch：模型/供应商切换 → 异常，计入浪费
- * - idle：超过供应商缓存 TTL（Anthropic 5 分钟）→ 提示
- * - 其余：未知破坏源
- *
- * <1024 tokens 的 miss 视为 breakpoint 粒度噪音忽略。
- */
-/**
- * 缓存 miss 提示的显示阈值（参照 Pi cache-stats 的 UI 显示规则）：
- * missedTokens < 20_000 且 missedCostCny < 0.1 时视为噪音不显示。
- * 注意：仅用于展示门控；会话累计（/cost、summary）不受影响。
- */
-export function shouldShowCacheMissNotice(
-  missedTokens: number | undefined,
-  missedCostCny: number | undefined,
-): boolean {
-  return (missedTokens ?? 0) >= 20_000 || (missedCostCny ?? 0) >= 0.1;
-}
-
-export function computeMissedTokens(
-  usage: { input: number; output: number; cached: number },
-  prevInputTokens: number,
-  prevTurnAtMs: number,
-  nowMs: number,
-  compactionCount: number,
-  seenCompactions: number,
-  switchedModel: boolean,
-): { missedTokens: number; missedReason?: "compaction" | "model_switch" | "idle" } {
-  if (prevInputTokens <= 0) return { missedTokens: 0 };
-  const expectedCached = Math.min(prevInputTokens, usage.input);
-  const missedTokens = Math.max(0, expectedCached - usage.cached);
-  if (missedTokens < 1024) return { missedTokens: 0 };
-  if (compactionCount > seenCompactions) {
-    return { missedTokens, missedReason: "compaction" };
-  }
-  if (switchedModel) {
-    return { missedTokens, missedReason: "model_switch" };
-  }
-  // Anthropic 缓存 TTL 5 分钟；空闲超时后未命中属预期，但值得提示
-  if (prevTurnAtMs > 0 && nowMs - prevTurnAtMs > 5 * 60_000) {
-    return { missedTokens, missedReason: "idle" };
-  }
-  return { missedTokens };
-}
-
-/** miss 浪费费用：missedTokens 本可按缓存价计费，实际按全价输入计费。
-    压缩是合法的缓存重置（Pi 语义：重置计数不计浪费），返回 undefined。 */
-export function missedCost(
-  missedTokens: number,
-  missedReason: "compaction" | "model_switch" | "idle" | undefined,
-  pricing?: ModelPricing,
-): number | undefined {
-  if (missedTokens <= 0 || missedReason === "compaction") return undefined;
-  if (!pricing) return undefined;
-  return (
-    (missedTokens *
-      Math.max(
-        0,
-        pricing.inputPerMillionCny - pricing.cachedInputPerMillionCny,
-      )) /
-    1_000_000
-  );
-}
-
+/** 从模型错误上提取供应商 trace（agentTrace 附在错误对象上，供回合 trace 落盘） */
 function modelErrorTrace(error: unknown):
   | { request?: unknown; response?: unknown }
   | undefined {
@@ -807,20 +638,6 @@ function modelErrorTrace(error: unknown):
     }
   ).agentTrace;
   return trace;
-}
-
-function errorMessageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "未知模型错误";
-}
-
-/** 沿 cause 链（ModelRetriesExhaustedError → 底层错误）取供应商 Retry-After */
-function retryAfterMsOf(error: unknown): number | undefined {
-  let current: unknown = error;
-  for (let depth = 0; current && depth < 4; depth += 1) {
-    if (current instanceof ModelHttpError) return current.retryAfterMs;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return undefined;
 }
 
 /** 输出长度截断的终止原因（Anthropic stop_reason=max_tokens / OpenAI finish_reason=length） */

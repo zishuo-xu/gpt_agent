@@ -1,4 +1,4 @@
-import { shouldShowCacheMissNotice } from "./core/agent-loop.js";
+import { shouldShowCacheMissNotice } from "./core/cache-stats.js";
 import type { AgentEvent } from "./core/types.js";
 
 /** 渲染与输入处理共享的审批状态（ask_permission 置位，permission_denied/解析成功清除） */

@@ -227,3 +227,18 @@ export function modelErrorGuidanceText(error: unknown): string {
         : String(error);
   return `${guidance.label}：${original}。操作建议：${guidance.guidance}`;
 }
+
+/** 错误消息提取（重试通知文案用） */
+export function errorMessageOf(error: unknown): string {
+  return error instanceof Error ? error.message : "未知模型错误";
+}
+
+/** 沿 cause 链（ModelRetriesExhaustedError → 底层错误）取供应商 Retry-After */
+export function retryAfterMsOf(error: unknown): number | undefined {
+  let current: unknown = error;
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    if (current instanceof ModelHttpError) return current.retryAfterMs;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
