@@ -845,3 +845,98 @@ test("账本恢复：进程重启后 restore 重放 ledger_update 事件重建�
   assert.equal(snapshot?.units[0]?.id, "src/one.ts");
   assert.equal(snapshot?.units[0]?.status, "done");
 });
+
+test("任务期间排队的用户消息在任务结束后按复位后的会话规则处理", async () => {
+  const cwd = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-run-queue-"),
+  );
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-run-queue-state-"),
+  );
+  await writeFile(path.join(cwd, "secret.txt"), "hello\n");
+  const client = new ScriptedClient([
+    // 任务 prompt 轮：Edit secret.txt 应被任务 hardRules 拒绝
+    response("", [
+      // 真实使用路径：Edit 前先 Read（Edit 工具前置检查要求文件已读）
+      {
+        id: "t-read",
+        tool: "Read",
+        target: "secret.txt",
+        args: { file_path: "secret.txt" },
+      },
+      {
+        id: "t-edit",
+        tool: "Edit",
+        target: "secret.txt",
+        args: {
+          file_path: "secret.txt",
+          old_string: "hello", new_string: "task-edit",
+        },
+      },
+    ]),
+    response("任务总结：任务期编辑被拒绝。"),
+    // 排队消息轮：Edit 应命中复位后的会话规则（normal 档自动放行）→ 写入成功
+    response("", [
+      {
+        id: "q-edit",
+        tool: "Edit",
+        target: "secret.txt",
+        args: {
+          file_path: "secret.txt",
+          old_string: "hello", new_string: "queued-edit",
+        },
+      },
+    ]),
+    response("排队消息处理完成。"),
+  ]);
+  const session = new AgentSession({
+    id: "queue-test",
+    title: "排队消息",
+    cwd,
+    mode: "normal",
+    model: new ConversationAgentModel(client, []),
+    stateDir,
+  });
+  const events: AgentEvent[] = [];
+  session.subscribe((record) => events.push(record.event));
+
+  const runPromise = session.runTask({
+    description: "任务",
+    permission: "normal",
+    hardRules: [{ effect: "deny", pattern: "Edit(*secret.txt*)" }],
+    semanticBounds: [],
+  });
+  // 任务处理中排队一条用户消息（任务级权限/任务盒仍生效的窗口）
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await session.sendInput("排队消息");
+  await runPromise;
+  // drain 为异步消费，等待其完成
+  for (let i = 0; i < 50; i += 1) {
+    if (events.some((event) => event.type === "user" && event.text === "排队消息")) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  // 任务期 Edit 被 deny（任务 hardRules 生效）
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "permission_denied" && event.call.id === "t-edit",
+    ),
+  );
+  // 排队消息在 run_finished 之后才被处理（事件顺序符合预期）
+  const runFinishedIndex = events.findIndex(
+    (event) => event.type === "run_finished",
+  );
+  const queuedUserIndex = events.findIndex(
+    (event) => event.type === "user" && event.text === "排队消息",
+  );
+  assert.ok(
+    runFinishedIndex >= 0 && queuedUserIndex > runFinishedIndex,
+    "排队消息必须在 run_finished 之后处理",
+  );
+  // 排队消息按复位后的会话规则执行：Edit 放行并真正写入
+  assert.equal(
+    await readFile(path.join(cwd, "secret.txt"), "utf8"),
+    "queued-edit\n",
+  );
+});

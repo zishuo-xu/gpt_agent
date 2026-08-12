@@ -5,6 +5,8 @@ import type {
   ToolCall,
 } from "./types.js";
 import { escapeRegExp } from "../utils/regexp.js";
+import os from "node:os";
+import path from "node:path";
 
 export type PermissionVerdict = PermissionEffect;
 
@@ -25,6 +27,9 @@ const NORMAL_AUTO = new Set<string>([
   "MultiEdit",
 ]);
 
+/** 文件工具（target 是文件路径，判定前需规范化与执行路径同构） */
+const FILE_TOOLS = new Set<string>(["Edit", "MultiEdit", "Write"]);
+
 function wildcardToRegExp(pattern: string): RegExp {
   const source = escapeRegExp(pattern).replaceAll("*", ".*");
   return new RegExp(`^${source}$`);
@@ -44,6 +49,31 @@ function matchesEffect(
   call: ToolCall,
 ): boolean {
   return rules.some((rule) => rule.effect === effect && matches(rule, call));
+}
+
+/**
+ * 文件工具 target 规范化：`~`/`~/` 展开为主目录、相对路径 resolve 到 cwd，
+ * 使判定对象与执行对象（executor.#resolve）是同一路径——杜绝
+ * `Edit(/Users/x/.ssh/a)` 绕过 `Edit(~/.ssh/*)`、`Edit(src/../src/secret/x)`
+ * 绕过 `Edit(*src/secret*)` 的字面匹配旁路。
+ */
+export function normalizeFileTarget(target: string, cwd: string): string {
+  if (target === "~") return os.homedir();
+  if (target.startsWith("~/")) {
+    return path.resolve(cwd, path.join(os.homedir(), target.slice(2)));
+  }
+  return path.resolve(cwd, target);
+}
+
+/**
+ * 规则 pattern 中的 `~` 前缀展开为主目录（与 target 规范化同构）。
+ * 仅处理工具签名内、路径起点位置的 `~`（`Edit(~/.ssh/*)`）；引号等字面场景不受影响。
+ */
+function expandTildeInPattern(pattern: string, home: string): string {
+  return pattern.replace(
+    /^([A-Za-z][\w-]*)\(~(?=\/|\))/,
+    (_match, tool: string) => `${tool}(${home}`,
+  );
 }
 
 /**
@@ -205,10 +235,21 @@ function isReadonlyPrimitiveAllow(rule: PermissionRule): boolean {
 export class PermissionEngine {
   #mode: PermissionMode;
   #rules: PermissionRule[];
+  readonly #cwd: string;
 
-  constructor(mode: PermissionMode, rules: PermissionRule[] = []) {
+  constructor(
+    mode: PermissionMode,
+    rules: PermissionRule[] = [],
+    options: { cwd?: string } = {},
+  ) {
     this.#mode = mode;
-    this.#rules = [...rules];
+    // 规则与 target 同构规范化：pattern 中的 `~` 展开为主目录，
+    // 使绝对路径形态的 target 同样命中 `~` 开头的 deny/allow 规则
+    this.#rules = rules.map((rule) => ({
+      ...rule,
+      pattern: expandTildeInPattern(rule.pattern, os.homedir()),
+    }));
+    this.#cwd = options.cwd ?? process.cwd();
   }
 
   get mode(): PermissionMode {
@@ -220,7 +261,10 @@ export class PermissionEngine {
   }
 
   setRules(rules: PermissionRule[]): void {
-    this.#rules = [...rules];
+    this.#rules = rules.map((rule) => ({
+      ...rule,
+      pattern: expandTildeInPattern(rule.pattern, os.homedir()),
+    }));
   }
 
   rules(): PermissionRule[] {
@@ -228,6 +272,16 @@ export class PermissionEngine {
   }
 
   remember(call: ToolCall): void {
+    // 与 judge 同构：文件工具按规范化签名记忆，避免授权后因路径形态不同失配
+    if (FILE_TOOLS.has(call.tool)) {
+      this.rememberPattern(
+        callSignature({
+          ...call,
+          target: normalizeFileTarget(call.target, this.#cwd),
+        }),
+      );
+      return;
+    }
     this.rememberPattern(callSignature(call));
   }
 
@@ -244,6 +298,23 @@ export class PermissionEngine {
   }
 
   judge(call: ToolCall): PermissionVerdict {
+    // 文件工具：先规范化 target（~ 展开 + resolve），与执行路径同构后再判定
+    if (FILE_TOOLS.has(call.tool)) {
+      const normalized = normalizeFileTarget(call.target, this.#cwd);
+      const fileCall = { ...call, target: normalized };
+      if (matchesEffect("deny", this.#rules, fileCall)) return "deny";
+      if (this.#mode === "strict" && STRICT_GATED.has(call.tool)) {
+        return "ask";
+      }
+      if (matchesEffect("ask", this.#rules, fileCall)) return "ask";
+      if (matchesEffect("allow", this.#rules, fileCall)) return "allow";
+      if (this.#mode === "trust") return "allow";
+      if (this.#mode === "normal" && NORMAL_AUTO.has(call.tool)) {
+        return "allow";
+      }
+      if (this.#mode === "strict") return "allow";
+      return "ask";
+    }
     if (matchesEffect("deny", this.#rules, call)) return "deny";
     if (this.#mode === "strict" && STRICT_GATED.has(call.tool)) return "ask";
     // Bash 链式命令（&& / || / ; 多段）：整串 ask/allow 对前缀锚定规则

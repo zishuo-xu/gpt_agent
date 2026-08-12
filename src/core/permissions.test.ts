@@ -6,6 +6,8 @@ import {
   READONLY_DENY_RULES,
   segmentWritesFile,
 } from "./permissions.js";
+import os from "node:os";
+import path from "node:path";
 import type { PermissionRule, ToolCall, ToolName } from "./types.js";
 
 function call(tool: ToolName, target = "file.txt"): ToolCall {
@@ -293,6 +295,70 @@ test("写重定向段：用户显式授权（--auto-allow / 自定义 allow）�
   // 链内混合：显式授权段放行 + 只读段放行 → 整串放行
   assert.equal(
     engine.judge(bash("ls && echo changed > changed.txt")),
+    "allow",
+  );
+});
+
+test("文件工具 target 规范化：绝对路径形态命中 ~/.ssh deny（原字面匹配旁路）", () => {
+  // 用户主目录为 /Users/xuzishuo 时，模型传绝对路径不再绕过 Edit(~/.ssh/*)
+  const home = os.homedir();
+  const engine = new PermissionEngine(
+    "normal",
+    DEFAULT_PERMISSION_RULES,
+    { cwd: "/work/project" },
+  );
+  // ~ 形态（原有语义保持）
+  assert.equal(engine.judge(call("Edit", "~/.ssh/config")), "deny");
+  // 绝对路径形态（原为 allow，旁路修复）
+  assert.equal(
+    engine.judge(call("Edit", path.join(home, ".ssh/config"))),
+    "deny",
+  );
+  assert.equal(
+    engine.judge(call("Write", path.join(home, ".ssh/known_hosts"))),
+    "deny",
+  );
+});
+
+test("文件工具 target 规范化：../ 折叠无法绕过 deny 硬边界", () => {
+  const engine = new PermissionEngine(
+    "normal",
+    [
+      ...DEFAULT_PERMISSION_RULES,
+      { effect: "deny", pattern: "Edit(*src/secret*)" },
+    ],
+    { cwd: "/work/project" },
+  );
+  // 直接形态
+  assert.equal(engine.judge(call("Edit", "src/secret/x.ts")), "deny");
+  // ../ 折叠形态（原为 allow，旁路修复）
+  assert.equal(engine.judge(call("Edit", "src/../src/secret/x.ts")), "deny");
+  // 相对路径 resolve 后规则仍可命中（判定与执行同构）
+  assert.equal(engine.judge(call("Edit", "src/secret/deep/../y.ts")), "deny");
+});
+
+test("文件工具 target 规范化：普通文件相对路径语义不变", () => {
+  const engine = new PermissionEngine(
+    "normal",
+    DEFAULT_PERMISSION_RULES,
+    { cwd: "/work/project" },
+  );
+  // 非敏感路径在 normal 档 NORMAL_AUTO 自动放行（语义不变）
+  assert.equal(engine.judge(call("Edit", "src/app.ts")), "allow");
+  // 规范化后 .myagent 记忆目录 allow 规则仍命中
+  const memoryEngine = new PermissionEngine(
+    "trust",
+    DEFAULT_PERMISSION_RULES,
+    { cwd: "/work/project" },
+  );
+  assert.equal(
+    memoryEngine.judge(call("Write", ".myagent/memory/notes.md")),
+    "allow",
+  );
+  // remember 与 judge 同构：授权后绝对路径形态同样命中
+  memoryEngine.remember(call("Edit", "docs/plan.md"));
+  assert.equal(
+    memoryEngine.judge(call("Edit", "/work/project/docs/plan.md")),
     "allow",
   );
 });

@@ -29,6 +29,12 @@ export interface TaskRunnerOptions {
   bus: AgentEventBus;
   client: ModelClient;
   mode: PermissionMode | (() => PermissionMode);
+  /**
+   * 父会话权限规则（函数形态每次 run 时取最新快照）。
+   * 子代理引擎 = 会话规则 + 子代理自身规则——会话级 deny
+   * （用户配置 / /run 硬边界）在子代理内同样生效，不可绕过。
+   */
+  rules?: PermissionRule[] | (() => PermissionRule[]);
   depth?: number;
   maxDepth?: number;
   approve?: ApprovalHandler;
@@ -60,6 +66,7 @@ export class TaskRunner {
   readonly #bus: AgentEventBus;
   #client: ModelClient;
   readonly #mode: PermissionMode | (() => PermissionMode);
+  readonly #rules: TaskRunnerOptions["rules"];
   readonly #depth: number;
   readonly #maxDepth: number;
   readonly #reportUsage:
@@ -76,6 +83,7 @@ export class TaskRunner {
     this.#bus = options.bus;
     this.#client = options.client;
     this.#mode = options.mode;
+    this.#rules = options.rules;
     this.#depth = options.depth ?? 1;
     this.#maxDepth = options.maxDepth ?? 2;
     this.#approve = options.approve;
@@ -156,17 +164,25 @@ export class TaskRunner {
       });
     });
 
-    const readonlyRules: PermissionRule[] = args.writable
-      ? DEFAULT_PERMISSION_RULES
-      : [
-          ...READONLY_DENY_RULES,
-          ...DEFAULT_PERMISSION_RULES,
-        ];
+    // 会话级 deny 规则（用户配置 / /run 硬边界）优先，子代理自身规则兜底：
+    // writable 子代理 = 会话规则 + 默认规则；readonly = 会话规则 + 只读写保护 + 默认
+    const parentRules =
+      typeof this.#rules === "function" ? this.#rules() : this.#rules;
+    const readonlyRules: PermissionRule[] = [
+      ...(parentRules ?? []),
+      ...(args.writable
+        ? DEFAULT_PERMISSION_RULES
+        : [
+            ...READONLY_DENY_RULES,
+            ...DEFAULT_PERMISSION_RULES,
+          ]),
+    ];
     const permissions = new PermissionEngine(
       typeof this.#mode === "function"
         ? this.#mode()
         : this.#mode,
       readonlyRules,
+      { cwd: this.#cwd },
     );
     const nestedRunner =
       this.#depth < this.#maxDepth

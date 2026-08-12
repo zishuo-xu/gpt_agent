@@ -172,6 +172,7 @@ export class AgentSession {
     this.#permissions = new PermissionEngine(
       options.mode,
       options.permissionRules ?? DEFAULT_PERMISSION_RULES,
+      { cwd: options.cwd },
     );
     this.#approvalTimeoutMs = options.approvalTimeoutMs ?? 300_000;
     this.#rememberPermission = options.rememberPermission;
@@ -223,6 +224,8 @@ export class AgentSession {
           bus: this.#bus,
           client: options.exploreModelClient,
           mode: () => this.#permissions.mode,
+          // 会话级 deny（用户配置 / /run 硬边界）快照传递给子代理引擎
+          rules: () => this.#permissions.rules(),
           approve: async (call, signal) =>
             await this.#approvalWaiter.wait(
               call,
@@ -521,7 +524,7 @@ export class AgentSession {
   async sendInput(
     message: string,
     displayText?: string,
-    options?: { steer?: boolean },
+    options?: { steer?: boolean; taskMode?: boolean },
   ): Promise<void> {
     const text = message.trim();
     if (!text) throw new Error("消息不能为空");
@@ -640,6 +643,10 @@ export class AgentSession {
           }
         }
 
+        // 任务模式（runTask 调用）：只处理任务 prompt 本身，任务期间排队的
+        // 用户消息留给任务结束后的空闲路径（权限已复位）处理——排队消息
+        // 不得在任务级权限/任务盒约束下执行，deadline 也不得吞掉用户消息
+        if (options?.taskMode === true) break;
         current = this.#queuedInputs.shift();
       }
     } finally {
@@ -737,6 +744,7 @@ export class AgentSession {
         resumeTaskId
           ? `/resume ${options.description}`
           : `/run ${options.description}`,
+        { taskMode: true },
       );
       if (this.#taskStopReason) {
         status = this.#taskHardStopped
@@ -810,7 +818,26 @@ export class AgentSession {
         reason,
       });
       await this.flush();
+      // 任务期排队的用户消息：权限/任务盒已复位，按普通消息消费——
+      // 避免悬置到用户下次发送才被拾起，也保证其不在任务约束下执行
+      this.#drainQueuedInputs();
     }
+  }
+
+  /** 任务结束后消费排队消息（权限已复位；失败兜底为会话 error 事件，不崩进程） */
+  #drainQueuedInputs(): void {
+    const first = this.#queuedInputs.shift();
+    if (!first) return;
+    void this.sendInput(first.text, first.displayText, {
+      ...(first.steer ? { steer: true } : {}),
+    }).catch((error) => {
+      if (error instanceof Error) {
+        this.#bus.emit({
+          type: "error",
+          message: error.message,
+        });
+      }
+    });
   }
 
   startRunTask(options: RunTaskOptions): void {

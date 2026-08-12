@@ -3,6 +3,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readFile,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -426,4 +427,98 @@ test("子代理超时软打断：保留已收集结果并标记 reason=timeout",
     assert.equal(end.status, "interrupted");
     assert.equal(end.reason, "timeout");
   }
+});
+
+test("writable 子代理继承父会话 deny 规则（/run 硬边界不可绕过）", async () => {
+  const cwd = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-task-deny-"),
+  );
+  await writeFile(path.join(cwd, "secret.txt"), "top secret");
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const runner = new TaskRunner({
+    cwd,
+    bus,
+    mode: "normal",
+    // 父会话规则含 deny（模拟用户配置 / /run --bounds 硬边界）
+    rules: () => [{ effect: "deny", pattern: "Edit(*secret.txt*)" }],
+    client: new ScriptedClient([
+      response("", [
+        {
+          id: "edit-secret",
+          tool: "Edit",
+          target: "secret.txt",
+          args: { filePath: "secret.txt", edits: [] },
+        },
+      ]),
+      response(
+        "Conclusion: 目标文件被权限策略拒绝。\nKey evidence: 无\nUnconfirmed: 无。",
+      ),
+    ]),
+  });
+
+  const result = await runner.run(
+    {
+      description: "修改 secret",
+      prompt: "修改 secret.txt",
+      writable: true,
+    },
+    new AbortController().signal,
+  );
+
+  assert.equal(
+    await readFile(path.join(cwd, "secret.txt"), "utf8"),
+    "top secret",
+    "子代理不得写入被会话 deny 的文件",
+  );
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "task_event" &&
+        event.eventType === "permission_denied",
+    ),
+  );
+});
+
+test("writable 子代理继承 deny：../ 折叠路径同样被拦截", async () => {
+  const cwd = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-task-deny-dotdot-"),
+  );
+  await writeFile(path.join(cwd, "secret.txt"), "top secret");
+  const bus = new AgentEventBus();
+  const runner = new TaskRunner({
+    cwd,
+    bus,
+    mode: "normal",
+    rules: () => [{ effect: "deny", pattern: "Edit(*secret.txt*)" }],
+    client: new ScriptedClient([
+      response("", [
+        {
+          id: "edit-secret",
+          tool: "Edit",
+          target: "sub/../secret.txt",
+          args: { filePath: "sub/../secret.txt", edits: [] },
+        },
+      ]),
+      response(
+        "Conclusion: 目标文件被权限策略拒绝。\nKey evidence: 无\nUnconfirmed: 无。",
+      ),
+    ]),
+  });
+
+  await runner.run(
+    {
+      description: "修改 secret",
+      prompt: "修改 secret.txt",
+      writable: true,
+    },
+    new AbortController().signal,
+  );
+
+  assert.equal(
+    await readFile(path.join(cwd, "secret.txt"), "utf8"),
+    "top secret",
+    "路径折叠形态同样受会话 deny 约束",
+  );
 });
