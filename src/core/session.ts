@@ -28,6 +28,15 @@ import {
 import { TaskRunner } from "./task-runner.js";
 import { BranchCoordinator } from "./session-branch.js";
 import { PermissionWaiter } from "./session-approval.js";
+import {
+  SessionStateMachine,
+  type SessionStateDeps,
+} from "./session-state.js";
+import {
+  firstUserText,
+  interruptedTaskFrom,
+  resumePrompt,
+} from "./session-restore.js";
 import type {
   AgentEvent,
   ApprovalAnswer,
@@ -87,25 +96,21 @@ export class AgentSession {
   readonly #pricing:
     | Partial<Record<"main" | "cheap" | "explore", ModelPricing>>
     | undefined;
-  #status: AgentSessionStatus = "idle";
   #updatedAt: string;
   #activeLoop: AgentLoop | undefined;
   #processing = false;
   /** 工具并行执行开关（behavior.parallelTools，热生效；批次含审批需求时自动串行） */
   #parallelTools = false;
-  #totalInputTokens = 0;
-  #totalOutputTokens = 0;
-  #totalCachedTokens = 0;
-  #totalCostCny = 0;
-  /** 累计缓存浪费（仅计异常失效；压缩属合法重置不计入，参照 Pi cache-stats） */
-  #totalMissedTokens = 0;
-  #totalMissedCostCny = 0;
-  /** 按模型/供应商拆分的成本（cost_update 带来源时累计；key = providerId/model） */
-  readonly #costByModel = new Map<
-    string,
-    { providerId: string; model: string; costCny: number; tokens: number }
-  >();
-  #todos: TodoItem[] = [];
+  /** 会话状态机与统计聚合（状态/成本/todo 的唯一落点，见 session-state.ts） */
+  readonly #state = new SessionStateMachine();
+  /** 状态机事件应用的外部依赖（权限档/分支树/模型 todo 同步） */
+  get #stateDeps(): SessionStateDeps {
+    return {
+      permissions: this.#permissions,
+      branchOps: this.#branchOps,
+      model: this.#model,
+    };
+  }
   #taskBox: TaskBox | undefined;
   #taskStopReason: "deadline" | "budget" | undefined;
   #taskHardStopped = false;
@@ -175,7 +180,7 @@ export class AgentSession {
         ? { rememberPermission: this.#rememberPermission }
         : {}),
       setStatus: (status) => {
-        this.#status = status;
+        this.#state.setStatus(status);
       },
     });
     this.#branchOps = new BranchCoordinator({
@@ -186,8 +191,8 @@ export class AgentSession {
         : {}),
       ...(this.#pricing ? { pricing: this.#pricing } : {}),
       getTotalTokens: () =>
-        this.#totalInputTokens + this.#totalOutputTokens,
-      getTotalCostCny: () => this.#totalCostCny,
+        this.#state.tokens(),
+      getTotalCostCny: () => this.#state.costCny(),
       ...(options.restoredEvents
         ? { restoredEvents: options.restoredEvents }
         : {}),
@@ -230,8 +235,7 @@ export class AgentSession {
               type: "cost_update",
               ...usage,
               totalTokens:
-                this.#totalInputTokens +
-                this.#totalOutputTokens +
+                this.#state.tokens() +
                 usage.input +
                 usage.output,
               ...(actualCostCny === undefined
@@ -239,7 +243,7 @@ export class AgentSession {
                 : {
                     costCny: actualCostCny,
                     totalCostCny:
-                      this.#totalCostCny + actualCostCny,
+                      this.#state.costCny() + actualCostCny,
                   }),
             });
           },
@@ -291,8 +295,7 @@ export class AgentSession {
             result.pricing ?? this.#pricing?.cheap,
           );
           const totalTokens =
-            this.#totalInputTokens +
-            this.#totalOutputTokens +
+            this.#state.tokens() +
             result.usage.input +
             result.usage.output;
           this.#bus.emit({
@@ -305,7 +308,7 @@ export class AgentSession {
               ? {}
               : {
                   costCny,
-                  totalCostCny: this.#totalCostCny + costCny,
+                  totalCostCny: this.#state.costCny() + costCny,
                 }),
           });
           const userEvents = this.#events.filter(
@@ -333,14 +336,14 @@ export class AgentSession {
         });
         // 独立计数器从最后合法记录续（磁盘缺号不产生内存空洞）
         if (record.seq > this.#eventSeq) this.#eventSeq = record.seq;
-        this.#applyEventState(record.event);
+        this.#state.apply(record.event, this.#stateDeps);
       }
       if (
-        this.#status === "idle" ||
-        this.#status === "running" ||
-        this.#status === "waiting_permission"
+        this.#state.status === "idle" ||
+        this.#state.status === "running" ||
+        this.#state.status === "waiting_permission"
       ) {
-        this.#status = "interrupted";
+        this.#state.setStatus("interrupted");
       }
     }
     // 初始权限模式入事件流：恢复时 lastPermissionMode 才能还原初始模式
@@ -364,23 +367,21 @@ export class AgentSession {
     const summary: AgentSessionSummary = {
       id: this.id,
       title: this.title,
-      status: this.#status,
+      status: this.#state.status,
       permissionMode: this.#permissions.mode,
       createdAt: this.createdAt,
       updatedAt: this.#updatedAt,
-      totalInputTokens: this.#totalInputTokens,
-      totalOutputTokens: this.#totalOutputTokens,
-      totalCachedTokens: this.#totalCachedTokens,
-      totalCostCny: this.#totalCostCny,
-      totalMissedTokens: this.#totalMissedTokens,
-      totalMissedCostCny: this.#totalMissedCostCny,
-      todos: structuredClone(this.#todos),
+      totalInputTokens: this.#state.inputTokens(),
+      totalOutputTokens: this.#state.outputTokens(),
+      totalCachedTokens: this.#state.cachedTokens(),
+      totalCostCny: this.#state.costCny(),
+      totalMissedTokens: this.#state.missedTokens(),
+      totalMissedCostCny: this.#state.missedCostCny(),
+      todos: structuredClone(this.#state.todos()),
       toolCallCount: this.#events.filter(
         (record) => record.event.type === "tool_call",
       ).length,
-      costByModel: [...this.#costByModel.values()]
-        .map((bucket) => ({ ...bucket }))
-        .sort((a, b) => b.costCny - a.costCny),
+      costByModel: this.#state.costByModel(),
       kind: this.#events.some(
         (record) => record.event.type === "run_started",
       )
@@ -560,7 +561,7 @@ export class AgentSession {
             : {}),
           ...(current.id ? { queueId: current.id } : {}),
         });
-        this.#status = "running";
+        this.#state.setStatus("running");
         this.#updatedAt = new Date().toISOString();
 
         const loop = new AgentLoop({
@@ -575,13 +576,13 @@ export class AgentSession {
               this.#taskApprovalTimeoutMs,
             ),
           initialTotalTokens:
-            this.#totalInputTokens + this.#totalOutputTokens,
+            this.#state.tokens(),
           getTotalTokens: () =>
-            this.#totalInputTokens + this.#totalOutputTokens,
+            this.#state.tokens(),
           ...(this.#pricing?.main
             ? { pricing: this.#pricing.main }
             : {}),
-          getTotalCostCny: () => this.#totalCostCny,
+          getTotalCostCny: () => this.#state.costCny(),
           beforeTurn: async () => this.#checkTaskBox(),
           modelRole: "main",
           modelCompactCount: () => this.#model.compactionCount,
@@ -607,7 +608,7 @@ export class AgentSession {
               question: `${guidance}输入“继续”重试。`,
             });
           } else {
-            this.#status = "error";
+            this.#state.setStatus("error");
             this.#bus.emit({
               type: "error",
               message:
@@ -621,7 +622,7 @@ export class AgentSession {
           } catch (error) {
             // 事件落盘失败：失败可见（事件流内存仍完整）但不崩进程——
             // 裸 void sendInput 调用点无 catch，未处理的 rejection 会让 Node 直接退出
-            this.#status = "error";
+            this.#state.setStatus("error");
             this.#bus.emit({
               type: "error",
               message: `事件落盘失败：${
@@ -658,7 +659,7 @@ export class AgentSession {
     // 续跑沿用原 taskId（事件流配对 run_finished）；新任务生成新 id
     const taskBox = new TaskBox(
       options,
-      this.#totalCostCny,
+      this.#state.costCny(),
       resumeTaskId,
     );
     this.#taskBox = taskBox;
@@ -706,7 +707,7 @@ export class AgentSession {
     try {
       await this.sendInput(
         resumeTaskId
-          ? resumePrompt(taskBox, this.#totalCostCny)
+          ? resumePrompt(taskBox, this.#state.costCny())
           : taskBox.prompt(),
         resumeTaskId
           ? `/resume ${options.description}`
@@ -717,10 +718,10 @@ export class AgentSession {
           ? "interrupted"
           : "completed";
         reason = this.#taskStopReason;
-      } else if (this.#status === "error" || this.#taskModelFailed) {
+      } else if (this.#state.status === "error" || this.#taskModelFailed) {
         status = "failed";
         reason = "error";
-      } else if (this.#status === "interrupted") {
+      } else if (this.#state.status === "interrupted") {
         status = "interrupted";
         reason = "interrupted";
       }
@@ -865,7 +866,7 @@ export class AgentSession {
   interrupt(): boolean {
     if (!this.#activeLoop) return false;
     this.#activeLoop.interrupt();
-    this.#status = "interrupted";
+    this.#state.setStatus("interrupted");
     return true;
   }
 
@@ -903,51 +904,7 @@ export class AgentSession {
     };
     this.#events.push(record);
     this.#updatedAt = record.ts;
-    this.#applyEventState(event);
-  }
-
-  #applyEventState(event: AgentEvent): void {
-    if (event.type === "user") this.#status = "running";
-    if (event.type === "permission_mode_changed") {
-      this.#permissions.setMode(event.mode);
-    }
-    if (event.type === "ask_permission") this.#status = "waiting_permission";
-    if (event.type === "todo_update") {
-      this.#todos = structuredClone(event.todos);
-      this.#model.setTodos(this.#todos);
-    }
-    if (event.type === "cost_update") {
-      this.#totalInputTokens += event.input;
-      this.#totalOutputTokens += event.output;
-      this.#totalCachedTokens += event.cached ?? 0;
-      this.#totalCostCny += event.costCny ?? 0;
-      if (event.missedTokens && event.missedReason !== "compaction") {
-        this.#totalMissedTokens += event.missedTokens;
-        this.#totalMissedCostCny += event.missedCostCny ?? 0;
-      }
-      // 按模型/供应商拆分（缺失来源的轮次不进入维度统计）
-      if (event.providerId || event.model) {
-        const providerId = event.providerId ?? "unknown";
-        const model = event.model ?? "unknown";
-        const key = `${providerId}/${model}`;
-        const bucket = this.#costByModel.get(key) ?? {
-          providerId,
-          model,
-          costCny: 0,
-          tokens: 0,
-        };
-        bucket.costCny += event.costCny ?? 0;
-        bucket.tokens += event.input + event.output;
-        this.#costByModel.set(key, bucket);
-      }
-    }
-    if (event.type === "done") this.#status = "done";
-    if (event.type === "need_user") this.#status = "done";
-    if (event.type === "error") this.#status = "error";
-    if (event.type === "interrupted") this.#status = "interrupted";
-    if (event.type === "branch_switch") {
-      this.#branchOps.noteSwitch(event.branchId);
-    }
+    this.#state.apply(event, this.#stateDeps);
   }
 
   async #checkTaskBox(): Promise<{
@@ -956,7 +913,7 @@ export class AgentSession {
   }> {
     const taskBox = this.#taskBox;
     if (!taskBox) return {};
-    const decision = taskBox.check(Date.now(), this.#totalCostCny);
+    const decision = taskBox.check(Date.now(), this.#state.costCny());
     if (decision.instruction) {
       this.#model.addUserMessage(
         `[任务盒控制指令]\n${decision.instruction}`,
@@ -986,72 +943,4 @@ export class AgentSession {
       ...(decision.finalOnly ? { finalOnly: true } : {}),
     };
   }
-}
-
-/** 事件流中首条 user 消息文本（截断 80 字符）；无则返回 undefined */
-function firstUserText(
-  events: readonly AgentSessionEvent[],
-): string | undefined {
-  const record = events.find((item) => item.event.type === "user");
-  if (!record || record.event.type !== "user") return undefined;
-  const text = record.event.text.replace(/\s+/g, " ").trim();
-  if (!text) return undefined;
-  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
-}
-
-/**
- * 从事件流检测中断任务：最近的 run_started 若无同 taskId 的 run_finished
- * 跟随（进程崩溃残留），返回该任务信息与持久化的完整选项。
- */
-function interruptedTaskFrom(
-  records: readonly RecordedEvent[] | undefined,
-):
-  | {
-      taskId: string;
-      description: string;
-      options?: NonNullable<
-        Extract<AgentEvent, { type: "run_started" }>["taskOptions"]
-      >;
-    }
-  | undefined {
-  if (!records) return undefined;
-  for (let index = records.length - 1; index >= 0; index -= 1) {
-    const event = records[index]?.event;
-    if (event?.type !== "run_started") continue;
-    const finished = records
-      .slice(index + 1)
-      .some(
-        (record) =>
-          record.event.type === "run_finished" &&
-          record.event.taskId === event.taskId,
-      );
-    if (!finished) {
-      return {
-        taskId: event.taskId,
-        description: event.description,
-        ...(event.taskOptions ? { options: event.taskOptions } : {}),
-      };
-    }
-  }
-  return undefined;
-}
-
-/** 续跑指令：不重复完整任务 prompt（原 prompt 已在事件流历史），只注入恢复说明 */
-function resumePrompt(taskBox: TaskBox, totalCostCny: number): string {
-  return [
-    `[任务续跑 #${taskBox.id}]`,
-    `之前的无人值守任务因进程重启而中断，现在继续。`,
-    `任务：${taskBox.options.description}`,
-    taskBox.options.goal
-      ? `机器验收目标：${taskBox.options.goal}`
-      : "机器验收目标：未指定；完成合理验证后自然停止。",
-    taskBox.options.budgetCny === undefined
-      ? ""
-      : `本任务剩余预算：¥${Math.max(0, taskBox.options.budgetCny - totalCostCny).toFixed(2)}`,
-    "",
-    "先评估已完成的进度（读取文件或检查 git 状态确认），再继续未完成的部分。",
-    "持续工作直至目标完成或任务盒要求收尾；收尾固定包含改动与验证总结、todo 快照、值得写入记忆的稳定事实。",
-  ]
-    .filter(Boolean)
-    .join("\n");
 }
