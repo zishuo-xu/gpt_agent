@@ -85,6 +85,123 @@ function splitBashChain(target: string): string[] {
   return segments;
 }
 
+/**
+ * 段内重定向目标是否为空输出丢弃（`> /dev/null` / `&> /dev/null`）：
+ * 丢弃输出不写盘，属于无害形态，不算写副作用。
+ */
+function isDevNullRedirect(target: string, from: number): boolean {
+  let index = from;
+  while (index < target.length && /\s/.test(target[index]!)) index++;
+  if (!target.startsWith("/dev/null", index)) return false;
+  // 目标必须是完整词（后随空白/结束/`2>&1` 之类的重定向起始符）
+  const after = target[index + "/dev/null".length];
+  return after === undefined || /\s/.test(after) || after === ">" || after === "&";
+}
+
+/**
+ * 段是否产生文件写副作用（引号感知）：
+ * - 写重定向 `>` / `>>` / `>|` / `N>file`（排除 fd 复制 `2>&1`/`>&1` 与 `> /dev/null` 丢弃）
+ * - `tee`（含 `tee -a`）：无论是否接文件参数都视为写盘通道
+ * 只读白名单（Bash(cat*) 等）按前缀匹配，带写重定向的段必须被识别——
+ * 否则 `cat x > out.txt` 会静默绕过只读判定。
+ */
+export function segmentWritesFile(segment: string): boolean {
+  let quote: '"' | "'" | null = null;
+  for (let index = 0; index < segment.length; index++) {
+    const char = segment[index]!;
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === ">") {
+      // `2>&1` / `>&1`：`>` 后紧跟 `&` 是 fd 复制，不写盘
+      if (segment[index + 1] === "&") continue;
+      // `>>` / `>|`：追加/强制覆盖，写盘
+      // `> /dev/null`：丢弃输出，不写盘
+      if (isDevNullRedirect(segment, index + 1)) {
+        // 跳过整个 /dev/null 目标词，避免其中的 `>` 误判（`2> /dev/null`）
+        let skip = index + 1;
+        while (skip < segment.length && /\s/.test(segment[skip]!)) skip++;
+        index = skip + "/dev/null".length - 1;
+        continue;
+      }
+      return true;
+    }
+  }
+  // tee：段按引号外 `|` 切子命令，子命令首词为 tee（含 tee -a）→ 写盘
+  let commandStart = true;
+  quote = null;
+  for (let index = 0; index < segment.length; index++) {
+    const char = segment[index]!;
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === "|") {
+      commandStart = true;
+      continue;
+    }
+    if (commandStart) {
+      if (/\s/.test(char)) continue;
+      const word = segment.slice(index).match(/^\S+/)?.[0] ?? "";
+      if (word === "tee") return true;
+      commandStart = false;
+    }
+  }
+  return false;
+}
+
+/** 规则集是否含只读写保护（deny 的 Edit(*)/Write(*)/MultiEdit(*)）：
+ * TaskRunner readonly 子代理、用户自定义禁写规则命中；普通会话无。 */
+function hasWriteDenyProtection(rules: PermissionRule[]): boolean {
+  return rules.some(
+    (rule) =>
+      rule.effect === "deny" &&
+      (rule.pattern === "Edit(*)" ||
+        rule.pattern === "Write(*)" ||
+        rule.pattern === "MultiEdit(*)"),
+  );
+}
+
+/**
+ * DEFAULT_PERMISSION_RULES 的只读原语动词（cat/ls/pwd/find/head/tail/wc/sort/grep/git
+ * 只读形态/npm|pnpm test）——系统预设的"只读语义" allow：命令本身无写副作用，
+ * 带写重定向（`cat x > out`）即不再只读，不得放行。
+ * 用户显式授权（--auto-allow / 自定义 allow 规则）语义即放行命令（含其写副作用），
+ * 不在此列——写重定向拦截只针对系统只读原语。
+ */
+const READONLY_BASH_VERBS = [
+  "cat",
+  "ls",
+  "pwd",
+  "find",
+  "head",
+  "tail",
+  "wc",
+  "sort",
+  "grep",
+  "git status",
+  "git diff",
+  "npm test",
+  "pnpm test",
+];
+
+function isReadonlyPrimitiveAllow(rule: PermissionRule): boolean {
+  if (rule.effect !== "allow" || !rule.pattern.startsWith("Bash(")) {
+    return false;
+  }
+  const verb = rule.pattern.slice("Bash(".length);
+  return READONLY_BASH_VERBS.some((prefix) => verb.startsWith(prefix));
+}
+
 export class PermissionEngine {
   #mode: PermissionMode;
   #rules: PermissionRule[];
@@ -131,23 +248,42 @@ export class PermissionEngine {
     if (this.#mode === "strict" && STRICT_GATED.has(call.tool)) return "ask";
     // Bash 链式命令（&& / || / ; 多段）：整串 ask/allow 对前缀锚定规则
     // （如 `Bash(ls*)` / `Bash(pwd*)`）有误放行风险（`ls && git push`），
-    // 因此多段命令不再看整串 ask/allow，一律段级判定：
-    // 任一段 deny/ask 即拦截，全段 allow 才放行，否则落入模式兜底。
+    // 因此统一段级判定（单段与多段同路径）：
+    // 任一段 deny/ask 即拦截；写重定向段（`cat x > out`）不得由只读原语
+    // 白名单前缀放行（只读环境 deny、其余落入模式兜底），用户显式授权
+    // （--auto-allow / 自定义 allow）语义即放行命令含其写副作用，不受此限；
+    // 全段 allow 才放行，否则落入模式兜底。
     if (call.tool === "Bash") {
       const segments = splitBashChain(call.target);
-      if (segments.length > 1) {
-        if (segments.some((segment) => matchesEffect("deny", this.#rules, { ...call, target: segment }))) {
-          return "deny";
-        }
-        if (segments.some((segment) => matchesEffect("ask", this.#rules, { ...call, target: segment }))) {
-          return "ask";
-        }
-        if (segments.every((segment) => matchesEffect("allow", this.#rules, { ...call, target: segment }))) {
-          return "allow";
-        }
-        // strict 下 Bash 已在上方 STRICT_GATED 返回，此处只剩 normal / trust
-        return this.#mode === "trust" ? "allow" : "ask";
+      if (segments.some((segment) => matchesEffect("deny", this.#rules, { ...call, target: segment }))) {
+        return "deny";
       }
+      if (segments.some((segment) => matchesEffect("ask", this.#rules, { ...call, target: segment }))) {
+        return "ask";
+      }
+      const writeSegments = segments.filter(segmentWritesFile);
+      if (writeSegments.length > 0) {
+        // 写重定向段是否被显式授权（非只读原语的 allow 规则）放行
+        const explicitlyAllowed = writeSegments.every((segment) => {
+          const allows = this.#rules.filter(
+            (rule) => rule.effect === "allow" && matches(rule, { ...call, target: segment }),
+          );
+          return allows.some((rule) => !isReadonlyPrimitiveAllow(rule));
+        });
+        if (!explicitlyAllowed) {
+          // 只读环境（TaskRunner readonly 子代理等）：写重定向 = 写操作，直接拒绝
+          return hasWriteDenyProtection(this.#rules)
+            ? "deny"
+            : this.#mode === "trust"
+              ? "allow"
+              : "ask";
+        }
+      }
+      if (segments.every((segment) => matchesEffect("allow", this.#rules, { ...call, target: segment }))) {
+        return "allow";
+      }
+      // strict 下 Bash 已在上方 STRICT_GATED 返回，此处只剩 normal / trust
+      return this.#mode === "trust" ? "allow" : "ask";
     }
     if (matchesEffect("ask", this.#rules, call)) return "ask";
     if (matchesEffect("allow", this.#rules, call)) return "allow";

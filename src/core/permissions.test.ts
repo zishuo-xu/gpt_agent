@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   DEFAULT_PERMISSION_RULES,
   PermissionEngine,
+  READONLY_DENY_RULES,
+  segmentWritesFile,
 } from "./permissions.js";
 import type { PermissionRule, ToolCall, ToolName } from "./types.js";
 
@@ -208,4 +210,89 @@ test("Bash 只读链：strict 全询问；trust 尊重段级 ask/deny", () => {
   assert.equal(trust.judge(bash("pwd && ls")), "allow");
   assert.equal(trust.judge(bash("pwd && git push origin main")), "ask", "trust 尊重段级显式 ask");
   assert.equal(trust.judge(bash("ls && rm -rf x")), "deny", "trust 也拒绝段级危险命令");
+});
+
+test("segmentWritesFile：写重定向与 tee 识别，fd 复制与 /dev/null 排除", () => {
+  // 写盘形态
+  assert.equal(segmentWritesFile("cat a.txt > out.txt"), true);
+  assert.equal(segmentWritesFile("ls >> log.txt"), true);
+  assert.equal(segmentWritesFile("ls >| out.txt"), true, "noclobber 强制覆盖也是写");
+  assert.equal(segmentWritesFile("cmd 2>err.log"), true, "stderr 重定向到文件也是写");
+  assert.equal(segmentWritesFile("grep x f | tee out.txt"), true, "tee 写盘");
+  assert.equal(segmentWritesFile("tee -a out.txt"), true, "tee -a 追加写盘");
+  // 无害形态
+  assert.equal(segmentWritesFile("cat a.txt 2>&1"), false, "fd 复制不写盘");
+  assert.equal(segmentWritesFile("cmd >&2"), false, "fd 复制到 stderr 不写盘");
+  assert.equal(segmentWritesFile("ls > /dev/null"), false, "丢弃输出不写盘");
+  assert.equal(segmentWritesFile("cmd 2> /dev/null"), false, "stderr 丢弃不写盘");
+  // 引号内不误伤
+  assert.equal(segmentWritesFile("ls '>'"), false, "引号内 > 是字面量");
+  assert.equal(segmentWritesFile("echo 'tee'"), false, "引号内 tee 是字面量");
+  assert.equal(segmentWritesFile("ls -la 2>&1 | head"), false, "管道内 fd 复制不写盘");
+});
+
+test("写重定向段：normal 询问、trust 放行、strict 询问（只读白名单前缀不放行）", () => {
+  const bash = (target: string): ToolCall => ({
+    id: target,
+    tool: "Bash",
+    target,
+    args: { command: target },
+  });
+  const normal = new PermissionEngine("normal", DEFAULT_PERMISSION_RULES);
+  // 漏洞回归：cat/ls 前缀 allow 规则不得覆盖写重定向
+  assert.equal(normal.judge(bash("cat package.json > out.txt")), "ask");
+  assert.equal(normal.judge(bash("ls -la >> log.txt")), "ask");
+  assert.equal(normal.judge(bash("grep x f | tee out.txt")), "ask");
+  assert.equal(normal.judge(bash("pwd && echo x > f.txt")), "ask", "链内写段拦截");
+  // 无害形态仍放行
+  assert.equal(normal.judge(bash("cat a.txt 2>&1 | head")), "allow");
+  assert.equal(normal.judge(bash("ls > /dev/null")), "allow");
+  assert.equal(normal.judge(bash("ls '>'")), "allow", "引号内字面量不误伤");
+  const trust = new PermissionEngine("trust", DEFAULT_PERMISSION_RULES);
+  assert.equal(trust.judge(bash("cat package.json > out.txt")), "allow", "trust 语义不变");
+  const strict = new PermissionEngine("strict", DEFAULT_PERMISSION_RULES);
+  assert.equal(strict.judge(bash("cat package.json > out.txt")), "ask", "strict 全询问");
+});
+
+test("只读环境（readonly 规则集）：写重定向 Bash 直接 deny", () => {
+  const bash = (target: string): ToolCall => ({
+    id: target,
+    tool: "Bash",
+    target,
+    args: { command: target },
+  });
+  const readonlyRules: PermissionRule[] = [
+    ...READONLY_DENY_RULES,
+    ...DEFAULT_PERMISSION_RULES,
+  ];
+  // TaskRunner readonly 子代理逃逸回归：cat 白名单 + 写重定向不得写盘
+  const readonly = new PermissionEngine("normal", readonlyRules);
+  assert.equal(readonly.judge(bash("cat x > out.txt")), "deny");
+  assert.equal(readonly.judge(bash("grep x f | tee out.txt")), "deny");
+  // 纯只读命令仍放行（readonly 子代理允许查询）
+  assert.equal(readonly.judge(bash("cat package.json")), "allow");
+  assert.equal(readonly.judge(bash("ls -la 2>&1 | head")), "allow");
+  // trust 主会话下 readonly 子代理同样被写保护拦下（模式兜底不得放行）
+  const readonlyTrust = new PermissionEngine("trust", readonlyRules);
+  assert.equal(readonlyTrust.judge(bash("cat x > out.txt")), "deny");
+});
+
+test("写重定向段：用户显式授权（--auto-allow / 自定义 allow）放行含写副作用命令", () => {
+  const bash = (target: string): ToolCall => ({
+    id: target,
+    tool: "Bash",
+    target,
+    args: { command: target },
+  });
+  // --auto-allow 语义：任务期放行指定工具（含写副作用），不受只读原语拦截
+  const engine = new PermissionEngine("normal", [
+    ...DEFAULT_PERMISSION_RULES,
+    { effect: "allow", pattern: "Bash(echo changed*)" },
+  ]);
+  assert.equal(engine.judge(bash("echo changed > changed.txt")), "allow");
+  // 链内混合：显式授权段放行 + 只读段放行 → 整串放行
+  assert.equal(
+    engine.judge(bash("ls && echo changed > changed.txt")),
+    "allow",
+  );
 });
