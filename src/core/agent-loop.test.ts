@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ToolExecutor } from "../tools/executor.js";
-import { AgentLoop, type AgentModel, type ModelTurn } from "./agent-loop.js";
+import {
+  AgentLoop,
+  jitteredBackoff,
+  type AgentModel,
+  type ModelTurn,
+} from "./agent-loop.js";
 import { shouldShowCacheMissNotice } from "./cache-stats.js";
 import { AgentEventBus } from "./events.js";
 import { PermissionEngine } from "./permissions.js";
@@ -935,4 +940,14 @@ test("Bash 执行时发射 tool_execution_update 流式事件，tool_result 仍�
       : String(result.output);
   assert.ok(stdout.includes("hello-partial"), "tool_result 输出应完整包含命令输出");
   assert.equal(events.at(-1)?.type, "done");
+});
+
+test("jitteredBackoff：25% 向下抖动——退避乘 [0.75, 1.0] 随机系数", () => {
+  // 注入随机源断言边界：random=0 → ×0.75；random=1 → ×1.0；random=0.5 → ×0.875
+  assert.equal(jitteredBackoff(2000, () => 0), 1500);
+  assert.equal(jitteredBackoff(2000, () => 1), 2000);
+  assert.equal(jitteredBackoff(2000, () => 0.5), 1750);
+  assert.equal(jitteredBackoff(8000, () => 0), 6000);
+  // 向下抖动语义：结果永不超过原退避（不会向上放大）
+  assert.ok(jitteredBackoff(2000, () => 0.99) <= 2000);
 });

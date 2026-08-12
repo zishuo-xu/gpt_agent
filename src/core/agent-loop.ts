@@ -26,6 +26,19 @@ import { isToolName, TOOL_NAMES } from "../shared/tool-names.js";
 import { usageCostCny } from "../utils/cost.js";
 import { abortableSleep } from "../utils/sleep.js";
 
+/**
+ * 重试退避 25% 向下抖动（参照 Pi provider 级公式 0.5×2^n ≤8s + 抖动）：
+ * 指数退避乘 [0.75, 1.0] 随机系数——多个并发请求同时失败时，同步重试
+ * 会形成 thundering herd 反复打同一端点，向下抖动错开重试时刻。
+ * Retry-After（供应商显式指令）不抖动，由调用方取 max 保留其语义。
+ */
+export function jitteredBackoff(
+  baseMs: number,
+  random: () => number = Math.random,
+): number {
+  return baseMs * (0.75 + random() * 0.25);
+}
+
 export interface ModelTurn {
   text?: string;
   toolCalls?: ToolCall[];
@@ -181,8 +194,11 @@ export class AgentLoop {
         policy === "overflow" ? 1 : this.#retryMaxRetries;
       let lastError = error;
       for (let retry = 1; retry <= maxRetries; retry += 1) {
-        // Retry-After 优先（供应商显式要求等待时长），否则指数退避
-        const backoff = this.#retryBaseDelayMs * 2 ** (retry - 1);
+        // Retry-After 优先（供应商显式要求等待时长），否则指数退避 + 25% 向下抖动
+        // （并发失败时错开重试时刻，防 thundering herd）
+        const backoff = jitteredBackoff(
+          this.#retryBaseDelayMs * 2 ** (retry - 1),
+        );
         const delayMs = Math.max(
           backoff,
           retryAfterMsOf(lastError) ?? 0,
