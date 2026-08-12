@@ -63,7 +63,7 @@ describe("ScheduledApp（定时任务面板）", () => {
     }
   });
 
-  async function setup(routes: Record<string, FetchHandler>) {
+  async function setup() {
     const [{ act }, { createRoot }, { ScheduledApp }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
@@ -94,10 +94,7 @@ describe("ScheduledApp（定时任务面板）", () => {
       "/api/projects": () => ({ projects: PROJECTS }),
       "/api/scheduled?project=proj-a": () => ({ tasks: [] }),
     });
-    const { container } = await setup({
-      "/api/projects": () => ({ projects: PROJECTS }),
-      "/api/scheduled?project=proj-a": () => ({ tasks: [] }),
-    });
+    const { container } = await setup();
     assert.ok(container.textContent?.includes("项目A"));
     assert.ok(
       container.textContent?.includes("当前项目暂无定时任务"),
@@ -126,26 +123,7 @@ describe("ScheduledApp（定时任务面板）", () => {
             }
           : { tasks: [] },
     });
-    const { container, act } = await setup({
-      "/api/projects": () => ({ projects: PROJECTS }),
-      "/api/scheduled?project=proj-a": (init) =>
-        init?.method === "POST"
-          ? {
-              task: {
-                id: "newtask",
-                command: "/run 巡检 --permission normal",
-                at: "2026-08-10T01:00:00.000Z",
-                everyMinutes: 60,
-                createdAt: "2026-08-09T00:00:00.000Z",
-                options: {
-                  description: "巡检",
-                  hardRules: [],
-                  semanticBounds: [],
-                },
-              },
-            }
-          : { tasks: [] },
-    });
+    const { container, act } = await setup();
 
     const input = container.querySelector(
       "input.scheduler-input",
@@ -190,21 +168,7 @@ describe("ScheduledApp（定时任务面板）", () => {
       }),
       "/api/scheduled/t1?project=": () => ({ removed: true }),
     });
-    const { container, root, act } = await setup({
-      "/api/projects": () => ({ projects: PROJECTS }),
-      "/api/scheduled?project=proj-a": () => ({
-        tasks: [
-          {
-            id: "t1",
-            command: "/run 巡检",
-            at: "2026-08-10T01:00:00.000Z",
-            createdAt: "2026-08-09T00:00:00.000Z",
-            options: { description: "巡检", hardRules: [], semanticBounds: [] },
-          },
-        ],
-      }),
-      "/api/scheduled/t1?project=": () => ({ removed: true }),
-    });
+    const { container, act } = await setup();
 
     assert.ok(container.textContent?.includes("/run 巡检"));
     const remove = container.querySelector("button.scheduler-remove") as

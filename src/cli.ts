@@ -13,10 +13,7 @@ import {
   getConfigValue,
   setConfigValue,
 } from "./shared/config-path.js";
-import {
-  toPublicConfig,
-  type ModelRole,
-} from "./config/schema.js";
+import type { ModelRole } from "./config/schema.js";
 import { AgentSessionManager } from "./core/session-manager.js";
 import { AgentSession } from "./core/session.js";
 import {
@@ -36,8 +33,6 @@ import {
   type RunTaskOptions,
 } from "./core/run-task.js";
 import type {
-  AgentEvent,
-  ApprovalAnswer,
   PermissionMode,
   SessionBranch,
 } from "./core/types.js";

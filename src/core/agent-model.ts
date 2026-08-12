@@ -427,16 +427,6 @@ function estimateMessageTokens(message: ConversationMessage): number {
 const BRANCH_SUMMARY_SYSTEM_PROMPT =
   "You are a context summarization assistant for a coding agent. Do NOT continue the conversation.";
 
-const BRANCH_SUMMARY_PROMPT = `Summarize this abandoned conversation branch so work can continue exactly after returning to the main branch.
-
-Return a concise structured summary with these headings:
-- Goal
-- Progress (Done / In Progress / Blocked)
-- Key Decisions
-- Next Steps
-
-Preserve concrete file paths, commands, and failed attempts. Do not invent facts.`;
-
 /**
  * 分支摘要（参照 Pi 的 branch-summarization）：把将被放弃的路径压缩成结构化摘要，
  * 供切分支后注入新分支上下文。独立于会话压缩管道，由 session 在 fork/switch 时触发。

@@ -1,15 +1,26 @@
-import { Fragment, createElement, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { SessionStatus } from "@shared/types.js";
 import type { DisplayItem } from "./session-display";
-import { statusLabel, toolResultDiffText } from "./session-display";
+import { formatTime, formatTokens } from "./session-format";
+import { RichText } from "./session-rich-text";
+import {
+  ApprovalCard,
+  SubtaskCard,
+  ToolCard,
+  type ApprovalScope,
+} from "./session-card";
 
-export type ApprovalScope = "once" | "session" | "project" | "global";
+export type { ApprovalScope } from "./session-card";
 
+/**
+ * 会话流事件卡片的统一入口：按 kind 分派到各专用卡片组件。
+ * 消息/思考/消耗/系统行内渲染；工具/审批/子代理见 session-card。
+ */
 export function ItemCard(props: {
   item: DisplayItem;
   /** 缓存 miss 提示开关（behavior.showCacheMissNotices；默认关） */
   showCacheMissNotices: boolean;
-  locallyResolved: Set<string>;
+  locallyResolved: ReadonlySet<string>;
   /** 正在提交审批的 callId（按钮 loading 态，防重复点击） */
   pendingPermissionCallId?: string | null;
   feedback: string;
@@ -48,240 +59,24 @@ export function ItemCard(props: {
   }
 
   if (item.kind === "tool") {
-    const { call, result, partial } = item;
-    const toolStateClass = !result
-      ? "tool-running"
-      : result.type === "permission_denied"
-        ? "tool-denied"
-        : result.isError
-          ? "tool-error"
-          : "tool-ok";
-    return (
-      <details className={`web-tool-card ${toolStateClass}`}>
-        <summary>
-          <span className="tool-chevron">›</span>
-          <span className="tool-badge">
-            {String(call.tool).toLowerCase()}
-          </span>
-          <code>{call.target}</code>
-          <span className="tool-state">
-            {!result
-              ? "运行中"
-              : result.type === "permission_denied"
-                ? "已拒绝"
-                : result.isError
-                  ? "失败"
-                  : "完成"}
-          </span>
-        </summary>
-        <div className="tool-detail">
-          {/* Bash 执行期实时输出（tool_execution_update 流式 partial；
-              命令结束后仍保留供查看，与最终 tool_result 不重复展示） */}
-          {partial && !result && (
-            <pre className="tool-partial-output">{partial}</pre>
-          )}
-          {call.purpose && <p>目的：{call.purpose}</p>}
-          {result?.summary && <p>{result.summary}</p>}
-          {result?.reason && <p>{result.reason}</p>}
-          {result?.details &&
-            typeof result.details === "object" && (
-              <div className="tool-details-grid">
-                {Object.entries(
-                  result.details as Record<string, unknown>,
-                ).map(([key, value]) => {
-                  // diff 单独渲染为高亮块，不进 details 网格
-                  if (key === "diff") return null;
-                  // Bash 退出码着色（0 绿/非 0 红），耗时转可读格式
-                  const toneClass =
-                    key === "code" && typeof value === "number"
-                      ? value === 0
-                        ? " detail-ok"
-                        : " detail-error"
-                      : key === "durationMs" || key === "signal"
-                        ? " detail-meta"
-                        : "";
-                  const display =
-                    key === "durationMs" && typeof value === "number"
-                      ? formatDuration(value)
-                      : typeof value === "object" && value !== null
-                        ? JSON.stringify(value)
-                        : String(value);
-                  return (
-                    <span
-                      className={`tool-details-item${toneClass}`}
-                      key={key}
-                    >
-                      <b>{key}</b>
-                      <span className="tool-details-sep">：</span>
-                      {display}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          {(() => {
-            // P0-3 后 Edit/Write diff 在 details.diff（不进模型上下文），渲染优先取它；
-            // 旧 trace 的 tool_result 无 details.diff 时回退 output
-            const text = toolResultDiffText(result);
-            return text === undefined ? null : (
-              <DiffOrOutput
-                text={text}
-                forceDiff={
-                  call.tool === "Edit" ||
-                  call.tool === "Write" ||
-                  call.tool === "MultiEdit"
-                }
-              />
-            );
-          })()}
-          {result?.output &&
-            typeof result.output === "object" && (
-              <pre className="tool-output">
-                {JSON.stringify(result.output, null, 2)}
-              </pre>
-            )}
-        </div>
-      </details>
-    );
+    return <ToolCard item={item} />;
   }
 
   if (item.kind === "approval") {
-    const { event } = item;
-    const callId = String(event.call.id);
-    const resolved =
-      item.resolvedByEvent || props.locallyResolved.has(callId);
     return (
-      <section
-        className={`web-approval-card ${resolved ? "resolved" : ""}`}
-      >
-        <div className="approval-heading">
-          <strong>⚠ 审批请求</strong>
-          <span>
-            {event.call.tool} · {event.call.target}
-          </span>
-          {resolved && (
-            <span
-              className={`approval-resolved-tag${
-                item.deniedReason ? " denied" : ""
-              }`}
-            >
-              {item.deniedReason
-                ? `已拒绝：${item.deniedReason}`
-                : "已处理"}
-            </span>
-          )}
-        </div>
-        <p>{event.risk}</p>
-        <DiffOrOutput text={String(event.detail || event.call.target)} />
-        {!resolved && (
-          <>
-            <div className="approval-actions">
-              <button
-                className="approve-button"
-                disabled={props.pendingPermissionCallId === callId}
-                onClick={() =>
-                  void props.onPermission(callId, true, "once")
-                }
-              >
-                {props.pendingPermissionCallId === callId
-                  ? "处理中…"
-                  : "仅这一次"}
-              </button>
-              <button
-                disabled={props.pendingPermissionCallId === callId}
-                onClick={() =>
-                  void props.onPermission(callId, true, "session")
-                }
-              >
-                {props.pendingPermissionCallId === callId
-                  ? "处理中…"
-                  : "本次会话允许"}
-              </button>
-              <button
-                disabled={props.pendingPermissionCallId === callId}
-                onClick={() =>
-                  void props.onPermission(callId, true, "project")
-                }
-              >
-                {props.pendingPermissionCallId === callId
-                  ? "处理中…"
-                  : "本项目允许"}
-              </button>
-              <button
-                disabled={props.pendingPermissionCallId === callId}
-                onClick={() =>
-                  void props.onPermission(callId, true, "global")
-                }
-              >
-                {props.pendingPermissionCallId === callId
-                  ? "处理中…"
-                  : "全局允许"}
-              </button>
-              <button
-                className="reject-button"
-                disabled={props.pendingPermissionCallId === callId}
-                onClick={() => void props.onPermission(callId, false)}
-              >
-                拒绝
-              </button>
-            </div>
-            <div className="approval-feedback">
-              <input
-                value={props.feedback}
-                onChange={(changeEvent) =>
-                  props.onFeedback(callId, changeEvent.target.value)
-                }
-                placeholder="拒绝并留言，例如：别用 npm，用 pnpm"
-              />
-              <button
-                disabled={!props.feedback.trim()}
-                onClick={() =>
-                  void props.onPermission(
-                    callId,
-                    false,
-                    "once",
-                    props.feedback,
-                  )
-                }
-              >
-                拒绝并留言
-              </button>
-            </div>
-          </>
-        )}
-      </section>
+      <ApprovalCard
+        item={item}
+        locallyResolved={props.locallyResolved}
+        pendingPermissionCallId={props.pendingPermissionCallId ?? null}
+        feedback={props.feedback}
+        onFeedback={props.onFeedback}
+        onPermission={props.onPermission}
+      />
     );
   }
 
   if (item.kind === "subtask") {
-    const { start, end } = item;
-    const durationMs = end
-      ? Date.parse(String(end.ts)) - Date.parse(String(start.ts))
-      : undefined;
-    return (
-      <details className="subtask-card">
-        <summary>
-          ◇ <strong>{start.description}</strong>
-          <span>
-            子代理 explore ·{" "}
-            {end
-              ? `${end.toolCalls} 次工具调用 · ${formatTokens(
-                  end.inputTokens + end.outputTokens,
-                )} tokens · ${
-                  durationMs !== undefined && Number.isFinite(durationMs)
-                    ? `${formatDuration(durationMs)} · `
-                    : ""
-                }${statusLabel(end.status)}${end.reason === "timeout" ? "（超时）" : ""}`
-              : "运行中"}
-          </span>
-        </summary>
-        {end?.summary && (
-          <div className="subtask-body">
-            <RichText text={String(end.summary)} />
-          </div>
-        )}
-      </details>
-    );
+    return <SubtaskCard item={item} />;
   }
 
   if (item.kind === "thinking") {
@@ -340,182 +135,6 @@ export function ItemCard(props: {
   return <SystemLine tone={item.tone}>{item.text}</SystemLine>;
 }
 
-export function RichText(props: { text: string }) {
-  const lines = props.text.split(/\r?\n/);
-  const blocks: ReactNode[] = [];
-  // fenced code block 状态：```lang 开行进入收集，闭合围栏渲染为 <pre>
-  let inCode = false;
-  let codeLang = "";
-  let codeLines: string[] = [];
-  const flushCode = (key: number) => {
-    if (!inCode) return;
-    blocks.push(
-      <pre
-        className="code-block"
-        data-lang={codeLang}
-        key={`code-${key}`}
-      >
-        {codeLines.map((line, lineIndex) => (
-          <span key={lineIndex}>
-            {line || " "}
-            {"\n"}
-          </span>
-        ))}
-      </pre>,
-    );
-    codeLang = "";
-    codeLines = [];
-    inCode = false;
-  };
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]!;
-    const trimmed = line.trim();
-    const fence = /^```(\S*)\s*$/.exec(trimmed);
-    if (fence) {
-      if (inCode) {
-        flushCode(blocks.length);
-      } else {
-        inCode = true;
-        codeLang = fence[1] ?? "";
-      }
-      continue;
-    }
-    if (inCode) {
-      codeLines.push(line);
-      continue;
-    }
-    if (!trimmed) {
-      blocks.push(<br key={index} />);
-      continue;
-    }
-    // markdown 标题：## 等原样渲染为分级标题（h1 过大映射 h2，最多 h4）
-    const heading = /^(#{1,6})\s+(.*)$/.exec(trimmed);
-    if (heading) {
-      const level = Math.min(Math.max(heading[1]!.length, 2), 4);
-      blocks.push(
-        createElement(
-          `h${level}`,
-          { key: index },
-          renderInline(heading[2] ?? ""),
-        ),
-      );
-      continue;
-    }
-    // 引用块
-    if (trimmed.startsWith(">")) {
-      blocks.push(
-        <blockquote key={index}>
-          {renderInline(trimmed.replace(/^>\s?/, ""))}
-        </blockquote>,
-      );
-      continue;
-    }
-    // 分隔线
-    if (/^-{3,}$/.test(trimmed)) {
-      blocks.push(<hr key={index} />);
-      continue;
-    }
-    // 有序列表：保留编号前缀
-    const ordered = /^(\d+[.)])\s+(.*)$/.exec(trimmed);
-    if (ordered) {
-      blocks.push(
-        <p className="rich-list-line ordered" key={index}>
-          {ordered[1]} {renderInline(ordered[2] ?? "")}
-        </p>,
-      );
-      continue;
-    }
-    const isList = /^[-*]\s+/.test(trimmed);
-    blocks.push(
-      <p className={isList ? "rich-list-line" : ""} key={index}>
-        {isList ? "• " : ""}
-        {renderInline(
-          isList ? trimmed.replace(/^[-*]\s+/, "") : line,
-        )}
-      </p>,
-    );
-  }
-  flushCode(blocks.length);
-  return <div className="rich-text">{blocks}</div>;
-}
-
-export function renderInline(text: string): ReactNode[] {
-  // 链接优先于 code/bold 解析：避免 [text](url) 中括号内容被误判
-  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]\n]+\]\([^)\n]+\))/g);
-  return tokens.map((token, index) => {
-    if (token.startsWith("`") && token.endsWith("`")) {
-      return <code key={index}>{token.slice(1, -1)}</code>;
-    }
-    if (token.startsWith("**") && token.endsWith("**")) {
-      return <strong key={index}>{token.slice(2, -2)}</strong>;
-    }
-    const link = /^\[([^\]\n]+)\]\(([^)\n]+)\)$/.exec(token);
-    if (link) {
-      const href = link[2] ?? "";
-      // 只放行 http(s) 链接，防 javascript: 等危险协议
-      return /^https?:\/\//i.test(href) ? (
-        <a key={index} href={href} target="_blank" rel="noopener noreferrer">
-          {link[1]}
-        </a>
-      ) : (
-        <Fragment key={index}>{token}</Fragment>
-      );
-    }
-    return <Fragment key={index}>{token}</Fragment>;
-  });
-}
-
-export function DiffOrOutput(props: { text: string; forceDiff?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  const lines = props.text.split(/\r?\n/);
-  // 同时存在 +/- 行（或带 diff 头）才按 diff 渲染，避免缩进文本误判；
-  // 编辑类工具（Edit/Write/MultiEdit）输出强制按 diff 着色（纯新增文件只有 + 行）
-  const hasMarker = lines.some(
-    (line) => line.startsWith("@@") || line.startsWith("diff --git"),
-  );
-  const hasAdd = lines.some((line) => line.startsWith("+"));
-  const hasRemove = lines.some((line) => line.startsWith("-"));
-  const isDiff =
-    props.forceDiff === true || hasMarker || (hasAdd && hasRemove);
-  // 长输出按需展开：默认只展示前 60 行，避免大段输出拖慢回放渲染
-  const collapseThreshold = 60;
-  const collapsed = !expanded && lines.length > collapseThreshold;
-  const visibleLines = collapsed
-    ? lines.slice(0, collapseThreshold)
-    : lines;
-  return (
-    <>
-      <pre className={isDiff ? "diff-output" : "tool-output"}>
-        {visibleLines.map((line, index) => (
-          <span
-            className={
-              line.startsWith("@@") || line.startsWith("diff --git")
-                ? "diff-hunk"
-                : line.startsWith("+")
-                  ? "diff-add"
-                  : line.startsWith("-")
-                    ? "diff-remove"
-                    : "diff-context"
-            }
-            key={index}
-          >
-            {line}
-            {"\n"}
-          </span>
-        ))}
-      </pre>
-      {collapsed && (
-        <button
-          className="output-expand-toggle"
-          onClick={() => setExpanded(true)}
-        >
-          展开剩余 {lines.length - collapseThreshold} 行
-        </button>
-      )}
-    </>
-  );
-}
-
 export function SystemLine(props: {
   children: ReactNode;
   tone?: string;
@@ -530,31 +149,6 @@ export function SystemLine(props: {
     </div>
   );
 }
-
-export function formatTokens(value: number): string {
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(1)}m`;
-  }
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(value);
-}
-
-export function formatTime(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
-export function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms)) return String(ms);
-  const seconds = ms / 1000;
-  if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)} 时`;
-  if (seconds >= 60) return `${(seconds / 60).toFixed(1)} 分`;
-  if (ms >= 1000) return `${seconds.toFixed(1)}s`;
-  return `${Math.round(ms)}ms`;
-}
-
 
 export const statusMeta: Record<
   SessionStatus,

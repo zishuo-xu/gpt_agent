@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdir, appendFile, readFile } from "node:fs/promises";
+import { mkdir, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { readJsonl } from "../utils/fs.js";
 import type { AgentEvent, RecordedEvent } from "./types.js";

@@ -109,7 +109,7 @@ describe("StatsApp（任务统计面板）", () => {
     }
   });
 
-  async function setup(routes: Record<string, FetchHandler>) {
+  async function setup() {
     const [{ act }, { createRoot }, { StatsApp }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
@@ -138,7 +138,7 @@ describe("StatsApp（任务统计面板）", () => {
 
   it("渲染总量卡、图表列与会话明细行", async () => {
     const fetch = stubFetch(baseRoutes());
-    const { container } = await setup(baseRoutes());
+    const { container } = await setup();
     const text = container.textContent ?? "";
     // 总量卡
     assert.match(text, /会话总数/);
@@ -156,7 +156,7 @@ describe("StatsApp（任务统计面板）", () => {
 
   it("渲染按模型成本维度表（费用占比条 + tokens）", async () => {
     const fetch = stubFetch(baseRoutes());
-    const { container } = await setup(baseRoutes());
+    const { container } = await setup();
     const text = container.textContent ?? "";
     assert.match(text, /按模型成本/);
     assert.equal(container.querySelectorAll(".stats-model-row").length, 2);
@@ -168,7 +168,7 @@ describe("StatsApp（任务统计面板）", () => {
 
   it("run 会话行有「查看」，交互会话行显示「—」", async () => {
     const fetch = stubFetch(baseRoutes());
-    const { container } = await setup(baseRoutes());
+    const { container } = await setup();
     const runRow = Array.from(
       container.querySelectorAll(".stats-table tbody tr"),
     ).find((row) => row.textContent?.includes("巡检任务"));
@@ -202,26 +202,7 @@ describe("StatsApp（任务统计面板）", () => {
         totals: { totalCostCny: 0.42, totalInputTokens: 1000, totalOutputTokens: 500, status: "done" },
       }),
     });
-    const { container, act } = await setup({
-      ...baseRoutes(),
-      "/api/sessions/s-run/summary?project=proj-a": () => ({
-        run: {
-          taskId: "task-1",
-          description: "巡检任务",
-          status: "completed",
-          reason: "done",
-          startedAt: "2026-08-09T02:00:00.000Z",
-          finishedAt: "2026-08-09T03:00:00.000Z",
-          durationMs: 3600_000,
-          summary: "全部检查通过，改动见上。",
-          todos: [
-            { id: "a", text: "跑测试", status: "done" },
-            { id: "b", text: "写收尾", status: "done" },
-          ],
-        },
-        totals: { totalCostCny: 0.42, totalInputTokens: 1000, totalOutputTokens: 500, status: "done" },
-      }),
-    });
+    const { container, act } = await setup();
 
     const runRow = Array.from(
       container.querySelectorAll(".stats-table tbody tr"),

@@ -3,12 +3,7 @@
  * 后端各模块（core/session、web/memory、model/test-connection、config/schema）
  * 从这里 re-export，前端不再手写后端类型副本。
  */
-import type {
-  PermissionMode,
-  RecordedEvent,
-  SessionBranch,
-  TodoItem,
-} from "../core/types.js";
+import type { PermissionMode, TodoItem } from "../core/types.js";
 
 export type {
   PermissionMode,

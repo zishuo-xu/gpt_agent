@@ -1,4 +1,3 @@
-import { ModelHttpError } from "./client.js";
 import type {
   CompletionRequest,
   ModelClient,
