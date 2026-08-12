@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 /**
  * MyAgent Web E2E 回归套件（生产级路径）：
@@ -11,6 +11,33 @@ import { expect, test } from "@playwright/test";
  * 工作目录持久化跨运行；涉及文件落盘的用例需先清理旧产物。
  */
 const E2E_WORKSPACE = "/tmp/myagent-gui-test-workspace";
+
+/**
+ * 任务运行期间自动批准审批卡（仅限只读任务测试）。
+ * 模型可能选用白名单外的只读命令组合，headless 无人响应时 60s
+ * 超时自动拒绝会导致任务停滞；本 helper 轮询未决审批卡并点
+ * 「仅这一次」（scope=once），直到完成标记可见或超时。
+ * 只读任务契约由任务描述保证；写任务测试不得使用——
+ * 「写文件触发审批卡」用例验证的正是审批流本身。
+ */
+async function autoApproveReadonly(
+  page: Page,
+  done: Locator,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await done.isVisible().catch(() => false)) return;
+    const pending = page.locator(
+      ".web-approval-card:not(.resolved) .approve-button",
+    );
+    if ((await pending.count()) > 0) {
+      await pending.first().click();
+    }
+    // 周期覆盖审批卡 resolved 的 SSE 推送往返（本地服务毫秒级）
+    await page.waitForTimeout(750);
+  }
+}
 
 test.describe("设置页", () => {
   test("加载并渲染六分区，编辑扩展字段后保存", async ({ page }) => {
@@ -148,6 +175,9 @@ test.describe("会话页", () => {
       "List the files in this project and briefly summarize what this project is about. Use read-only commands only.",
     );
     await page.getByRole("button", { name: "启动任务" }).click();
+    const done = page.getByText("本轮任务已完成");
+    // 并行：等待完成的同时自动批准白名单外只读命令触发的审批卡
+    const approvalLoop = autoApproveReadonly(page, done, 180_000);
     // 进入会话详情，等待工具调用与完成
     await expect(
       page.getByRole("button", { name: "■ 中止任务" }).or(
@@ -159,9 +189,10 @@ test.describe("会话页", () => {
       page.locator(".web-tool-card").first(),
     ).toBeVisible({ timeout: 60_000 });
     // 等待任务完成（真实模型，最长 3 分钟）
-    await expect(page.getByText("本轮任务已完成")).toBeVisible({
+    await expect(done).toBeVisible({
       timeout: 180_000,
     });
+    await approvalLoop;
   });
 });
 
