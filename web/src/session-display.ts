@@ -1,4 +1,4 @@
-import type { RecordedEvent } from "@shared/types.js";
+import type { LedgerUnit, RecordedEvent } from "@shared/types.js";
 
 export type SessionEvent = RecordedEvent;
 
@@ -35,6 +35,15 @@ export type DisplayItem =
       seq: number;
       start: Record<string, any>;
       end?: Record<string, any>;
+    }
+  | {
+      /** 任务执行账本卡：同 taskId 的 ledger_update 合并为一张，随事件流实时刷新 */
+      kind: "ledger";
+      seq: number;
+      taskId: string;
+      /** 任务描述（来自 run_started；run_started 缺失时为 undefined） */
+      description?: string;
+      units: LedgerUnit[];
     }
   | { kind: "cost"; seq: number; event: Record<string, any> }
   | { kind: "system"; seq: number; text: string; tone?: string }
@@ -73,6 +82,9 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
   const taskEnds = new Map<string, Record<string, any>>();
   // tool_execution_update 流式输出累积（callId → 已拼接的 partial）
   const toolPartials = new Map<string, string>();
+  // 任务执行账本：taskId → 单元累积（同 taskId 的 ledger_update 合并为一张卡）
+  const ledgerUnits = new Map<string, LedgerUnit[]>();
+  const runStartedDescriptions = new Map<string, string>();
   for (const { event } of events) {
     if (event.type === "tool_result") {
       toolResults.set(String(event.callId), event);
@@ -90,12 +102,30 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
       startedQueues.add(String(event.queueId));
     } else if (event.type === "task_end") {
       taskEnds.set(String(event.taskId), event);
+    } else if (event.type === "ledger_update") {
+      const list = ledgerUnits.get(String(event.taskId)) ?? [];
+      list.push(event.unit);
+      ledgerUnits.set(String(event.taskId), list);
+    } else if (event.type === "run_started") {
+      runStartedDescriptions.set(String(event.taskId), event.description);
     }
   }
 
   const items: DisplayItem[] = [];
   const system = (seq: number, text: string, tone?: string) =>
     items.push({ kind: "system", seq, text, tone });
+  // 已渲染账本卡的 taskId（同任务只渲染一张，units 快照随事件流刷新）
+  const ledgerCards = new Set<string>();
+  const pushLedgerCard = (taskId: string, seq: number) => {
+    ledgerCards.add(taskId);
+    items.push({
+      kind: "ledger",
+      seq,
+      taskId,
+      description: runStartedDescriptions.get(taskId),
+      units: ledgerUnits.get(taskId) ?? [],
+    });
+  };
 
   for (let index = 0; index < events.length; index += 1) {
     const { seq, ts, event } = events[index]!;
@@ -206,6 +236,17 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
           `无人值守任务 #${event.taskId} 已启动 · ${event.permissionMode} 档`,
           "running",
         );
+        // 账本卡挂在任务启动行后：units 取第一遍遍历的全量快照，
+        // buildDisplayItems 每次全量重算 → 卡随 ledger_update 事件实时刷新
+        if (!ledgerCards.has(String(event.taskId))) {
+          pushLedgerCard(String(event.taskId), seq);
+        }
+        break;
+      case "ledger_update":
+        // 无 run_started 的极端情况（事件流不完整）：首个 ledger_update 建卡
+        if (!ledgerCards.has(String(event.taskId))) {
+          pushLedgerCard(String(event.taskId), seq);
+        }
         break;
       case "wrapup_warning":
         system(seq, `任务进入 ${event.level} 阶段 · ${event.message}`, "warning");

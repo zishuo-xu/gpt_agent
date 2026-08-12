@@ -6,6 +6,8 @@
 import type { PermissionMode, TodoItem } from "../core/types.js";
 
 export type {
+  LedgerStatus,
+  LedgerUnit,
   PermissionMode,
   RecordedEvent,
   SessionBranch,

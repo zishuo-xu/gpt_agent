@@ -114,6 +114,20 @@ export function createEventRenderer(options: {
         `\n◆ 无人值守任务 #${event.taskId} 已启动 · ${event.permissionMode} 档\n`,
       );
     }
+    if (event.type === "ledger_update") {
+      // 任务执行账本：每个文件/子任务一行实时增量（状态徽标 + 相对路径）
+      const marker =
+        event.unit.status === "done"
+          ? "✓"
+          : event.unit.status === "verified"
+            ? "✔"
+            : event.unit.status === "in_progress"
+              ? "→"
+              : event.unit.status === "blocked"
+                ? "✗"
+                : "○";
+      output(`  ${marker} ${event.unit.label}\n`);
+    }
     if (event.type === "wrapup_warning") {
       output(`\n⚠ 任务进入 ${event.level} 阶段：${event.message}\n`);
     }
@@ -184,6 +198,8 @@ export function summarizeEvent(event: AgentEvent): string {
       return `上下文压缩：${event.summary.slice(0, 40)}`;
     case "run_started":
       return `无人值守任务：${event.description.slice(0, 40)}`;
+    case "ledger_update":
+      return `账本：#${event.taskId} ${event.unit.label}（${event.unit.status}）`;
     default:
       return event.type;
   }

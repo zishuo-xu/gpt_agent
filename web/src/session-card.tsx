@@ -260,3 +260,56 @@ export function SubtaskCard(props: {
     </details>
   );
 }
+
+/** 账本状态徽标文案与样式类（系统自动记账 + 模型显式确认双通道） */
+const ledgerStatusMeta: Record<string, { label: string; className: string }> =
+  {
+    pending: { label: "待开始", className: "ledger-pending" },
+    in_progress: { label: "进行中", className: "ledger-in-progress" },
+    done: { label: "已写入", className: "ledger-done" },
+    verified: { label: "已验证", className: "ledger-verified" },
+    blocked: { label: "卡住", className: "ledger-blocked" },
+  };
+
+/** 任务执行账本卡：同任务的文件/子任务进度清单（随 ledger_update 实时刷新） */
+export function LedgerCard(props: {
+  item: Extract<DisplayItem, { kind: "ledger" }>;
+}) {
+  const { taskId, description, units } = props.item;
+  const doneCount = units.filter(
+    (unit) => unit.status === "done" || unit.status === "verified",
+  ).length;
+  const cardTitle = description
+    ? `任务账本：${description}`
+    : `任务账本 #${taskId}`;
+  return (
+    <details className="ledger-card" open>
+      <summary>
+        <span className="ledger-chevron">›</span>
+        <strong>{cardTitle}</strong>
+        <span className="ledger-count">
+          {units.length === 0
+            ? "暂无记录"
+            : `已记录 ${doneCount}/${units.length}`}
+        </span>
+      </summary>
+      {units.length > 0 && (
+        <ul className="ledger-units">
+          {units.map((unit) => {
+            const meta = ledgerStatusMeta[unit.status] ?? {
+              label: unit.status,
+              className: "ledger-pending",
+            };
+            return (
+              <li key={unit.id} className={`ledger-unit ${meta.className}`}>
+                <span className="ledger-status">{meta.label}</span>
+                <code>{unit.label}</code>
+                {unit.note && <span className="ledger-note">{unit.note}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </details>
+  );
+}

@@ -287,6 +287,19 @@ export type V1Event =
   | { seq: number; ts: string; type: "approval.request"; callId: string; tool: string; risk: string }
   | { seq: number; ts: string; type: "run.started"; description: string }
   | { seq: number; ts: string; type: "run.finished"; status: string; reason?: string }
+  | {
+      seq: number;
+      ts: string;
+      type: "ledger.update";
+      taskId: string;
+      unit: {
+        id: string;
+        kind: "file" | "task";
+        label: string;
+        status: string;
+        note?: string;
+      };
+    }
   | { seq: number; ts: string; type: "system.info"; message: string }
   | { seq: number; ts: string; type: "system.error"; message: string };
 
@@ -351,6 +364,19 @@ function mapV1Event(
         type: "run.finished",
         status: event.status,
         ...(event.reason ? { reason: event.reason } : {}),
+      };
+    case "ledger_update":
+      return {
+        ...base,
+        type: "ledger.update",
+        taskId: event.taskId,
+        unit: {
+          id: event.unit.id,
+          kind: event.unit.kind,
+          label: event.unit.label,
+          status: event.unit.status,
+          ...(event.unit.note ? { note: event.unit.note } : {}),
+        },
       };
     case "error":
       return { ...base, type: "system.error", message: event.message };

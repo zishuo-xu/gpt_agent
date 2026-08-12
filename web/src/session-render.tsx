@@ -5,6 +5,7 @@ import { formatTime, formatTokens } from "./session-format";
 import { RichText } from "./session-rich-text";
 import {
   ApprovalCard,
+  LedgerCard,
   SubtaskCard,
   ToolCard,
   type ApprovalScope,
@@ -77,6 +78,10 @@ export function ItemCard(props: {
 
   if (item.kind === "subtask") {
     return <SubtaskCard item={item} />;
+  }
+
+  if (item.kind === "ledger") {
+    return <LedgerCard item={item} />;
   }
 
   if (item.kind === "thinking") {

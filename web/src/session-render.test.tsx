@@ -283,6 +283,65 @@ describe("ItemCard（会话展示组件全分支）", () => {
     assert.ok(subtask.textContent?.includes("探索完成"));
   });
 
+  it("账本卡：标题/计数/文件清单 + 各状态徽标", async () => {
+    const ts2 = "2026-08-09T10:00:00.000Z";
+    const container = await renderItem({
+      kind: "ledger",
+      seq: 8,
+      ts: ts2,
+      taskId: "run1",
+      description: "重构 session.ts",
+      units: [
+        {
+          id: "src/a.ts",
+          kind: "file",
+          label: "src/a.ts",
+          status: "done",
+          updatedAt: ts2,
+        },
+        {
+          id: "src/b.ts",
+          kind: "file",
+          label: "src/b.ts",
+          status: "in_progress",
+          note: "待验证",
+          updatedAt: ts2,
+        },
+        {
+          id: "src/c.ts",
+          kind: "file",
+          label: "src/c.ts",
+          status: "blocked",
+          updatedAt: ts2,
+        },
+      ],
+    } as never);
+    assert.ok(container.querySelector(".ledger-card"), "账本卡应渲染");
+    assert.ok(container.textContent?.includes("任务账本：重构 session.ts"));
+    assert.match(container.textContent ?? "", /已记录 1\/3/);
+    const statuses = Array.from(
+      container.querySelectorAll(".ledger-status"),
+    ).map((el) => el.textContent);
+    assert.deepEqual(statuses, ["已写入", "进行中", "卡住"]);
+    assert.ok(container.querySelector(".ledger-unit.ledger-done"));
+    assert.ok(container.querySelector(".ledger-unit.ledger-in-progress"));
+    assert.ok(container.querySelector(".ledger-unit.ledger-blocked"));
+    assert.match(container.textContent ?? "", /待验证/, "note 应展示");
+  });
+
+  it("账本卡：无记录时显示占位计数，空 units 不渲染清单", async () => {
+    const container = await renderItem({
+      kind: "ledger",
+      seq: 9,
+      ts,
+      taskId: "run2",
+      units: [],
+    } as never);
+    assert.ok(container.textContent?.includes("任务账本 #run2"));
+    assert.match(container.textContent ?? "", /暂无记录/);
+    assert.equal(container.querySelectorAll(".ledger-units li").length, 0);
+  });
+
   it("StatusTag 与格式化纯函数", async () => {
     const [{ act }, { createRoot }, { StatusTag }, format] = await Promise.all([
       import("react"),

@@ -101,8 +101,20 @@ test("v1 事件映射：白名单类型多对一折叠", () => {
       hardRules: [],
     }),
     record(8, { type: "run_finished", taskId: "t1", status: "completed", reason: "done" }),
-    record(9, { type: "error", message: "模型超时" }),
-    record(10, { type: "done" }),
+    record(9, {
+      type: "ledger_update",
+      taskId: "t1",
+      unit: {
+        id: "src/a.ts",
+        kind: "file",
+        label: "src/a.ts",
+        status: "done",
+        note: "系统自动记录：文件已修改，待验证",
+        updatedAt: "2026-08-09T10:00:00.000Z",
+      },
+    }),
+    record(10, { type: "error", message: "模型超时" }),
+    record(11, { type: "done" }),
   ]);
   assert.deepEqual(events, [
     { seq: 1, ts: "2026-08-09T10:00:00.000Z", type: "user.text", text: "你好" },
@@ -113,8 +125,21 @@ test("v1 事件映射：白名单类型多对一折叠", () => {
     { seq: 6, ts: "2026-08-09T10:00:00.000Z", type: "approval.request", callId: "c2", tool: "Write", risk: "写文件" },
     { seq: 7, ts: "2026-08-09T10:00:00.000Z", type: "run.started", description: "修复测试" },
     { seq: 8, ts: "2026-08-09T10:00:00.000Z", type: "run.finished", status: "completed", reason: "done" },
-    { seq: 9, ts: "2026-08-09T10:00:00.000Z", type: "system.error", message: "模型超时" },
-    { seq: 10, ts: "2026-08-09T10:00:00.000Z", type: "system.info", message: "任务完成" },
+    {
+      seq: 9,
+      ts: "2026-08-09T10:00:00.000Z",
+      type: "ledger.update",
+      taskId: "t1",
+      unit: {
+        id: "src/a.ts",
+        kind: "file",
+        label: "src/a.ts",
+        status: "done",
+        note: "系统自动记录：文件已修改，待验证",
+      },
+    },
+    { seq: 10, ts: "2026-08-09T10:00:00.000Z", type: "system.error", message: "模型超时" },
+    { seq: 11, ts: "2026-08-09T10:00:00.000Z", type: "system.info", message: "任务完成" },
   ]);
 });
 

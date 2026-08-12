@@ -225,6 +225,103 @@ describe("buildDisplayItems（会话回放事件流转换）", () => {
     }
   });
 
+  it("run_started 后同 taskId 的 ledger_update 合并为一张账本卡（随事件流刷新）", () => {
+    const unitA = {
+      type: "ledger_update",
+      taskId: "t1",
+      unit: {
+        id: "src/a.ts",
+        kind: "file",
+        label: "src/a.ts",
+        status: "done",
+        updatedAt: ts,
+      },
+    };
+    const unitB = {
+      type: "ledger_update",
+      taskId: "t1",
+      unit: {
+        id: "src/b.ts",
+        kind: "file",
+        label: "src/b.ts",
+        status: "in_progress",
+        note: "待验证",
+        updatedAt: ts,
+      },
+    };
+    // 事件流到达一半：卡只含已到的单元
+    const partial = buildDisplayItems([
+      ev(1, { type: "run_started", taskId: "t1", description: "写两个文件", permissionMode: "trust" }),
+      ev(2, unitA),
+    ]);
+    assert.deepEqual(
+      partial.map((item) => item.kind),
+      ["system", "ledger"],
+    );
+    const card = partial[1]!;
+    assert.equal(card.kind, "ledger");
+    if (card.kind === "ledger") {
+      assert.equal(card.taskId, "t1");
+      assert.equal(card.description, "写两个文件");
+      assert.equal(card.units.length, 1);
+      assert.equal(card.units[0]?.id, "src/a.ts");
+    }
+
+    // 完整事件流：同一 taskId 仍只有一张卡，含全部单元
+    const full = buildDisplayItems([
+      ev(1, { type: "run_started", taskId: "t1", description: "写两个文件", permissionMode: "trust" }),
+      ev(2, unitA),
+      ev(3, unitB),
+      ev(4, { type: "run_finished", taskId: "t1", status: "completed", reason: "done" }),
+    ]);
+    const ledgerItems = full.filter((item) => item.kind === "ledger");
+    assert.equal(ledgerItems.length, 1);
+    const finalCard = ledgerItems[0]!;
+    assert.equal(finalCard.kind, "ledger");
+    if (finalCard.kind === "ledger") {
+      assert.equal(finalCard.units.length, 2);
+      assert.deepEqual(
+        finalCard.units.map((unit) => unit.id),
+        ["src/a.ts", "src/b.ts"],
+      );
+    }
+  });
+
+  it("无 run_started 时首个 ledger_update 建卡；不同 taskId 各自成卡", () => {
+    const items = buildDisplayItems([
+      ev(1, {
+        type: "ledger_update",
+        taskId: "x1",
+        unit: {
+          id: "notes.md",
+          kind: "file",
+          label: "notes.md",
+          status: "done",
+          updatedAt: ts,
+        },
+      }),
+      ev(2, {
+        type: "ledger_update",
+        taskId: "y2",
+        unit: {
+          id: "other.txt",
+          kind: "file",
+          label: "other.txt",
+          status: "blocked",
+          updatedAt: ts,
+        },
+      }),
+    ]);
+    const ledgerItems = items.filter((item) => item.kind === "ledger");
+    assert.equal(ledgerItems.length, 2);
+    const first = ledgerItems[0]!;
+    assert.equal(first.kind, "ledger");
+    if (first.kind === "ledger") {
+      assert.equal(first.taskId, "x1");
+      assert.equal(first.description, undefined);
+    }
+  });
+
   it("回放裁剪：events.slice(0, cursor) 前缀流产生对应前缀的显示条目", () => {
     const events: SessionEvent[] = [
       ev(1, { type: "user", text: "开始" }),
