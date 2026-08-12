@@ -160,10 +160,13 @@ export function StatsApp() {
     window.localStorage.setItem("stats.project", currentProject);
     setLoading(true);
     setError("");
+    // 竞态保护：快速切换项目时，过期响应（旧项目的 fetch）不得覆盖新数据
+    const controller = new AbortController();
     void (async () => {
       try {
         const response = await fetch(
           `/api/stats?project=${encodeURIComponent(currentProject)}`,
+          { signal: controller.signal },
         );
         const payload = await response.json();
         if (!response.ok) {
@@ -171,11 +174,13 @@ export function StatsApp() {
         }
         setStats(payload as SessionStatsPayload);
       } catch (err) {
+        if (controller.signal.aborted) return;
         setError(err instanceof Error ? err.message : "读取统计失败");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     })();
+    return () => controller.abort();
   }, [currentProject, reloadKey]);
 
   const chart = useMemo(() => {

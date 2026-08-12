@@ -13,6 +13,27 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 const E2E_WORKSPACE = "/tmp/myagent-gui-test-workspace";
 
 /**
+ * React 19 受控 select 的真实用户路径选择：经原型 setter 写 value + 派发 change。
+ * Playwright 原生 selectOption 直接赋值会同步 React 19 实例级 value tracker，
+ * 导致 onChange 的 change-detection 判定"无变化"而静默不触发（受控组件 state
+ * 不更新、页面停留在旧数据）——与 typeInto 对 input 的处理同源。
+ */
+async function selectProjectOption(page: Page, label: string): Promise<void> {
+  await page
+    .getByRole("combobox", { name: "项目" })
+    .evaluate((el, targetLabel) => {
+      const select = el as HTMLSelectElement;
+      const option = Array.from(select.options).find(
+        (item) => item.textContent === targetLabel,
+      );
+      if (!option) throw new Error(`项目选项不存在：${targetLabel}`);
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!
+        .set!.call(select, option.value);
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }, label);
+}
+
+/**
  * 任务运行期间自动批准审批卡（仅限只读任务测试）。
  * 模型可能选用白名单外的只读命令组合，headless 无人响应时 60s
  * 超时自动拒绝会导致任务停滞；本 helper 轮询未决审批卡并点
@@ -305,8 +326,18 @@ test.describe("新功能：定时任务 / 统计面板", () => {
     await expect(
       page.getByRole("heading", { name: "定时任务" }),
     ).toBeVisible();
-    // 选择第一个非大厅项目（隔离 workspace 的默认项目）
-    await page.getByRole("combobox", { name: "项目" }).selectOption({ index: 1 });
+    // 选择第一个非大厅项目（隔离 workspace 的默认项目）；
+    // 原型 setter 模拟真实用户选择（React 19 tracker 兼容）
+    await page
+      .getByRole("combobox", { name: "项目" })
+      .evaluate((el) => {
+        const select = el as HTMLSelectElement;
+        const option = select.options[1];
+        if (!option) throw new Error("项目下拉没有第二个选项");
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!
+          .set!.call(select, option.value);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
     const input = page.getByRole("textbox", {
       name: "/run 任务描述 [--at HH:mm] [--every N 分钟] [--permission …]",
     });
@@ -335,7 +366,10 @@ test.describe("新功能：定时任务 / 统计面板", () => {
     await expect(
       page.getByRole("heading", { name: "任务统计" }),
     ).toBeVisible();
-    await page.getByRole("combobox", { name: "项目" }).selectOption({ index: 1 });
+    // 选择 e2e 工作区项目（defaultCwd，startSession 的会话所在）——不能按 index：
+    // listProjects 按 updatedAt 降序，隔离 HOME 积累的历史项目会抢占前位；
+    // 用原型 setter 模拟真实用户选择（React 19 tracker 兼容，见 helper 注释）
+    await selectProjectOption(page, "myagent-gui-test-workspace");
     // 总量卡与图表
     await expect(page.locator(".stats-card").first()).toBeVisible({
       timeout: 15_000,
