@@ -11,6 +11,7 @@ import type {
   SessionStatus,
   SessionSummary,
 } from "@shared/types.js";
+import { useProjectPicker, type OpenedProject } from "./use-project-picker";
 import { buildDisplayItems } from "./session-display";
 import type { ApprovalScope } from "./session-render";
 import {
@@ -33,17 +34,6 @@ import { SessionStream } from "./session-stream";
 import { NewTaskOverlay } from "./session-new-task";
 import { ProjectPicker } from "./ProjectPicker";
 
-interface FsRoot {
-  name: string;
-  path: string;
-}
-
-interface FsEntry {
-  name: string;
-  path: string;
-  isDirectory: boolean;
-}
-
 /** SSE 事件记录（后端 RecordedEvent 的会话内形态） */
 export type SessionEvent = RecordedEvent;
 
@@ -54,12 +44,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [selectedId, setSelectedId] = useState("");
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [currentProject, setCurrentProject] = useState("");
-  const [showProjectPicker, setShowProjectPicker] = useState(false);
-  const [fsRoots, setFsRoots] = useState<FsRoot[]>([]);
-  const [fsPath, setFsPath] = useState("");
-  const [fsEntries, setFsEntries] = useState<FsEntry[]>([]);
-  const [fsError, setFsError] = useState("");
-  const [fsOpening, setFsOpening] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [branches, setBranches] = useState<SessionBranch[]>([]);
   const [currentBranchId, setCurrentBranchId] = useState("main");
@@ -76,6 +60,29 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [showDetail, setShowDetail] = useState(false);
   /** 移动端侧栏抽屉开合（≤768px 生效） */
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // 项目选择器（目录浏览 + 打开项目）：打开成功后切换到目标项目视图
+  const projectPicker = useProjectPicker({
+    onOpened: (project: OpenedProject) => {
+      setSelectedId("");
+      setSessions([]);
+      setSessionsLoaded(false);
+      setEvents([]);
+      setCurrentProject(project.key);
+      // 新建面板可能正打开着：同步面板内执行环境，避免下拉停留在旧项目
+      if (showNewTask) {
+        setNewTaskEnv("project");
+        setNewTaskProject(project.key);
+      }
+      // 打开后立即拉取该项目的会话列表（值不变时 useEffect 不会触发）
+      void refreshSessions();
+      // 刷新项目列表（把新项目并入切换器）
+      void (async () => {
+        const projectsResponse = await fetch("/api/projects");
+        const projectsPayload = await projectsResponse.json();
+        setProjects((projectsPayload.projects ?? []) as ProjectEntry[]);
+      })();
+    },
+  });
   const [submitting, setSubmitting] = useState(false);
   const [resolvedPermissions, setResolvedPermissions] =
     useState<Set<string>>(new Set());
@@ -297,80 +304,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
     setNewTaskEnv(currentProject === "lobby" ? "lobby" : "project");
     setNewTaskProject(currentProject === "lobby" ? "" : currentProject);
     setShowNewTask(true);
-  }
-
-  // 面板展开后聚焦输入框（模态居中，无需滚动）
-  async function openProjectPicker() {
-    setFsError("");
-    setShowProjectPicker(true);
-    try {
-      const rootsResponse = await fetch("/api/fs/roots");
-      const rootsPayload = await rootsResponse.json();
-      const roots = (rootsPayload.roots ?? []) as FsRoot[];
-      setFsRoots(roots);
-      // 从第一个根（家目录）开始浏览
-      const first = roots[0];
-      if (first) {
-        setFsPath(first.path);
-        await loadFsDirectory(first.path);
-      }
-    } catch {
-      setFsError("无法读取目录列表");
-    }
-  }
-
-  async function loadFsDirectory(dir: string) {
-    setFsError("");
-    setFsPath(dir);
-    const response = await fetch(
-      `/api/fs/list?path=${encodeURIComponent(dir)}`,
-    );
-    const payload = await response.json();
-    if (!response.ok) {
-      setFsError(payload.error ?? "读取目录失败");
-      setFsEntries([]);
-      return;
-    }
-    setFsEntries((payload.entries ?? []) as FsEntry[]);
-  }
-
-  async function confirmOpenProject(dir: string) {
-    setFsOpening(true);
-    setFsError("");
-    try {
-      const response = await fetch("/api/projects/open", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path: dir }),
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        setFsError(payload.error ?? "无法打开项目");
-        return;
-      }
-      const project = payload.project as ProjectEntry;
-      setShowProjectPicker(false);
-      setSelectedId("");
-      setSessions([]);
-      setSessionsLoaded(false);
-      setEvents([]);
-      setCurrentProject(project.key);
-      // 新建面板可能正打开着：同步面板内执行环境，避免下拉停留在旧项目
-      if (showNewTask) {
-        setNewTaskEnv("project");
-        setNewTaskProject(project.key);
-      }
-      // 打开后立即拉取该项目的会话列表（值不变时 useEffect 不会触发）
-      await refreshSessions();
-      // 刷新项目列表（把新项目并入切换器）
-      const projectsResponse = await fetch("/api/projects");
-      const projectsPayload = await projectsResponse.json();
-      setProjects((projectsPayload.projects ?? []) as ProjectEntry[]);
-    } catch {
-      setFsError("无法打开项目");
-    } finally {
-      setFsOpening(false);
-    }
   }
 
   // 标题统一在此设置：等待审批 > 刚完成提醒 > 当前会话 > 默认
@@ -790,22 +723,22 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   onMessage={updateMessage}
                   onPickTemplate={setMessage}
                   onSubmit={submitMessage}
-                  onOpenProjectPicker={() => void openProjectPicker()}
+                  onOpenProjectPicker={() => void projectPicker.openProjectPicker()}
                   onClose={() => setShowNewTask(false)}
                   onCancelBounds={() => setRunBoundsPreview(null)}
                 />
               </div>
             )}
-            {showProjectPicker && (
+            {projectPicker.showProjectPicker && (
               <ProjectPicker
-                roots={fsRoots}
-                path={fsPath}
-                entries={fsEntries}
-                error={fsError}
-                opening={fsOpening}
-                onNavigate={(dir) => void loadFsDirectory(dir)}
-                onOpen={() => void confirmOpenProject(fsPath)}
-                onClose={() => setShowProjectPicker(false)}
+                roots={projectPicker.fsRoots}
+                path={projectPicker.fsPath}
+                entries={projectPicker.fsEntries}
+                error={projectPicker.fsError}
+                opening={projectPicker.fsOpening}
+                onNavigate={(dir) => void projectPicker.loadFsDirectory(dir)}
+                onOpen={() => void projectPicker.confirmOpenProject(projectPicker.fsPath)}
+                onClose={projectPicker.closeProjectPicker}
               />
             )}
       </main>

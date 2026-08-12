@@ -1,20 +1,10 @@
 import { randomUUID } from "node:crypto";
-import {
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  unlink,
-} from "node:fs/promises";
+import { readdir, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { atomicWriteFile, readJsonl } from "../utils/fs.js";
 import type { ConfigService } from "../config/service.js";
-import type {
-  ModelProviderConfig,
-  ModelRole,
-  RoleModelConfig,
-} from "../config/schema.js";
+import type { ModelRole } from "../config/schema.js";
 import { DesktopNotifier, WebhookNotifier } from "./notifier.js";
 import { pluginToolRegistry } from "../shared/plugin-tool.js";
 import {
@@ -30,7 +20,6 @@ import {
 import type { McpClient } from "../tools/mcp-client.js";
 import type { AtomicFileTools } from "../tools/atomic-file.js";
 import { ConversationAgentModel } from "./agent-model.js";
-import { ConfiguredModelClient } from "../model/client.js";
 import { FallbackModelClient } from "../model/fallback-client.js";
 import type {
   ConversationMessage,
@@ -48,11 +37,15 @@ import {
   currentBranchIdFrom,
 } from "./branch.js";
 import type {
-  ModelPricing,
   PermissionMode,
   PermissionRule,
   RecordedEvent,
 } from "./types.js";
+import { acquireInstanceLock } from "./instance-lock.js";
+import { buildRoleClientChain, rolePricing } from "./model-factory.js";
+import { generateSessionTitle, titleFrom } from "./session-title.js";
+
+export { buildRoleClientChain } from "./model-factory.js";
 
 export interface AgentSessionManagerOptions {
   cwd: string;
@@ -66,75 +59,6 @@ export interface AgentSessionManagerOptions {
   ) => Promise<ConversationAgentModel> | ConversationAgentModel;
   /** 文件工具实现（可注入记忆留档钩子等）；缺省每个会话新建 */
   files?: AtomicFileTools;
-}
-
-/** 项目级单实例写锁：O_EXCL 独占创建 + pid 记录；崩溃残留（持有者已死）自动接管 */
-async function acquireInstanceLock(
-  lockPath: string,
-  skip: boolean,
-): Promise<void> {
-  if (skip) return;
-  try {
-    await mkdir(path.dirname(lockPath), { recursive: true });
-    const handle = await open(lockPath, "wx");
-    try {
-      await handle.writeFile(
-        JSON.stringify({
-          pid: process.pid,
-          startedAt: new Date().toISOString(),
-        }),
-      );
-    } finally {
-      await handle.close();
-    }
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "EEXIST") throw error;
-    // 锁已存在：读取持有者 pid 做存活检测；持有者已死（崩溃残留）则删旧锁重试一次
-    let holderPid: number | undefined;
-    try {
-      const raw = await readFile(lockPath, "utf8");
-      holderPid = (JSON.parse(raw) as { pid?: number }).pid;
-    } catch {
-      // 锁内容不可读（半写坏锁）：按残留处理，同样删锁重试
-    }
-    // 持有者已死（崩溃残留）或锁内容不可读（半写坏锁）：删旧锁重试一次
-    if (holderPid === undefined || !isPidAlive(holderPid)) {
-      await unlink(lockPath).catch(() => undefined);
-      try {
-        const handle = await open(lockPath, "wx");
-        try {
-          await handle.writeFile(
-            JSON.stringify({
-              pid: process.pid,
-              startedAt: new Date().toISOString(),
-            }),
-          );
-        } finally {
-          await handle.close();
-        }
-        return; // 接管成功
-      } catch {
-        // 重试仍失败（并发竞争）→ 落到下方统一报错
-      }
-    }
-    const holder = holderPid === undefined ? "" : `（pid ${holderPid}）`;
-    throw new Error(
-      `项目已被其他进程占用${holder}：事件流为追加写，多进程并发会损坏数据。` +
-        `若确认该进程已退出（崩溃残留），删除 ${lockPath} 后重试，或加 --force 忽略。`,
-    );
-  }
-}
-
-/** pid 存活检测：kill(pid, 0) 成功=存活；ESRCH=已死；EPERM=存在但无权限（视为存活，fail-closed） */
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    const errno = (error as NodeJS.ErrnoException).code;
-    return errno === "EPERM";
-  }
 }
 
 export class AgentSessionManager {
@@ -622,35 +546,11 @@ export class AgentSessionManager {
   }
 
   async #generateTitle(session: AgentSession, userText: string): Promise<void> {
-    const client = await this.#createRoleClient("cheap");
-    if (!client) return;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
-    timeout.unref();
-    try {
-      const response = await client.complete({
-        system:
-          "你是一个标题生成器。根据用户的请求，生成一个简短的中文会话标题（10个字以内）。只返回标题文本，不要任何解释、标点或引号。",
-        messages: [{ role: "user", content: userText }],
-        // 标题生成不需要工具调用，不携带工具 schema（省 token）
-        tools: [],
-        signal: controller.signal,
-      });
-      const title = clipTitle(response.text);
-      // 用户请求是中文但模型返回了纯英文标题时，回退到请求原文前缀
-      const fallback =
-        title && hasChinese(userText) && !hasChinese(title)
-          ? titleFrom(userText)
-          : title;
-      if (fallback) {
-        session.setTitle(fallback);
-      }
-    } catch {
-      // 生成失败时用首条消息的前缀兜底，避免标题永远停在「新会话」
-      session.setTitle(titleFrom(userText));
-    } finally {
-      clearTimeout(timeout);
-    }
+    await generateSessionTitle({
+      createRoleClient: (role) => this.#createRoleClient(role),
+      userText,
+      onTitle: (title) => session.setTitle(title),
+    });
   }
 
   async #ensureProjectMetadata(): Promise<void> {
@@ -668,85 +568,6 @@ export class AgentSessionManager {
       ) + "\n",
     );
   }
-}
-
-function rolePricing(
-  models: Awaited<
-    ReturnType<ConfigService["readEffective"]>
-  >["models"],
-) {
-  return {
-    ...(models.main.pricing
-      ? { main: models.main.pricing }
-      : {}),
-    ...(models.cheap.pricing
-      ? { cheap: models.cheap.pricing }
-      : {}),
-    ...(models.explore.pricing
-      ? { explore: models.explore.pricing }
-      : {}),
-  };
-}
-
-function createConfiguredClient(
-  provider: ModelProviderConfig,
-  model: string,
-): ModelClient {
-  try {
-    return new ConfiguredModelClient(provider, model);
-  } catch (error) {
-    return {
-      async complete() {
-        throw error;
-      },
-    };
-  }
-}
-
-function failingModelClient(message: string): ModelClient {
-  return {
-    async complete() {
-      throw new Error(message);
-    },
-  };
-}
-
-/**
- * 构建角色模型 fallback 链（[选中模型, ...fallbacks]）。
- * 供应商缺失/不可用（禁用、缺 Key、模型不在列表）时降级为即抛客户端，
- * 由 FallbackModelClient 顺延到下一候选；pricing 随目标透传用于成本核算。
- * 重试已上收到回合级（AgentLoop.#requestTurn），链内客户端不做请求级重试。
- */
-export function buildRoleClientChain(
-  role: ModelRole,
-  config: {
-    models: Record<ModelRole, RoleModelConfig>;
-    providers: ModelProviderConfig[];
-  },
-): Array<{
-  id: string;
-  client: ModelClient;
-  pricing?: ModelPricing;
-}> {
-  const selection = config.models[role];
-  const targets = [selection, ...(selection.fallbacks ?? [])];
-  return targets.map((target) => {
-    const provider = config.providers.find(
-      (candidate) => candidate.id === target.providerId,
-    );
-    const inner = provider
-      ? createConfiguredClient(provider, target.model)
-      : failingModelClient(
-          `${role} 角色引用了不存在的供应商：${target.providerId}`,
-        );
-    return {
-      id: `${target.providerId}/${target.model}`,
-      client: inner,
-      ...(target.pricing
-        ? { pricing: target.pricing }
-        : {}),
-    };
-  });
 }
 
 async function readRecordedEvents(filePath: string): Promise<RecordedEvent[]> {
@@ -774,32 +595,4 @@ function sessionInfoTitle(
     if (event?.type === "session_info") return event.name;
   }
   return undefined;
-}
-
-function titleFrom(message: string): string {
-  const compact = message.replace(/\s+/g, " ").trim();
-  return compact.length > 36 ? `${compact.slice(0, 36)}…` : compact;
-}
-
-/** 是否包含 CJK 字符（用于标题语言守卫） */
-function hasChinese(text: string): boolean {
-  return /[\u4e00-\u9fff]/.test(text);
-}
-
-/** 清洗标点并按长度智能截断：优先在单词/分词边界切断，避免英文残词 */
-function clipTitle(text: string, max = 20): string {
-  const cleaned = text
-    .replace(/[\n"'`。，,；;：:！!？?]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!cleaned) return "";
-  if (cleaned.length <= max) return cleaned;
-  const cut = cleaned.slice(0, max);
-  const boundary = Math.max(
-    cut.lastIndexOf(" "),
-    cut.lastIndexOf("-"),
-    cut.lastIndexOf("/"),
-  );
-  if (boundary > max * 0.4) return `${cut.slice(0, boundary).trimEnd()}…`;
-  return `${cut.trimEnd()}…`;
 }
