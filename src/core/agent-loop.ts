@@ -125,6 +125,9 @@ export class AgentLoop {
   #prevInputTokens = 0;
   #prevTurnAtMs = 0;
   #seenCompactions = 0;
+  /** reportedCache sticky（Pi 语义）：会话是否曾见过缓存命中（cached > 0）；
+   *  从未命中的供应商（OpenAI 兼容端点 cached 恒 0）不报缓存浪费 */
+  #everReportedCache = false;
   /** Steer 打断请求（参照 Pi 的 steer）：当前工具完成后拒绝剩余工具调用并退出循环 */
   #steerRequested = false;
 
@@ -408,6 +411,9 @@ export class AgentLoop {
         streamedThinking = false;
         if (turn.usage) {
           const now = Date.now();
+          // reportedCache sticky：见过缓存命中后置位（永不重置）；
+          // 从未命中的供应商（cached 恒 0）后续轮次不计缓存浪费
+          if (turn.usage.cached > 0) this.#everReportedCache = true;
           // 缓存浪费度量（参照 Pi 的 cache-stats）：上轮已有、本轮本应命中
           // 却未命中的 token 数；<1024 视为 breakpoint 粒度噪音忽略
           const missed = computeMissedTokens(
@@ -418,6 +424,7 @@ export class AgentLoop {
             this.#modelCompactCount?.() ?? 0,
             this.#seenCompactions,
             (turn.fallbacks?.length ?? 0) > 0,
+            this.#everReportedCache,
           );
           this.#seenCompactions = this.#modelCompactCount?.() ?? 0;
           this.#prevInputTokens = turn.usage.input;

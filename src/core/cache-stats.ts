@@ -10,6 +10,11 @@ import type { ModelPricing } from "./types.js";
  * - idle：超过供应商缓存 TTL（Anthropic 5 分钟）→ 提示
  * - 其余：未知破坏源
  *
+ * reportedCache sticky（Pi 语义）：会话从未报告过缓存活动（cached > 0）
+ * 时不计 miss——区分「OpenAI 式全 miss」与「根本不支持缓存的 provider」，
+ * 避免 DeepSeek 等 OpenAI 兼容端点（cached 恒为 0）每轮误报缓存浪费。
+ * sticky 置位后永不重置（压缩重置 prev 不影响该标志）。
+ *
  * <1024 tokens 的 miss 视为 breakpoint 粒度噪音忽略。
  */
 export function computeMissedTokens(
@@ -20,8 +25,12 @@ export function computeMissedTokens(
   compactionCount: number,
   seenCompactions: number,
   switchedModel: boolean,
+  /** 会话是否曾报告过缓存命中（sticky：置位后永不重置） */
+  everReportedCache: boolean,
 ): { missedTokens: number; missedReason?: "compaction" | "model_switch" | "idle" } {
   if (prevInputTokens <= 0) return { missedTokens: 0 };
+  // 从未见过缓存活动的供应商（cached 恒为 0）：不报 miss，避免误报
+  if (!everReportedCache) return { missedTokens: 0 };
   const expectedCached = Math.min(prevInputTokens, usage.input);
   const missedTokens = Math.max(0, expectedCached - usage.cached);
   if (missedTokens < 1024) return { missedTokens: 0 };
