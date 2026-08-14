@@ -581,8 +581,15 @@ select {
 
 /* ========== 移动端（≤768px）：侧栏抽屉化 ========== */
 @media (max-width: 768px) {
+  /* 桌面布局的固定最小宽度（防内容撑破）在移动端必须取消，
+     否则所有页面 980px 宽、375px 视口下横向溢出 */
+  body {
+    min-width: 0;
+  }
   .shell {
-    grid-template-columns: 1fr;
+    /* min 必须为 0：1fr 的隐式 min 是 min-content，diff 等 pre 内容会把
+       列撑到内容宽度，导致 375px 视口下页面横向溢出（scrollWidth > 视口） */
+    grid-template-columns: minmax(0, 1fr);
   }
   .sidebar {
     position: fixed;
