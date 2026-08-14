@@ -1,6 +1,7 @@
 import type { AgentModel, ModelTurn } from "./agent-loop.js";
 import { ContextManager } from "./context.js";
 import type {
+  FileOps,
   ModelPricing,
   TodoItem,
   ToolCall,
@@ -80,6 +81,8 @@ export class ConversationAgentModel implements AgentModel {
   /** 流式推理内容回调（thinking 增量，CLI/Web 实时展示用） */
   onThinkingDelta: ((text: string) => void) | undefined;
   #compactionCount = 0;
+  /** 文件操作跟踪（P0-3）：AgentLoop 每批执行后刷新，compact 时拼进摘要请求 */
+  #fileOps: FileOps = { read: [], modified: [] };
   #compaction:
     | {
         client: ModelClient;
@@ -142,6 +145,11 @@ export class ConversationAgentModel implements AgentModel {
     this.#context.setTodos(todos);
   }
 
+  /** 文件操作跟踪（P0-3）：AgentLoop 每批执行后注入，compact 时拼进摘要请求 */
+  setFileOps(ops: FileOps): void {
+    this.#fileOps = ops;
+  }
+
   configureCompaction(options: {
     client: ModelClient;
     thresholdTokens: number;
@@ -173,7 +181,9 @@ export class ConversationAgentModel implements AgentModel {
       messages: [
         {
           role: "user",
-          content: serializeConversation(older),
+          content:
+            serializeConversation(older) +
+            formatFileOpsNote(this.#fileOps),
         },
       ],
       // 压缩不需要工具调用，不携带工具 schema（省 token）
@@ -214,6 +224,9 @@ export class ConversationAgentModel implements AgentModel {
       retainedUserCount: recent.filter(
         (message) => message.role === "user",
       ).length,
+      ...(this.#fileOps.read.length > 0 || this.#fileOps.modified.length > 0
+        ? { fileOps: this.#fileOps }
+        : {}),
       ...(response.pricing
         ? { pricing: response.pricing }
         : {}),
@@ -372,6 +385,8 @@ export interface CompactionResult {
   usage: ModelUsage;
   /** 压缩后保留的 user 消息数（事件流侧据此计算 keepFromSeq） */
   retainedUserCount: number;
+  /** 压缩时的文件操作跟踪（P0-3）：事件流透传，前端可展示 */
+  fileOps?: FileOps;
   pricing?: ModelPricing;
   fallbacks?: Array<{
     from: string;
@@ -481,6 +496,20 @@ function serializeConversation(
       return `TOOL ${message.toolName}(${message.target ?? ""}):\n${message.content}`;
     })
     .join("\n\n");
+}
+
+/** 文件操作清单段落（P0-3）：拼进压缩摘要请求，压缩模型据此保留关键文件信息 */
+function formatFileOpsNote(fileOps: FileOps): string {
+  const { read, modified } = fileOps;
+  if (read.length === 0 && modified.length === 0) return "";
+  const lines: string[] = [];
+  if (read.length > 0) {
+    lines.push("Files read:", ...read.map((file) => `- ${file}`));
+  }
+  if (modified.length > 0) {
+    lines.push("Files modified:", ...modified.map((file) => `- ${file}`));
+  }
+  return `\n\n${lines.join("\n")}`;
 }
 
 function formatToolResult(result: ToolExecutionResult): string {

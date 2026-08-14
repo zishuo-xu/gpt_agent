@@ -328,6 +328,7 @@ export class AgentSession {
             summary: result.summary,
             ratio: result.ratio,
             keepFromSeq,
+            ...(result.fileOps ? { fileOps: result.fileOps } : {}),
           });
         },
       });

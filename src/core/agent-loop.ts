@@ -12,6 +12,7 @@ import {
 } from "./tool-batch.js";
 import type {
   ApprovalHandler,
+  FileOps,
   ModelPricing,
   ToolCall,
   ToolExecutionResult,
@@ -74,6 +75,8 @@ export interface AgentModel {
     isError?: boolean,
   ): void;
   acceptToolDenied?(call: ToolCall, reason: string): void;
+  /** 文件操作跟踪（P0-3）：压缩时携带，压缩后模型仍知道动过哪些文件 */
+  setFileOps?(ops: FileOps): void;
   onTextDelta?: ((text: string) => void) | undefined;
   onThinkingDelta?: ((text: string) => void) | undefined;
 }
@@ -143,6 +146,8 @@ export class AgentLoop {
   #everReportedCache = false;
   /** Steer 打断请求（参照 Pi 的 steer）：当前工具完成后拒绝剩余工具调用并退出循环 */
   #steerRequested = false;
+  /** 文件操作跟踪（P0-3）：累计 read/modified 相对路径，注入模型供压缩摘要携带 */
+  readonly #fileOps = { read: new Set<string>(), modified: new Set<string>() };
 
   constructor(options: AgentLoopOptions) {
     this.#bus = options.bus;
@@ -270,6 +275,19 @@ export class AgentLoop {
     });
   }
 
+  /** 累计工具结果的 FileOps 并注入模型（P0-3）：压缩摘要据此携带文件操作清单 */
+  #mergeFileOps(result: ToolExecutionResult | undefined): void {
+    if (!result?.fileOps) return;
+    for (const file of result.fileOps.read) this.#fileOps.read.add(file);
+    for (const file of result.fileOps.modified) {
+      this.#fileOps.modified.add(file);
+    }
+    this.#model.setFileOps?.({
+      read: [...this.#fileOps.read],
+      modified: [...this.#fileOps.modified],
+    });
+  }
+
   /**
    * 并行工具执行（参照 Pi 的 parallel 模式）：deny/finalOnly 直接拒绝（同步回灌），
    * 其余并发执行；执行完成后按 assistant 原始顺序统一回灌事件与模型消息。
@@ -327,6 +345,7 @@ export class AgentLoop {
       const { call, verdict } = item;
       if (item.state === "skipped") continue;
       if (item.state === "denied") continue; // trace 已在 executions 内记录
+      this.#mergeFileOps(item.result);
       emitToolResult(this.#bus, this.#model, traceTools, {
         call,
         result: item.result!,
@@ -620,13 +639,20 @@ export class AgentLoop {
             }
           }
 
-          await executeTool(this.#bus, this.#model, this.#tools, traceTools, {
-            call,
-            permission: verdict,
-            signal,
-            ms: toolStartedAt,
-            onData: this.#makeOnToolData(call.id),
-          });
+          const result = await executeTool(
+            this.#bus,
+            this.#model,
+            this.#tools,
+            traceTools,
+            {
+              call,
+              permission: verdict,
+              signal,
+              ms: toolStartedAt,
+              onData: this.#makeOnToolData(call.id),
+            },
+          );
+          this.#mergeFileOps(result);
         }
 
         recordTurn();

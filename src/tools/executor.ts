@@ -180,6 +180,12 @@ export class ToolExecutor {
           summary: `已读取 ${args.file_path} 第 ${offset}-${endLine} 行（共 ${lines.length} 行）`,
           output: bounded.text,
           traceOutput: paged,
+          fileOps: {
+            read: [
+              normalizeSlashes(path.relative(this.#cwd, filePath)),
+            ],
+            modified: [],
+          },
           details: {
             filePath: args.file_path,
             startLine: offset,
@@ -307,6 +313,14 @@ export class ToolExecutor {
         return {
           summary: `已编辑 ${args.file_path}`,
           output: `已编辑 ${args.file_path}（${diffHunkCount(diff)} 处变更）`,
+          fileOps: {
+            read: [],
+            modified: [
+              normalizeSlashes(
+                path.relative(this.#cwd, this.#resolve(args.file_path)),
+              ),
+            ],
+          },
           details: {
             filePath: args.file_path,
             diff,
@@ -324,6 +338,14 @@ export class ToolExecutor {
         return {
           summary: `已完成 ${args.file_path} 的 ${args.edits.length} 项编辑`,
           output: `已完成 ${args.file_path} 的 ${args.edits.length} 项编辑`,
+          fileOps: {
+            read: [],
+            modified: [
+              normalizeSlashes(
+                path.relative(this.#cwd, this.#resolve(args.file_path)),
+              ),
+            ],
+          },
           details: {
             filePath: args.file_path,
             edits: args.edits.length,
@@ -344,6 +366,14 @@ export class ToolExecutor {
         return {
           summary: `已写入 ${args.file_path}`,
           output: `已写入 ${args.file_path}（${Buffer.byteLength(args.content)} 字节）`,
+          fileOps: {
+            read: [],
+            modified: [
+              normalizeSlashes(
+                path.relative(this.#cwd, this.#resolve(args.file_path)),
+              ),
+            ],
+          },
           details: {
             filePath: args.file_path,
           },

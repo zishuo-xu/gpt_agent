@@ -40,7 +40,8 @@ export function emitDeniedTool(
   });
 }
 
-/** 结果侧副作用：tool_result 事件（含 todo 快照）+ 模型结果回灌 + trace 记录 */
+/** 结果侧副作用：tool_result 事件（含 todo 快照）+ 模型结果回灌 + trace 记录。
+    返回最终结果（P0-3 起供调用方累计 FileOps 等） */
 export function emitToolResult(
   bus: AgentEventBus,
   model: AgentModel,
@@ -51,7 +52,7 @@ export function emitToolResult(
     permission: string;
     ms: number;
   },
-): void {
+): ToolExecutionResult {
   const { call, result } = options;
   bus.emit({
     type: "tool_result",
@@ -78,9 +79,11 @@ export function emitToolResult(
     },
     ms: options.ms,
   });
+  return result;
 }
 
-/** 执行 + 结果回灌（异常转为 isError 结果），串行/并行批次共用 */
+/** 执行 + 结果回灌（异常转为 isError 结果），串行/并行批次共用。
+    返回最终结果（P0-3 起供调用方累计 FileOps 等）。 */
 export async function executeTool(
   bus: AgentEventBus,
   model: AgentModel,
@@ -93,12 +96,12 @@ export async function executeTool(
     ms: number;
     onData?: (chunk: string) => void;
   },
-): Promise<void> {
+): Promise<ToolExecutionResult> {
   try {
     const result = await tools.execute(options.call, options.signal, {
       ...(options.onData ? { onData: options.onData } : {}),
     });
-    emitToolResult(bus, model, traceTools, {
+    return emitToolResult(bus, model, traceTools, {
       call: options.call,
       result,
       permission: options.permission,
@@ -109,7 +112,7 @@ export async function executeTool(
       summary:
         error instanceof Error ? error.message : "工具执行发生未知错误",
     };
-    emitToolResult(bus, model, traceTools, {
+    return emitToolResult(bus, model, traceTools, {
       call: options.call,
       result: { ...result, isError: true },
       permission: options.permission,

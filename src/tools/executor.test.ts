@@ -452,3 +452,28 @@ test("插件 executionMode 非法值注册被拒绝", () => {
     /executionMode/,
   );
 });
+
+test("fileOps：Read 记 read、Edit/Write 记 modified（相对路径），Bash 不记", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-fileops-"));
+  await writeFile(path.join(cwd, "a.txt"), "hello\n", "utf8");
+  const executor = new ToolExecutor(cwd);
+  const readResult = await executor.execute(
+    call("r1", "Read", "a.txt", { file_path: "a.txt" }),
+    new AbortController().signal,
+  );
+  assert.deepEqual(readResult.fileOps, { read: ["a.txt"], modified: [] });
+  const editResult = await executor.execute(
+    call("e1", "Edit", "a.txt", {
+      file_path: "a.txt",
+      old_string: "hello",
+      new_string: "world",
+    }),
+    new AbortController().signal,
+  );
+  assert.deepEqual(editResult.fileOps, { read: [], modified: ["a.txt"] });
+  const bashResult = await executor.execute(
+    call("b1", "Bash", "echo hi", { command: "echo hi" }),
+    new AbortController().signal,
+  );
+  assert.equal(bashResult.fileOps, undefined);
+});

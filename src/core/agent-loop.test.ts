@@ -14,12 +14,14 @@ import {
 import { shouldShowCacheMissNotice } from "./cache-stats.js";
 import { AgentEventBus } from "./events.js";
 import { PermissionEngine } from "./permissions.js";
-import type { AgentEvent, ToolCall, ToolExecutionResult } from "./types.js";
+import type { AgentEvent, FileOps, ToolCall, ToolExecutionResult } from "./types.js";
 
 class ScriptedModel implements AgentModel {
   #turns: ModelTurn[];
   /** acceptToolResult 回灌记录（用于断言工具结果如何反馈模型） */
   readonly results: Array<{ call: ToolCall; isError: boolean }> = [];
+  /** setFileOps 回灌记录（P0-3 断言用） */
+  readonly fileOpsSnapshots: FileOps[] = [];
   /** 流式 thinking 推送（AgentModel 可选面；测试注入模拟流式模型） */
   onThinkingDelta?: (text: string) => void;
 
@@ -37,6 +39,10 @@ class ScriptedModel implements AgentModel {
     isError = false,
   ): void {
     this.results.push({ call, isError });
+  }
+
+  setFileOps(ops: FileOps): void {
+    this.fileOpsSnapshots.push(ops);
   }
 }
 
@@ -1014,4 +1020,40 @@ test("jitteredBackoff：25% 向下抖动——退避乘 [0.75, 1.0] 随机系数
   assert.equal(jitteredBackoff(8000, () => 0), 6000);
   // 向下抖动语义：结果永不超过原退避（不会向上放大）
   assert.ok(jitteredBackoff(2000, () => 0.99) <= 2000);
+});
+
+test("AgentLoop 累计文件操作并注入模型（FileOps）", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-fileops-loop-"));
+  const filePath = path.join(directory, "sample.txt");
+  await writeFile(filePath, "before\n", "utf8");
+  const bus = new AgentEventBus();
+  const model = new ScriptedModel([
+    {
+      toolCalls: [
+        toolCall("r1", "Read", "sample.txt", { file_path: "sample.txt" }),
+      ],
+    },
+    {
+      toolCalls: [
+        toolCall("e1", "Edit", "sample.txt", {
+          file_path: "sample.txt",
+          old_string: "before",
+          new_string: "after",
+        }),
+      ],
+    },
+    { text: "完成", done: true },
+  ]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: true }),
+  });
+  await loop.run();
+  assert.deepEqual(model.fileOpsSnapshots.at(-1), {
+    read: ["sample.txt"],
+    modified: ["sample.txt"],
+  });
 });

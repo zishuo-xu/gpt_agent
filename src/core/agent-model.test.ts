@@ -413,3 +413,38 @@ test("会话小于保留预算或无可压缩时返回 null", () => {
   assert.equal(findCompactionCutPoint(summaryOnly, 10), null);
 });
 
+
+test("压缩摘要请求携带文件操作清单（FileOps）", async () => {
+  const history: ConversationMessage[] = [
+    { role: "user", content: "任务开始" },
+    { role: "assistant", content: "已读取文件", toolCalls: [] },
+    { role: "user", content: "继续" },
+  ];
+  const cheap = new CapturingClient([
+    response("Task goal: 完成\nKey files: a.ts", 40, 12),
+  ]);
+  const model = new ConversationAgentModel(
+    new CapturingClient([response("继续")]),
+    history,
+  );
+  model.setFileOps({ read: ["src/a.ts"], modified: ["src/a.ts"] });
+  let compacted: { fileOps?: unknown } | undefined;
+  model.configureCompaction({
+    client: cheap,
+    thresholdTokens: 1,
+    keepRecentTokens: 1,
+    onCompacted: (result) => {
+      compacted = result;
+    },
+  });
+  await model.compact(new AbortController().signal, true);
+  const content = (
+    cheap.requests[0]?.messages[0] as { content: string }
+  ).content;
+  assert.match(content, /Files read:\n- src\/a\.ts/);
+  assert.match(content, /Files modified:\n- src\/a\.ts/);
+  assert.deepEqual(compacted?.fileOps, {
+    read: ["src/a.ts"],
+    modified: ["src/a.ts"],
+  });
+});

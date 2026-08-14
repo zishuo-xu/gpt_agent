@@ -56,6 +56,13 @@ export interface ToolCall {
   purpose?: string;
 }
 
+/** 文件操作跟踪（P0-3）：压缩时携带，压缩后模型仍知道动过哪些文件。
+    路径为相对 cwd 的规范化形式（Read → read；Edit/MultiEdit/Write → modified）。 */
+export interface FileOps {
+  read: string[];
+  modified: string[];
+}
+
 export type AgentEvent =
   | {
       type: "user";
@@ -76,6 +83,8 @@ export type AgentEvent =
       summary: string;
       ratio: number;
       keepFromSeq: number;
+      /** 压缩时的文件操作跟踪（P0-3）：前端可展示，旧事件兼容 */
+      fileOps?: FileOps;
     }
   | {
       type: "task_start";
@@ -255,6 +264,8 @@ export interface ToolExecutionResult {
   aborted?: boolean;
   todoSnapshot?: TodoItem[];
   isError?: boolean;
+  /** 文件操作跟踪（P0-3）：压缩摘要携带；可选，旧事件回放无此字段也兼容 */
+  fileOps?: FileOps;
 }
 
 export interface ApprovalAnswer {
