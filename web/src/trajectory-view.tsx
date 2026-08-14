@@ -2,88 +2,31 @@ import { useMemo, useState } from "react";
 import type { SessionEvent } from "./session-display";
 
 /**
- * 轨迹表格（任务统计面板内"每个任务点开一个表格"）：
- * 一次会话的步骤明细表——每行一个步骤（时间 / 来源 / 内容摘要），
- * 点击行展开该步骤的完整详情（工具参数、推理文本、子代理任务等）。
+ * 轨迹视图（任务统计面板内"每个任务点开"）：
+ * 按回合结构化的步骤展示——每一轮完整呈现
+ * 「用户输入（提示词）→ 模型推理过程 → 工具调用（参数+结果）→ 模型最终回复」。
  * 数据来自 GET /api/sessions/:id/events（一次性），无需 SSE。
  */
 
-type Lane = "message" | "thinking" | "tool" | "subtask" | "system";
-
-const LANE_LABELS: Record<Lane, string> = {
-  message: "对话",
-  thinking: "推理",
-  tool: "工具",
-  subtask: "子代理",
-  system: "系统",
-};
-
-/** 步骤行：来源 + 时间 + 展示内容 */
-export interface TrajectoryRow {
-  lane: Lane;
-  seq: number;
-  ts: string;
-  title: string;
-  detail: string;
+/** 单个回合的完整链路 */
+export interface TrajectoryTurn {
+  /** 回合序号（1 起） */
+  index: number;
+  userSeq: number;
+  userTs: string;
+  /** 用户输入全文（提示词） */
+  userText: string;
+  /** 模型推理过程（thinking_delta 按回合合并） */
+  thinking?: string;
+  /** 工具调用（参数 + 配对结果） */
+  tools: Array<{ title: string; detail: string }>;
+  /** 模型最终回复（text_delta 按回合合并） */
+  reply?: string;
 }
 
-function laneOf(event: SessionEvent["event"]): Lane | null {
-  switch (event.type) {
-    case "user":
-      return "message";
-    case "thinking_delta":
-      return "thinking";
-    case "tool_call":
-      return "tool";
-    case "task_start":
-      return "subtask";
-    case "text_delta":
-    case "tool_result":
-    case "task_end":
-      return null; // 文本并入对话行/配对用，不单独成行
-    default:
-      return "system";
-  }
-}
-
-function titleOf(event: SessionEvent["event"]): string {
-  switch (event.type) {
-    case "user":
-      return event.text.slice(0, 60);
-    case "thinking_delta":
-      return "推理过程";
-    case "tool_call": {
-      const args = JSON.stringify(event.call.args ?? {});
-      return `${event.call.tool} ${event.call.target}${args.length > 80 ? "…" : ""}`;
-    }
-    case "task_start":
-      return event.description;
-    default:
-      return event.type;
-  }
-}
-
-function detailOf(event: SessionEvent["event"]): string {
-  switch (event.type) {
-    case "user":
-      return event.text;
-    case "thinking_delta":
-      return event.text;
-    case "tool_call": {
-      const args = JSON.stringify(event.call.args ?? {}, null, 2);
-      return `${event.call.tool}\n目标：${event.call.target}\n参数：\n${args}`;
-    }
-    case "task_start":
-      return `子代理任务：${event.description}`;
-    default:
-      return JSON.stringify(event, null, 2);
-  }
-}
-
-/** 事件流 → 步骤行：连续 thinking/text 增量按回合合并为单个步骤，
-    工具调用配对 tool_result 展示结果（输出/diff），子代理在调用点成行 */
-export function buildTrajectoryRows(events: SessionEvent[]): TrajectoryRow[] {
-  // 预收集 tool_result（by callId）：结果文本进工具行详情
+function toolResultMap(
+  events: SessionEvent[],
+): Map<string, { summary?: string; output?: unknown; diff?: string }> {
   const toolResults = new Map<
     string,
     { summary?: string; output?: unknown; diff?: string }
@@ -98,86 +41,21 @@ export function buildTrajectoryRows(events: SessionEvent[]): TrajectoryRow[] {
       ...(typeof details.diff === "string" ? { diff: details.diff } : {}),
     });
   }
-  const rows: TrajectoryRow[] = [];
-  let pending:
-    | {
-        lane: "thinking" | "message";
-        ts: string;
-        seq: number;
-        texts: string[];
-      }
-    | undefined;
-  const flush = (): void => {
-    if (!pending) return;
-    const texts = pending.texts.join("");
-    rows.push({
-      lane: pending.lane,
-      seq: pending.seq,
-      ts: pending.ts,
-      title:
-        pending.lane === "thinking"
-          ? "推理过程"
-          : `回复：${texts.slice(0, 40)}${texts.length > 40 ? "…" : ""}`,
-      detail: texts,
-    });
-    pending = undefined;
-  };
-  for (const record of events) {
-    const event = record.event;
-    if (event.type === "thinking_delta" || event.type === "text_delta") {
-      const lane =
-        event.type === "thinking_delta" ? "thinking" : "message";
-      if (pending && pending.lane === lane) {
-        pending.texts.push(event.text);
-      } else {
-        flush();
-        pending = {
-          lane,
-          ts: record.ts,
-          seq: record.seq,
-          texts: [event.text],
-        };
-      }
-      continue;
-    }
-    flush();
-    if (event.type === "tool_call") {
-      const result = toolResults.get(event.call.id);
-      rows.push({
-        lane: "tool",
-        seq: record.seq,
-        ts: record.ts,
-        title: titleOf(event),
-        detail: toolDetail(event, result),
-      });
-      continue;
-    }
-    const lane = laneOf(event);
-    if (!lane) continue;
-    rows.push({
-      lane,
-      seq: record.seq,
-      ts: record.ts,
-      title: titleOf(event),
-      detail: detailOf(event),
-    });
-  }
-  flush();
-  return rows;
+  return toolResults;
 }
 
-/** 工具行详情：参数 + 结果（diff 优先，其次输出/摘要；长输出截断） */
 function toolDetail(
-  event: Extract<SessionEvent["event"], { type: "tool_call" }>,
+  tool: string,
+  target: string,
+  args: unknown,
   result:
     | { summary?: string; output?: unknown; diff?: string }
     | undefined,
 ): string {
-  const args = JSON.stringify(event.call.args ?? {}, null, 2);
   const parts = [
-    `${event.call.tool}`,
-    `目标：${event.call.target}`,
-    `参数：\n${args}`,
+    `${tool}`,
+    `目标：${target}`,
+    `参数：\n${JSON.stringify(args ?? {}, null, 2)}`,
   ];
   if (result) {
     const outputText =
@@ -197,6 +75,62 @@ function toolDetail(
   return parts.join("\n\n");
 }
 
+/** 事件流 → 回合分组：user 事件开新回合，thinking/text 增量按回合合并，
+    工具调用配对 tool_result 展示结果；子代理/系统事件并入回合的附注 */
+export function buildTrajectoryTurns(
+  events: SessionEvent[],
+): TrajectoryTurn[] {
+  const toolResults = toolResultMap(events);
+  const turns: TrajectoryTurn[] = [];
+  let current:
+    | {
+        index: number;
+        userSeq: number;
+        userTs: string;
+        userText: string;
+        thinking?: string;
+        tools: Array<{ title: string; detail: string }>;
+        reply?: string;
+      }
+    | undefined;
+
+  const startTurn = (seq: number, ts: string, text: string): void => {
+    current = {
+      index: turns.length + 1,
+      userSeq: seq,
+      userTs: ts,
+      userText: text,
+      tools: [],
+    };
+    turns.push(current);
+  };
+
+  for (const record of events) {
+    const event = record.event;
+    if (event.type === "user") {
+      startTurn(record.seq, record.ts, event.text);
+      continue;
+    }
+    if (!current) {
+      // 无用户消息的会话（异常/恢复片段）：兜底归入一个回合
+      startTurn(record.seq, record.ts, "（会话无用户消息）");
+    }
+    if (event.type === "thinking_delta") {
+      current!.thinking = (current!.thinking ?? "") + event.text;
+    } else if (event.type === "text_delta") {
+      current!.reply = (current!.reply ?? "") + event.text;
+    } else if (event.type === "tool_call") {
+      const result = toolResults.get(event.call.id);
+      const args = event.call.args ?? {};
+      current!.tools.push({
+        title: `${event.call.tool} ${event.call.target}`,
+        detail: toolDetail(event.call.tool, event.call.target, args, result),
+      });
+    }
+  }
+  return turns;
+}
+
 function formatTime(iso: string): string {
   const date = new Date(iso);
   return date.toLocaleTimeString([], {
@@ -206,81 +140,96 @@ function formatTime(iso: string): string {
   });
 }
 
-export function TrajectoryTable(props: {
-  events: SessionEvent[];
-  onClose: () => void;
+/** 可折叠内容块：标题行 + 点击展开详情 */
+function ExpandBlock(props: {
+  label: string;
+  meta?: string;
+  content: string;
+  defaultOpen?: boolean;
 }) {
-  const rows = useMemo(
-    () => buildTrajectoryRows(props.events),
-    [props.events],
-  );
-  const [expanded, setExpanded] = useState<number | null>(null);
-
+  const [open, setOpen] = useState(props.defaultOpen ?? false);
   return (
-    <div className="trajectory-table">
-      <div className="trajectory-table-header">
-        <span>步骤明细</span>
-        <code>{rows.length} 个步骤</code>
-        <button onClick={props.onClose}>关闭</button>
-      </div>
-      <div className="trajectory-table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>来源</th>
-              <th>内容</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <FragmentRow
-                key={row.seq}
-                row={row}
-                expanded={expanded === row.seq}
-                onToggle={() =>
-                  setExpanded(expanded === row.seq ? null : row.seq)
-                }
-              />
-            ))}
-          </tbody>
-        </table>
-        {rows.length === 0 && (
-          <p className="trajectory-table-empty">该会话暂无步骤事件。</p>
+    <div className={`trajectory-block-item${open ? " open" : ""}`}>
+      <button
+        className="trajectory-block-toggle"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="trajectory-block-caret">{open ? "▾" : "▸"}</span>
+        <span className="trajectory-block-label">{props.label}</span>
+        {props.meta && (
+          <span className="trajectory-block-meta">{props.meta}</span>
         )}
-      </div>
+      </button>
+      {open && (
+        <pre className="trajectory-block-content">{props.content}</pre>
+      )}
     </div>
   );
 }
 
-function FragmentRow(props: {
-  row: TrajectoryRow;
-  expanded: boolean;
-  onToggle: () => void;
+export function TrajectoryTable(props: {
+  events: SessionEvent[];
+  onClose: () => void;
 }) {
-  const { row } = props;
+  const turns = useMemo(
+    () => buildTrajectoryTurns(props.events),
+    [props.events],
+  );
+  const toolCount = turns.reduce(
+    (sum, turn) => sum + turn.tools.length,
+    0,
+  );
+
   return (
-    <>
-      <tr
-        className={`trajectory-row lane-${row.lane}${
-          props.expanded ? " expanded" : ""
-        }`}
-        onClick={props.onToggle}
-      >
-        <td className="trajectory-cell-time">{formatTime(row.ts)}</td>
-        <td className="trajectory-cell-lane">
-          <span className={`lane-dot lane-${row.lane}`} />
-          {LANE_LABELS[row.lane]}
-        </td>
-        <td className="trajectory-cell-title">{row.title}</td>
-      </tr>
-      {props.expanded && (
-        <tr className="trajectory-row-detail">
-          <td colSpan={3}>
-            <pre>{row.detail}</pre>
-          </td>
-        </tr>
-      )}
-    </>
+    <div className="trajectory-table">
+      <div className="trajectory-table-header">
+        <span>轨迹</span>
+        <code>
+          {turns.length} 轮 · {toolCount} 次工具调用
+        </code>
+        <button onClick={props.onClose}>关闭</button>
+      </div>
+      <div className="trajectory-table-scroll">
+        {turns.map((turn) => (
+          <section className="trajectory-turn" key={turn.userSeq}>
+            <header className="trajectory-turn-head">
+              <span className="trajectory-turn-index">#{turn.index}</span>
+              <span className="trajectory-turn-title">
+                {turn.userText.slice(0, 40)}
+                {turn.userText.length > 40 ? "…" : ""}
+              </span>
+              <time>{formatTime(turn.userTs)}</time>
+            </header>
+            <div className="trajectory-turn-body">
+              <ExpandBlock
+                label="用户输入"
+                content={turn.userText}
+                defaultOpen
+              />
+              {turn.thinking && (
+                <ExpandBlock label="推理过程" content={turn.thinking} />
+              )}
+              {turn.tools.map((tool, index) => (
+                <ExpandBlock
+                  key={`${turn.userSeq}-${index}`}
+                  label={tool.title}
+                  content={tool.detail}
+                />
+              ))}
+              {turn.reply && (
+                <ExpandBlock
+                  label="模型回复"
+                  content={turn.reply}
+                  defaultOpen
+                />
+              )}
+            </div>
+          </section>
+        ))}
+        {turns.length === 0 && (
+          <p className="trajectory-table-empty">该会话暂无步骤事件。</p>
+        )}
+      </div>
+    </div>
   );
 }

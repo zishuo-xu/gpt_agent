@@ -1,7 +1,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { buildTrajectoryRows } from "./trajectory-view";
+import { buildTrajectoryTurns } from "./trajectory-view";
 
 /** 构造一条事件（seq 自增） */
 function record(
@@ -12,7 +12,7 @@ function record(
   return { seq, ts, event } as never;
 }
 
-describe("buildTrajectoryRows（轨迹表格步骤行）", () => {
+describe("buildTrajectoryTurns（轨迹回合分组）", () => {
   before(() => {
     GlobalRegistrator.register();
   });
@@ -21,11 +21,11 @@ describe("buildTrajectoryRows（轨迹表格步骤行）", () => {
     GlobalRegistrator.unregister();
   });
 
-  it("连续的 thinking_delta 合并为单个推理步骤（完整内容）", () => {
-    const rows = buildTrajectoryRows([
+  it("每轮完整链路：用户输入 → 推理合并 → 工具带结果 → 回复合并", () => {
+    const turns = buildTrajectoryTurns([
       record(1, "2026-08-14T10:00:00.000Z", {
         type: "user",
-        text: "你好",
+        text: "修复 bug",
       }),
       record(2, "2026-08-14T10:00:01.000Z", {
         type: "thinking_delta",
@@ -33,29 +33,9 @@ describe("buildTrajectoryRows（轨迹表格步骤行）", () => {
       }),
       record(3, "2026-08-14T10:00:01.100Z", {
         type: "thinking_delta",
-        text: "user greets",
+        text: "user has a bug",
       }),
-      record(4, "2026-08-14T10:00:01.200Z", {
-        type: "text_delta",
-        text: "你好！",
-      }),
-      record(5, "2026-08-14T10:00:01.300Z", {
-        type: "text_delta",
-        text: "有什么可以帮你？",
-      }),
-    ]);
-    const thinking = rows.filter((row) => row.lane === "thinking");
-    assert.equal(thinking.length, 1, "32 个增量块应合并为 1 个推理步骤");
-    assert.equal(thinking[0]?.detail, "The user greets");
-    const messages = rows.filter((row) => row.lane === "message");
-    assert.equal(messages.length, 2, "提问 + 回复各一行");
-    assert.equal(messages[1]?.detail, "你好！有什么可以帮你？");
-    assert.match(messages[1]?.title ?? "", /^回复：你好！/);
-  });
-
-  it("工具调用配对 tool_result 展示结果（diff 优先）", () => {
-    const rows = buildTrajectoryRows([
-      record(1, "2026-08-14T10:00:00.000Z", {
+      record(4, "2026-08-14T10:00:02.000Z", {
         type: "tool_call",
         call: {
           id: "call-1",
@@ -64,38 +44,70 @@ describe("buildTrajectoryRows（轨迹表格步骤行）", () => {
           args: { file_path: "a.ts", old_string: "x", new_string: "y" },
         },
       }),
-      record(2, "2026-08-14T10:00:01.000Z", {
+      record(5, "2026-08-14T10:00:03.000Z", {
         type: "tool_result",
         callId: "call-1",
         summary: "已编辑 a.ts",
         details: { diff: "-x\n+y" },
       }),
+      record(6, "2026-08-14T10:00:04.000Z", {
+        type: "text_delta",
+        text: "已修复，",
+      }),
+      record(7, "2026-08-14T10:00:04.100Z", {
+        type: "text_delta",
+        text: "测试通过。",
+      }),
     ]);
-    const tool = rows.filter((row) => row.lane === "tool");
-    assert.equal(tool.length, 1);
-    assert.match(tool[0]?.detail ?? "", /参数：/);
-    assert.match(tool[0]?.detail ?? "", /结果：\n-x\n\+y/, "diff 应展示");
-    assert.ok(
-      !(tool[0]?.detail ?? "").includes("无返回"),
-      "有结果时不应标注无返回",
-    );
+    assert.equal(turns.length, 1);
+    const turn = turns[0]!;
+    assert.equal(turn.userText, "修复 bug");
+    assert.equal(turn.thinking, "The user has a bug", "推理增量按回合合并");
+    assert.equal(turn.reply, "已修复，测试通过。", "回复增量按回合合并");
+    assert.equal(turn.tools.length, 1);
+    assert.match(turn.tools[0]!.title, /^Edit a\.ts$/);
+    assert.match(turn.tools[0]!.detail, /参数：/);
+    assert.match(turn.tools[0]!.detail, /结果：\n-x\n\+y/, "工具结果展示 diff");
+  });
+
+  it("用户消息开启新回合，轮次序号递增", () => {
+    const turns = buildTrajectoryTurns([
+      record(1, "2026-08-14T10:00:00.000Z", { type: "user", text: "第一问" }),
+      record(2, "2026-08-14T10:00:01.000Z", {
+        type: "text_delta",
+        text: "回答一",
+      }),
+      record(3, "2026-08-14T10:00:02.000Z", { type: "user", text: "第二问" }),
+      record(4, "2026-08-14T10:00:03.000Z", {
+        type: "text_delta",
+        text: "回答二",
+      }),
+    ]);
+    assert.equal(turns.length, 2);
+    assert.equal(turns[0]!.index, 1);
+    assert.equal(turns[0]!.userText, "第一问");
+    assert.equal(turns[0]!.reply, "回答一");
+    assert.equal(turns[1]!.index, 2);
+    assert.equal(turns[1]!.userText, "第二问");
+    assert.equal(turns[1]!.reply, "回答二");
   });
 
   it("无结果的工具调用标注无返回", () => {
-    const rows = buildTrajectoryRows([
-      record(1, "2026-08-14T10:00:00.000Z", {
+    const turns = buildTrajectoryTurns([
+      record(1, "2026-08-14T10:00:00.000Z", { type: "user", text: "hi" }),
+      record(2, "2026-08-14T10:00:01.000Z", {
         type: "tool_call",
         call: { id: "call-x", tool: "Bash", target: "rm -rf /", args: {} },
       }),
     ]);
-    const tool = rows.filter((row) => row.lane === "tool");
-    assert.equal(tool.length, 1);
-    assert.match(tool[0]?.detail ?? "", /无返回/);
+    assert.equal(turns[0]!.tools.length, 1);
+    assert.match(turns[0]!.tools[0]!.detail, /无返回/);
   });
 
   it("Bash 对象型输出（stdout/stderr）序列化进结果", () => {
-    const rows = buildTrajectoryRows([
-      record(1, "2026-08-14T10:00:00.000Z", {
+    const turns = buildTrajectoryTurns([
+      record(1, "2026-08-14T10:00:00.000Z", { type: "user", text: "hi" }),
+      record(2, "2026-08-14T10:00:01.000Z", {
         type: "tool_call",
         call: {
           id: "call-b",
@@ -104,31 +116,27 @@ describe("buildTrajectoryRows（轨迹表格步骤行）", () => {
           args: { command: "echo hi" },
         },
       }),
-      record(2, "2026-08-14T10:00:01.000Z", {
+      record(3, "2026-08-14T10:00:02.000Z", {
         type: "tool_result",
         callId: "call-b",
         summary: "命令退出：0",
         output: { stdout: "hi\n", stderr: "", code: 0 },
       }),
     ]);
-    const tool = rows.filter((row) => row.lane === "tool");
-    assert.match(tool[0]?.detail ?? "", /"stdout": "hi\\n"/);
-    assert.match(tool[0]?.detail ?? "", /"code": 0/);
+    const detail = turns[0]!.tools[0]!.detail;
+    assert.match(detail, /"stdout": "hi\\n"/);
+    assert.match(detail, /"code": 0/);
   });
 
-  it("用户提问与系统事件各自成行", () => {
-    const rows = buildTrajectoryRows([
-      record(1, "2026-08-14T10:00:00.000Z", { type: "user", text: "hi" }),
-      record(2, "2026-08-14T10:00:01.000Z", {
-        type: "run_started",
-        taskId: "t1",
-        description: "任务",
-        hardRules: [],
+  it("无用户消息的会话兜底归入一个回合", () => {
+    const turns = buildTrajectoryTurns([
+      record(1, "2026-08-14T10:00:01.000Z", {
+        type: "text_delta",
+        text: "只有回复",
       }),
     ]);
-    assert.equal(rows.length, 2);
-    assert.equal(rows[0]?.lane, "message");
-    assert.equal(rows[1]?.lane, "system");
-    assert.equal(rows[1]?.title, "run_started");
+    assert.equal(turns.length, 1);
+    assert.match(turns[0]!.userText, /无用户消息/);
+    assert.equal(turns[0]!.reply, "只有回复");
   });
 });
