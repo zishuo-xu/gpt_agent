@@ -50,6 +50,10 @@ export class AtomicFileTools {
   readonly #readSet = new Set<string>();
   readonly journal: EditJournal;
   readonly #snapshot: (filePath: string, before: string | null) => Promise<void>;
+  /** 同路径写互斥队列（P0-2）：按 resolve 后路径分桶的 promise 链。
+      同路径写串行（防 lost update；web server 同进程多会话共享实例时同样生效），
+      不同路径写互不等待。 */
+  readonly #writeQueues = new Map<string, Promise<void>>();
 
   constructor(
     journal = new EditJournal(),
@@ -76,11 +80,13 @@ export class AtomicFileTools {
     replaceAll = false,
     signal?: AbortSignal,
   ): Promise<string> {
-    this.#assertRead(filePath);
-    const before = await readFile(filePath, "utf8");
-    const after = applyEdit(before, oldString, newString, replaceAll);
-    await this.#commit(filePath, before, after, signal);
-    return createDiffPreview(filePath, before, after);
+    return this.#withPathLock(filePath, signal, async () => {
+      this.#assertRead(filePath);
+      const before = await readFile(filePath, "utf8");
+      const after = applyEdit(before, oldString, newString, replaceAll);
+      await this.#commit(filePath, before, after, signal);
+      return createDiffPreview(filePath, before, after);
+    });
   }
 
   async previewEdit(
@@ -100,11 +106,13 @@ export class AtomicFileTools {
     edits: Array<{ old_string: string; new_string: string; replace_all?: boolean }>,
     signal?: AbortSignal,
   ): Promise<string> {
-    this.#assertRead(filePath);
-    const before = await readFile(filePath, "utf8");
-    const after = applyMultiEdit(before, edits);
-    await this.#commit(filePath, before, after, signal);
-    return createDiffPreview(filePath, before, after);
+    return this.#withPathLock(filePath, signal, async () => {
+      this.#assertRead(filePath);
+      const before = await readFile(filePath, "utf8");
+      const after = applyMultiEdit(before, edits);
+      await this.#commit(filePath, before, after, signal);
+      return createDiffPreview(filePath, before, after);
+    });
   }
 
   async previewMultiEdit(
@@ -125,22 +133,24 @@ export class AtomicFileTools {
     content: string,
     signal?: AbortSignal,
   ): Promise<string> {
-    const before = await readOptional(filePath);
-    if (before !== null) this.#assertRead(filePath);
-    const preview =
-      before === null
-        ? createNewFilePreview(filePath, content)
-        : createDiffPreview(filePath, before, content);
-    await this.#snapshot(filePath, before);
-    await atomicWriteFile(filePath, content, signal ? { signal } : {});
-    this.journal.record({
-      path: filePath,
-      beforeHash: hash(before),
-      afterHash: hash(content),
-      beforeContent: before,
+    return this.#withPathLock(filePath, signal, async () => {
+      const before = await readOptional(filePath);
+      if (before !== null) this.#assertRead(filePath);
+      const preview =
+        before === null
+          ? createNewFilePreview(filePath, content)
+          : createDiffPreview(filePath, before, content);
+      await this.#snapshot(filePath, before);
+      await atomicWriteFile(filePath, content, signal ? { signal } : {});
+      this.journal.record({
+        path: filePath,
+        beforeHash: hash(before),
+        afterHash: hash(content),
+        beforeContent: before,
+      });
+      this.#readSet.add(path.resolve(filePath));
+      return preview;
     });
-    this.#readSet.add(path.resolve(filePath));
-    return preview;
   }
 
   async previewWrite(filePath: string, content: string): Promise<string> {
@@ -156,6 +166,39 @@ export class AtomicFileTools {
     if (!this.#readSet.has(path.resolve(filePath))) {
       throw new Error(`必须先 Read 文件：${filePath}`);
     }
+  }
+
+  /** 按路径互斥执行写动作：同路径前驱 settle（成功或失败）后才执行；
+      前驱失败不级联（互斥 ≠ 级联失败）。锁轮到本操作时先查 abort——等待期间
+      signal 已 abort 则快速失败，不执行写。 */
+  #withPathLock<T>(
+    filePath: string,
+    signal: AbortSignal | undefined,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const key = path.resolve(filePath);
+    const previous = this.#writeQueues.get(key) ?? Promise.resolve();
+    const run = previous.then(
+      () => {
+        assertNotAborted(signal);
+        return action();
+      },
+      () => {
+        assertNotAborted(signal);
+        return action();
+      },
+    );
+    const done = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#writeQueues.set(key, done);
+    void done.then(() => {
+      if (this.#writeQueues.get(key) === done) {
+        this.#writeQueues.delete(key);
+      }
+    });
+    return run;
   }
 
   async #commit(

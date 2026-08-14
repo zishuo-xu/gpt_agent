@@ -111,3 +111,70 @@ test("snapshot 注入：write/edit 提交前调用且携带旧内容", async () 
   assert.equal(calls[0]!.before, "alpha\nbeta\n");
   assert.equal(calls[1]!.before, "新内容");
 });
+
+test("同路径并发写互斥：快照延迟下无 lost update", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-lock-"));
+  const file = path.join(directory, "x.txt");
+  await writeFile(file, "A\n", "utf8");
+  const files = new AtomicFileTools(undefined, {
+    snapshot: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    },
+  });
+  await files.read(file);
+  // 无互斥时：两个 edit 都读到 "A\n"，第二个的 old_string "B" 未找到而抛错
+  await Promise.all([
+    files.edit(file, "A", "A\nB", undefined, undefined),
+    files.edit(file, "B", "B\nC", undefined, undefined),
+  ]);
+  assert.equal(await readFile(file, "utf8"), "A\nB\nC\n");
+});
+
+test("不同路径并发写互不等待", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-lock-par-"));
+  const fileA = path.join(directory, "a.txt");
+  const fileB = path.join(directory, "b.txt");
+  await writeFile(fileA, "A", "utf8");
+  await writeFile(fileB, "B", "utf8");
+  const files = new AtomicFileTools(undefined, {
+    snapshot: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    },
+  });
+  await files.read(fileA);
+  await files.read(fileB);
+  const startedAt = Date.now();
+  await Promise.all([
+    files.write(fileA, "A2"),
+    files.write(fileB, "B2"),
+  ]);
+  const elapsed = Date.now() - startedAt;
+  assert.ok(elapsed < 180, `异路径写应并行（各 100ms 快照，实际 ${elapsed}ms）`);
+});
+
+test("锁等待期间 abort 快速失败，不执行写", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-lock-abort-"));
+  const file = path.join(directory, "x.txt");
+  await writeFile(file, "A", "utf8");
+  const files = new AtomicFileTools(undefined, {
+    snapshot: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    },
+  });
+  await files.read(file);
+  const slow = files.edit(file, "A", "A\nB", undefined, undefined);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const controller = new AbortController();
+  const queued = files.edit(
+    file,
+    "A\nB",
+    "A\nB\nC",
+    undefined,
+    controller.signal,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  controller.abort();
+  await assert.rejects(queued, { name: "AbortError" });
+  await slow;
+  assert.equal(await readFile(file, "utf8"), "A\nB");
+});
