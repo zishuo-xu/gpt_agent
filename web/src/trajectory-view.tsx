@@ -231,19 +231,49 @@ export function TrajectoryTable(props: {
       </div>
       <div className="trajectory-table-scroll">
         {turns.map((turn) => (
-          <section className="trajectory-turn" key={turn.userSeq}>
-            <header className="trajectory-turn-head">
-              <span className="trajectory-turn-index">#{turn.index}</span>
-              <span className="trajectory-turn-title">
-                {turn.userText.slice(0, 40)}
-                {turn.userText.length > 40 ? "…" : ""}
-              </span>
-              <time>{formatTime(turn.userTs)}</time>
-            </header>
-            <div className="trajectory-turn-body">
-              <section className="trajectory-stage stage-user">
-                <div className="trajectory-stage-head">
-                  <span className="trajectory-stage-icon">👤</span>
+          <TurnCard key={turn.userSeq} turn={turn} />
+        ))}
+        {turns.length === 0 && (
+          <p className="trajectory-table-empty">该会话暂无步骤事件。</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 回合卡片：默认折叠为摘要行（#序号 + 用户输入摘要 + 阶段概览），点击展开四阶段 */
+function TurnCard({ turn }: { turn: TrajectoryTurn }) {
+  const [open, setOpen] = useState(false);
+  const stageSummary = [
+    turn.thinking ? "推理" : "",
+    turn.tools.length > 0 ? `${turn.tools.length} 次工具` : "",
+    turn.reply ? "回复" : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <section className={`trajectory-turn${open ? " open" : ""}`}>
+      <button
+        className="trajectory-turn-head"
+        onClick={() => setOpen((value) => !value)}
+        title={open ? "折叠本回合" : "展开本回合"}
+      >
+        <span className="trajectory-turn-caret">{open ? "▾" : "▸"}</span>
+        <span className="trajectory-turn-index">#{turn.index}</span>
+        <span className="trajectory-turn-title">
+          {turn.userText.slice(0, 40)}
+          {turn.userText.length > 40 ? "…" : ""}
+        </span>
+        {stageSummary && (
+          <span className="trajectory-turn-meta">{stageSummary}</span>
+        )}
+        <time>{formatTime(turn.userTs)}</time>
+      </button>
+      {open && (
+        <div className="trajectory-turn-body">
+          <section className="trajectory-stage stage-user">
+            <div className="trajectory-stage-head">
+              <span className="trajectory-stage-icon">👤</span>
                   <span className="trajectory-stage-label">用户</span>
                   <span className="trajectory-stage-meta">
                     输入 · {turn.userText.length} 字
@@ -302,13 +332,8 @@ export function TrajectoryTable(props: {
                   </div>
                 </section>
               )}
-            </div>
-          </section>
-        ))}
-        {turns.length === 0 && (
-          <p className="trajectory-table-empty">该会话暂无步骤事件。</p>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </section>
   );
 }
