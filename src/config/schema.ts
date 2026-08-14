@@ -137,7 +137,8 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     key: "context",
     type: "context",
     title: "上下文",
-    description: "硬压缩触发阈值与压缩后保留的最近对话轮数。",
+    description:
+      "硬压缩触发阈值（估算 token 数）与压缩后保留的最近上下文量（token 预算）。",
     renderer: "context",
   },
   {

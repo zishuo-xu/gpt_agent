@@ -210,7 +210,7 @@ tool_execution_end(toolCallId, toolName, result, isError)
 2. **provider 请求级**（provider-retry.ts）：`x-should-retry` 头优先 → retry-after 头 → `min(0.5×2^n, 8)s` 指数退避 + 25% 抖动；`DEFAULT_MAX_RETRY_DELAY_MS = 60s`。
 3. **summarization 重试**（retry.ts:162-211）：`stopReason === "aborted"` 永不重试。
 
-**MyAgent 现状**（2026-08-09 已对齐）：turn 级 `#requestTurn` auto-retry（`agent-loop.ts`）——`error-policy.ts` classifyModelError 三分类（retry/overflow/fatal，quota/认证 fail-closed）+ 指数退避（默认 3 次 2s 起步，可配置）+ **overflow 特例**（上下文超长先 force 压缩再重试一次）+ Retry-After 优先；重试期 abort 立即可中断（见 P1-11）。`FallbackModelClient` 链式降级（complete + **流式**均覆盖，`model_fallback` 事件）。**差距**：无 25% 向下抖动（Pi provider 级公式记录备查，未实现）。
+**MyAgent 现状**（2026-08-09 已对齐）：turn 级 `#requestTurn` auto-retry（`agent-loop.ts`）——`error-policy.ts` classifyModelError 三分类（retry/overflow/fatal，quota/认证 fail-closed）+ 指数退避（默认 3 次 2s 起步，可配置）+ **overflow 特例**（上下文超长先 force 压缩再重试一次）+ Retry-After 优先；重试期 abort 立即可中断（见 P1-11）。`FallbackModelClient` 链式降级（complete + **流式**均覆盖，`model_fallback` 事件）。**已落地**：25% 向下抖动（`jitteredBackoff = base × [0.75, 1.0]`，回合级退避使用；Retry-After 不抖动）。
 
 ### 3.5 截断对照
 
@@ -260,7 +260,7 @@ MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）�
 > 2026-08-10：P2-14 书签已落地（`addBookmark`/`bookmarks()` + `label` 事件，`session.ts:425-439`）；续读指引精确化（Read 截断提示带精确行号区间，`executor.ts`）。
 > 2026-08-05 第三轮（第一期 5 项）：检索加速（P1-12 的零依赖替代：git ls-files + gitignore 过滤）、stopReason 截断判失败（P1-10 ✅）、session_info 元数据事件（P2-14 前置）、Web 会话搜索（P2-17 ✅）、跨项目记忆开关。
 > 2026-08-05 第四轮：P0-3 diff 移出上下文（测量驱动 ✅）、P2-16 Bash 全量落盘（✅）、P2-15 AJV 参数校验（✅，类型强转 + 字段级报错 + wire 键名回显）。
-> 2026-08-06 第五轮（Pi 对照修正）：缓存隔离（`cacheRetention: "none"` 省略 cache_control——分支摘要已隔离 ✅，**压缩摘要于 2026-08-09 补上隔离**）、Write 对齐 Pi（无 diff、只报字节数 ✅）、**wire 键名统一**（消灭 camelCase 层：删 normalizeToolArgs/wireToolArgs/WIRE_TO_CAMEL 映射/validateArgs，全程 wire 键名 + schema minLength/minItems 承接非空规则，未知键由 additionalProperties 拒绝并回显 ✅）。provider 级 25% 向下抖动**未落地**（回合级重试未做抖动；Pi 公式记录备查，无对应代码）。
+> 2026-08-06 第五轮（Pi 对照修正）：缓存隔离（`cacheRetention: "none"` 省略 cache_control——分支摘要已隔离 ✅，**压缩摘要于 2026-08-09 补上隔离**）、Write 对齐 Pi（无 diff、只报字节数 ✅）、**wire 键名统一**（消灭 camelCase 层：删 normalizeToolArgs/wireToolArgs/WIRE_TO_CAMEL 映射/validateArgs，全程 wire 键名 + schema minLength/minItems 承接非空规则，未知键由 additionalProperties 拒绝并回显 ✅）。provider 级 25% 向下抖动**已落地**（2026-08-13：回合级退避加入 `jitteredBackoff`，注入随机源可测）。
 
 ### P0 — 低成本高收益，直接对照改
 
@@ -322,7 +322,7 @@ MyAgent 的差异化上限（更激进，符合"控制单轮注入量"方向）�
 | Bash 排空宽限 | 100ms 空闲（data 续期） | 空闲窗口 data 续期（原 2s 固定已改） | P0-1 ✅ |
 | Bash abort | 返回部分输出 | abort/超时 kill 后以部分输出 resolve（`aborted`/`details.timedOut`） | P0-2 ✅ |
 | 工具执行 | 默认并行 | `behavior.parallelTools` 开关（默认关，ask 批次退串行） | P1-9 ✅ |
-| 请求重试 | 3 次 2s/4s/8s（turn 级）+ provider 级 0.5×2^n ≤8s + 25% 抖动 | turn 级 3 次 2s 起步（可配置）+ overflow 特例；**无 25% 抖动** | P1-11 ✅（抖动未做） |
+| 请求重试 | 3 次 2s/4s/8s（turn 级）+ provider 级 0.5×2^n ≤8s + 25% 抖动 | turn 级 3 次 2s 起步（可配置）+ overflow 特例；**25% 向下抖动已落地** | P1-11 ✅ |
 | 行内截断 | grep 500 字符 | 2000 字符 | 差异不大，可不动 |
 
 ---

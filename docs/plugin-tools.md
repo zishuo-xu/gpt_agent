@@ -21,7 +21,7 @@ MyAgent 支持以插件形式引入自定义工具，参考 Pi 扩展系统的 t
 - 全局：`~/.myagent/tools/*.ts`（或 `.mjs` / `.js`）
 - 项目：`<cwd>/.myagent/tools/*.ts`（同名时项目层覆盖全局层，与配置合并语义一致）
 
-每个文件 default 导出一个工具对象。插件在 **server/进程启动后首个会话创建时懒加载**（`session-manager.#ensurePlugins`；`behavior.enablePlugins: false` 可整体关闭）；会话内工具集固定（与内置工具同一约束，不破坏 prompt cache 前缀）。**修改插件后可在插件面板点「重新加载」**（`POST /api/plugins/reload`）——重建注册表并重连 MCP server，后续请求（含运行中会话的下一轮）即用新工具集；prompt cache 前缀自变更点失效一次（效率损失，非正确性问题）。坏文件跳过并记日志，不阻塞会话。
+每个文件 default 导出一个工具对象。插件加载时机：Web 服务在 restore 后立即主动加载（`server.ts` 调 `ensurePluginsLoaded`，插件面板启动即见 loaded/errors）；CLI 路径在首个会话创建时惰性加载（`session-manager.#ensurePlugins`）。`behavior.enablePlugins: false` 可整体关闭；会话内工具集固定（与内置工具同一约束，不破坏 prompt cache 前缀）。**修改插件后可在插件面板点「重新加载」**（`POST /api/plugins/reload`）——重建注册表并重连 MCP server，后续请求（含运行中会话的下一轮）即用新工具集；prompt cache 前缀自变更点失效一次（效率损失，非正确性问题）。坏文件跳过并记日志，不阻塞会话。
 
 ### 工具协议
 

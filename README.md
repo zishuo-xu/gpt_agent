@@ -35,8 +35,8 @@ MyAgent 是一个面向长时间自主运行任务的本机编码 Agent：把自
 
 ### 记忆复利
 
-- 项目记忆：`AGENTS.md`（/init 生成）+ `.myagent/memory/`（conventions / pitfalls / decisions）；全局记忆四类：preferences / conventions / pitfalls / decisions
-- 全局记忆：`~/.myagent/MEMORY.md`；干活中学到的稳定事实自动写入，下次会话自动注入
+- 记忆共四类：`preferences`（全局）+ `conventions` / `pitfalls` / `decisions`（项目级）
+- 全局记忆：`~/.myagent/MEMORY.md`；干活中学到的稳定事实自动写入，下次会话自动注入；项目级记忆：`AGENTS.md`（/init 生成）+ `.myagent/memory/`（conventions / pitfalls / decisions），随项目使用累积
 - 跨项目联想：新会话注入他项目记忆的标题索引，相关时自动调取全文
 
 ### Web 界面（myagent --web）

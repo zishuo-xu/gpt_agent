@@ -27,12 +27,36 @@ import type { AgentEvent, RecordedEvent } from "./types.js";
 
 class ScriptedClient implements ModelClient {
   readonly #responses: ModelResponse[];
+  /** 门控：设置后每次 complete 先等待 releaseGate（测试控制任务轮挂起窗口） */
+  #gate: (() => void) | undefined;
+  /** 当前是否挂在门控上（complete 已挂起等待放行） */
+  gateHeld = false;
 
   constructor(responses: ModelResponse[]) {
     this.#responses = [...responses];
   }
 
+  /** 开启门控：下一个 complete 调用挂起，直到 releaseGate 放行 */
+  setGate(): void {
+    this.#gate = () => {};
+  }
+
+  get releaseGate(): () => void {
+    return () => {
+      const release = this.#gate;
+      this.#gate = undefined;
+      release?.();
+    };
+  }
+
   async complete(_request: CompletionRequest): Promise<ModelResponse> {
+    if (this.#gate) {
+      this.gateHeld = true;
+      await new Promise<void>((resolve) => {
+        this.#gate = resolve;
+      });
+      this.gateHeld = false;
+    }
     const response = this.#responses.shift();
     if (!response) throw new Error("测试模型没有更多响应");
     return response;
@@ -889,6 +913,9 @@ test("任务期间排队的用户消息在任务结束后按复位后的会话�
     ]),
     response("排队消息处理完成。"),
   ]);
+  // 门控：任务首轮模型调用挂起——排队窗口由 gate 精确控制，
+  // 不依赖真实 bash/固定 sleep 时序（全量并发下会抖动）
+  client.setGate();
   const session = new AgentSession({
     id: "queue-test",
     title: "排队消息",
@@ -906,13 +933,26 @@ test("任务期间排队的用户消息在任务结束后按复位后的会话�
     hardRules: [{ effect: "deny", pattern: "Edit(*secret.txt*)" }],
     semanticBounds: [],
   });
-  // 任务处理中排队一条用户消息（任务级权限/任务盒仍生效的窗口）
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  // 任务首轮已挂起在门控（complete 等待放行，processing 稳定为 true）后再排队
+  for (let i = 0; i < 100; i += 1) {
+    if (client.gateHeld) break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(client.gateHeld, true, "任务首轮应挂起在门控上");
+  assert.equal(session.isProcessing(), true, "排队前任务应在处理中");
   await session.sendInput("排队消息");
+  // 放行任务轮：Read+Edit(deny) → 总结 → runTask 结束 → drain 消费排队消息
+  client.releaseGate();
   await runPromise;
-  // drain 为异步消费，等待其完成
-  for (let i = 0; i < 50; i += 1) {
-    if (events.some((event) => event.type === "user" && event.text === "排队消息")) break;
+  for (const e of events) console.log("[dbg]", e.type, e.type === "tool_result" ? (e as any).summary ?? "" : "");
+  // drain 为异步消费：等排队轮的 Edit 真正执行完（tool_result），而非 user 事件出现
+  for (let i = 0; i < 200; i += 1) {
+    if (
+      events.some(
+        (event) =>
+          event.type === "tool_result" && "callId" in event && event.callId === "q-edit",
+      )
+    ) break;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
