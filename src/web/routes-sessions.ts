@@ -326,6 +326,14 @@ export function registerSessionRoutes(
     });
   });
 
+  /** 一次性返回会话全部事件（轨迹表格等需要整段事件做分布的消费方） */
+  app.get("/api/sessions/:id/events", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
+    if (!session) return context.json({ error: "会话不存在" }, 404);
+    return context.json({ events: session.events() });
+  });
+
   app.get("/api/sessions/:id/stream", async (context) => {
     const target = await resolveProject(context);
     const session = target.sessionManager?.get(context.req.param("id"));

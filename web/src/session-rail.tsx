@@ -29,7 +29,6 @@ export function SessionRail(props: {
   onSwitchBranch: (branchId: string) => void;
   onScrollToSeq: (seq: number) => void;
   onToggleBookmark: (seq: number, name: string) => void;
-  onReplay: () => void;
 }) {
   return (
     <aside className="session-rail">
@@ -194,12 +193,6 @@ export function SessionRail(props: {
               label="开始时间"
               value={formatTime(props.selected.createdAt)}
             />
-            <button
-              className="replay-button"
-              onClick={props.onReplay}
-            >
-              ▶ 回放模式
-            </button>
           </RailCard>
         </>
       )}

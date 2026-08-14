@@ -1245,14 +1245,48 @@
 
 .replay-bar {
   display: grid;
-  grid-template-columns: auto minmax(100px, 1fr) auto auto;
+  grid-template-columns: auto auto minmax(100px, 1fr) auto auto;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 9px 13px;
   border-bottom: 1px solid #2c3643;
   background: #171f2a;
   color: #9aa6b6;
   font-size: 10px;
+}
+
+.replay-bar .replay-play {
+  border-color: #2f6b4f;
+  background: #143526;
+  color: #7be2a5;
+  font-weight: 750;
+}
+
+/* Trajectory 来源筛选 chips 行（回放条下方） */
+.replay-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 13px;
+  border-bottom: 1px solid #2c3643;
+  background: #141b24;
+}
+
+.replay-chip {
+  padding: 3px 10px;
+  border: 1px solid #33404f;
+  border-radius: 12px;
+  background: #1b2430;
+  color: #8d99a9;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.replay-chip.active {
+  border-color: #3d6ea8;
+  background: #1c2f4a;
+  color: #8fc3ff;
+  font-weight: 750;
 }
 
 .replay-bar input {
@@ -2062,4 +2096,129 @@
   .web-approval-card .approval-actions button {
     min-height: 44px;
   }
+}
+
+/* ========== 轨迹表格（任务统计 → 每个任务点开） ========== */
+.trajectory-table {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+}
+
+.trajectory-table-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: #9aa6b6;
+}
+
+.trajectory-table-header code {
+  color: #6fb3ff;
+}
+
+.trajectory-table-header button {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid #3a4657;
+  border-radius: 5px;
+  background: #202936;
+  color: #b9c1cc;
+  cursor: pointer;
+}
+
+.trajectory-table-scroll {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid #2c3643;
+  border-radius: 8px;
+}
+
+.trajectory-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.trajectory-table th {
+  position: sticky;
+  top: 0;
+  padding: 7px 10px;
+  text-align: left;
+  background: #1b2430;
+  color: #748091;
+  font-weight: 750;
+  border-bottom: 1px solid #2c3643;
+}
+
+.trajectory-table th:nth-child(1) {
+  width: 72px;
+}
+
+.trajectory-table th:nth-child(2) {
+  width: 64px;
+}
+
+.trajectory-row {
+  cursor: pointer;
+}
+
+.trajectory-row:hover {
+  background: #182230;
+}
+
+.trajectory-row.expanded {
+  background: #1c2f4a;
+}
+
+.trajectory-row td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #1f2834;
+  color: #9aa6b6;
+  vertical-align: middle;
+}
+
+.trajectory-cell-time {
+  color: #748091;
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.trajectory-cell-lane {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.trajectory-cell-title {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trajectory-row-detail td {
+  padding: 0;
+  background: #0d131b;
+}
+
+.trajectory-row-detail pre {
+  margin: 0;
+  padding: 10px 12px;
+  font: 11px/1.6 var(--mono);
+  color: #b9c1cc;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.trajectory-table-empty {
+  padding: 18px;
+  text-align: center;
+  color: #748091;
+  font-size: 11px;
 }

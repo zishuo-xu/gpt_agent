@@ -94,6 +94,11 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [error, setError] = useState("");
   const [replay, setReplay] = useState(false);
   const [replayCursor, setReplayCursor] = useState(0);
+  /** Trajectory 式回放：自动播放（⏸ 暂停）与速度倍率（1/2/4/8x） */
+  const [replayPlaying, setReplayPlaying] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState(1);
+  /** 来源筛选（Trajectory 按来源分组）：全部/推理/工具/子代理/系统；消息始终显示 */
+  const [sourceFilter, setSourceFilter] = useState("all");
   /** 缓存 miss 提示开关（behavior.showCacheMissNotices；默认关，参照 Pi） */
   const [showCacheMissNotices, setShowCacheMissNotices] =
     useState(false);
@@ -122,6 +127,40 @@ export function SessionApp(props: { initialSessionId?: string }) {
     () => buildDisplayItems(visibleEvents),
     [visibleEvents],
   );
+  // Trajectory 来源筛选：只保留目标来源的事件（消息始终保留作上下文）
+  const filteredDisplayItems = useMemo(() => {
+    if (sourceFilter === "all") return displayItems;
+    return displayItems.filter((item) => {
+      if (item.kind === "message") return true;
+      if (sourceFilter === "thinking") return item.kind === "thinking";
+      if (sourceFilter === "tool") {
+        return item.kind === "tool" || item.kind === "approval";
+      }
+      if (sourceFilter === "subtask") return item.kind === "subtask";
+      return (
+        item.kind === "system" ||
+        item.kind === "cost" ||
+        item.kind === "ledger"
+      );
+    });
+  }, [displayItems, sourceFilter]);
+  /** 自动播放推进：按速度倍率逐事件前进，播完自动停止 */
+  useEffect(() => {
+    if (!replay || !replayPlaying) return;
+    if (replayCursor >= events.length) {
+      setReplayPlaying(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setReplayCursor((cursor) => Math.min(cursor + 1, events.length));
+    }, 200 / replaySpeed);
+    return () => clearTimeout(timer);
+  }, [replay, replayPlaying, replayCursor, events.length, replaySpeed]);
+  /** 播放/暂停：播到末尾时重新从头播放 */
+  function togglePlayback() {
+    if (replayCursor >= events.length) setReplayCursor(0);
+    setReplayPlaying((playing) => !playing);
+  }
   // 对话链路：每轮用户提问的目录，点击可定位到对应消息
   const userTurns = useMemo<UserTurn[]>(() => {
     let turn = 0;
@@ -345,6 +384,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
     }
     setEvents([]);
     setReplay(false);
+    setReplayPlaying(false);
     setReplayCursor(0);
     setResolvedPermissions(new Set());
     seenSeqs.current = new Set();
@@ -611,6 +651,12 @@ export function SessionApp(props: { initialSessionId?: string }) {
                 }
               }}
               onToggleDetail={() => setShowDetail((v) => !v)}
+              onReplay={() => {
+                // 进入回放从第一个事件开始（Trajectory 式回放整个过程）
+                setReplay(true);
+                setReplayCursor(events.length > 0 ? 1 : 0);
+                setReplayPlaying(false);
+              }}
             />
 
             {error && (
@@ -620,7 +666,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
             <div className="session-workspace with-rail">
               <section className="chat-column">
                 <SessionStream
-                  displayItems={displayItems}
+                  displayItems={filteredDisplayItems}
                   totalEvents={events.length}
                   replay={replay}
                   replayCursor={replayCursor}
@@ -639,7 +685,16 @@ export function SessionApp(props: { initialSessionId?: string }) {
                     void toggleBookmark(seq, name)
                   }
                   onPermission={answerPermission}
-                  onExitReplay={() => setReplay(false)}
+                  replayPlaying={replayPlaying}
+                  replaySpeed={replaySpeed}
+                  sourceFilter={sourceFilter}
+                  onTogglePlayback={togglePlayback}
+                  onReplaySpeed={setReplaySpeed}
+                  onSourceFilter={setSourceFilter}
+                  onExitReplay={() => {
+                    setReplay(false);
+                    setReplayPlaying(false);
+                  }}
                   onReplayCursor={setReplayCursor}
                 />
                 {!replay && (
@@ -682,10 +737,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
                 onToggleBookmark={(seq, name) =>
                   void toggleBookmark(seq, name)
                 }
-                onReplay={() => {
-                  setReplay(true);
-                  setReplayCursor(Math.max(1, events.length));
-                }}
               />
             </div>
           </>

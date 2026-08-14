@@ -3,7 +3,7 @@ import { ItemCard, type ApprovalScope } from "./session-render";
 import type { DisplayItem } from "./session-display";
 
 /**
- * 消息流：回放条 + 事件卡片序列（含书签按钮与审批回调接线）。
+ * 消息流：回放条（Trajectory 式：播放/速度/来源筛选）+ 事件卡片序列。
  * 纯展示组件——事件/回放/审批状态由父组件持有。
  */
 export function SessionStream(props: {
@@ -11,6 +11,9 @@ export function SessionStream(props: {
   totalEvents: number;
   replay: boolean;
   replayCursor: number;
+  replayPlaying: boolean;
+  replaySpeed: number;
+  sourceFilter: string;
   streamRef: RefObject<HTMLDivElement | null>;
   showCacheMissNotices: boolean;
   resolvedPermissions: ReadonlySet<string>;
@@ -26,31 +29,76 @@ export function SessionStream(props: {
   ) => Promise<void>;
   onExitReplay: () => void;
   onReplayCursor: (value: number) => void;
+  onTogglePlayback: () => void;
+  onReplaySpeed: (value: number) => void;
+  onSourceFilter: (value: string) => void;
 }) {
   return (
     <>
       {props.replay && (
-        <div className="replay-bar">
-          <span>回放模式</span>
-          <input
-            type="range"
-            min={1}
-            max={Math.max(1, props.totalEvents)}
-            value={Math.max(1, props.replayCursor)}
-            onChange={(event) =>
-              props.onReplayCursor(
-                Number(event.target.value),
-              )
-            }
-          />
-          <code>
-            {Math.min(props.replayCursor, props.totalEvents)} /{" "}
-            {props.totalEvents}
-          </code>
-          <button onClick={props.onExitReplay}>
-            退出
-          </button>
-        </div>
+        <>
+          <div className="replay-bar">
+            <button
+              className="replay-play"
+              onClick={props.onTogglePlayback}
+              title={props.replayPlaying ? "暂停回放" : "自动回放整个过程"}
+            >
+              {props.replayPlaying ? "⏸ 暂停" : "▶ 播放"}
+            </button>
+            <button
+              className="replay-speed"
+              onClick={() =>
+                props.onReplaySpeed(
+                  props.replaySpeed === 8 ? 1 : props.replaySpeed * 2,
+                )
+              }
+              title="播放速度（1x/2x/4x/8x）"
+            >
+              {props.replaySpeed}x
+            </button>
+            <input
+              type="range"
+              min={1}
+              max={Math.max(1, props.totalEvents)}
+              value={Math.max(1, props.replayCursor)}
+              onChange={(event) =>
+                props.onReplayCursor(
+                  Number(event.target.value),
+                )
+              }
+            />
+            <code>
+              {Math.min(props.replayCursor, props.totalEvents)} /{" "}
+              {props.totalEvents}
+            </code>
+            <button onClick={props.onExitReplay}>
+              退出
+            </button>
+          </div>
+          <div className="replay-filters">
+            {(
+              [
+                ["all", "全部"],
+                ["thinking", "推理"],
+                ["tool", "工具"],
+                ["subtask", "子代理"],
+                ["system", "系统"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                className={
+                  props.sourceFilter === key
+                    ? "replay-chip active"
+                    : "replay-chip"
+                }
+                onClick={() => props.onSourceFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
       )}
       <div
         className="chat-stream"

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { SettingsSidebar } from "./SettingsSidebar";
+import { TrajectoryTable } from "./trajectory-view";
+import type { SessionEvent } from "./session-display";
 
 interface ProjectEntry {
   key: string;
@@ -118,6 +120,37 @@ export function StatsApp() {
     };
   } | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  /** 轨迹表格模态：会话 id → 事件流（一次性拉取） */
+  const [trajectoryFor, setTrajectoryFor] = useState<{
+    id: string;
+    title: string;
+    events: SessionEvent[];
+  } | null>(null);
+  const [loadingTrajectory, setLoadingTrajectory] = useState(false);
+
+  async function openTrajectory(id: string, title: string) {
+    setTrajectoryFor({ id, title, events: [] });
+    setLoadingTrajectory(true);
+    try {
+      const response = await fetch(
+        `/api/sessions/${id}/events?project=${encodeURIComponent(currentProject)}`,
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "读取会话事件失败");
+      }
+      setTrajectoryFor({
+        id,
+        title,
+        events: (payload.events ?? []) as SessionEvent[],
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取会话事件失败");
+      setTrajectoryFor(null);
+    } finally {
+      setLoadingTrajectory(false);
+    }
+  }
 
   async function openSummary(id: string, title: string) {
     setSummaryFor({ id, title });
@@ -366,6 +399,7 @@ export function StatsApp() {
                       <th>输入 tokens</th>
                       <th>费用</th>
                       <th>收尾总结</th>
+                      <th>轨迹</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -396,6 +430,16 @@ export function StatsApp() {
                           ) : (
                             "—"
                           )}
+                        </td>
+                        <td>
+                          <button
+                            className="stats-summary-button"
+                            onClick={() =>
+                              void openTrajectory(session.id, session.title)
+                            }
+                          >
+                            轨迹
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -495,6 +539,48 @@ export function StatsApp() {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )}
+        {trajectoryFor && (
+          <div
+            className="stats-modal-overlay"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                setTrajectoryFor(null);
+              }
+            }}
+          >
+            <div
+              className="stats-modal stats-modal-trajectory"
+              role="dialog"
+              aria-label={`轨迹 · ${trajectoryFor.title}`}
+            >
+              <div className="stats-modal-head">
+                <div>
+                  <h3 title={trajectoryFor.title}>
+                    {trajectoryFor.title.slice(0, 60)}
+                  </h3>
+                  <span className="stats-modal-reason">
+                    {trajectoryFor.id}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setTrajectoryFor(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="stats-modal-body">
+                {loadingTrajectory ? (
+                  <div className="chat-waiting">正在读取会话事件…</div>
+                ) : (
+                  <TrajectoryTable
+                    events={trajectoryFor.events}
+                    onClose={() => setTrajectoryFor(null)}
+                  />
+                )}
+              </div>
             </div>
           </div>
         )}
