@@ -1057,3 +1057,236 @@ test("AgentLoop 累计文件操作并注入模型（FileOps）", async () => {
     modified: ["sample.txt"],
   });
 });
+
+test("afterToolCall 改写工具结果（emit 前应用）", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-hook-"));
+  await writeFile(path.join(directory, "a.txt"), "hi\n", "utf8");
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([
+    {
+      toolCalls: [
+        toolCall("r1", "Read", "a.txt", { file_path: "a.txt" }),
+      ],
+    },
+    { text: "完成", done: true },
+  ]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("trust"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: true }),
+    afterToolCall: (_call, result) => ({
+      ...result,
+      summary: `改写：${result.summary}`,
+    }),
+  });
+  await loop.run();
+  const toolResult = events.find((event) => event.type === "tool_result");
+  assert.ok(toolResult?.type === "tool_result");
+  if (toolResult?.type === "tool_result") {
+    assert.match(toolResult.summary, /^改写：/);
+  }
+});
+
+test("afterToolCall 抛错不中断循环，保留原结果", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-hook-err-"));
+  await writeFile(path.join(directory, "a.txt"), "hi\n", "utf8");
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([
+    {
+      toolCalls: [
+        toolCall("r1", "Read", "a.txt", { file_path: "a.txt" }),
+      ],
+    },
+    { text: "完成", done: true },
+  ]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("trust"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: true }),
+    afterToolCall: () => {
+      throw new Error("钩子故障");
+    },
+  });
+  await loop.run();
+  assert.equal(events.at(-1)?.type, "done");
+  const toolResult = events.find((event) => event.type === "tool_result");
+  assert.ok(toolResult?.type === "tool_result");
+  if (toolResult?.type === "tool_result") {
+    assert.match(toolResult.summary, /已读取/);
+  }
+});
+
+test("terminate：单工具批次 terminate 后循环立即结束", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-term-"));
+  await writeFile(path.join(directory, "a.txt"), "hi\n", "utf8");
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([
+    {
+      toolCalls: [
+        toolCall("r1", "Read", "a.txt", { file_path: "a.txt" }),
+      ],
+    },
+    // 循环若未终止，第二轮会执行 r2
+    {
+      toolCalls: [
+        toolCall("r2", "Read", "a.txt", { file_path: "a.txt" }),
+      ],
+    },
+    { text: "完成", done: true },
+  ]);
+  let executed = 0;
+  const tools = new ToolExecutor(directory);
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, signal, options) => {
+    executed += 1;
+    return await originalExecute(call, signal, options);
+  };
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("trust"),
+    tools,
+    approve: async () => ({ granted: true }),
+    afterToolCall: (_call, result) => ({ ...result, terminate: true }),
+  });
+  await loop.run();
+  assert.equal(executed, 1, "terminate 后不再发起下一轮工具调用");
+  assert.equal(events.at(-1)?.type, "done");
+});
+
+test("terminate：批次部分 terminate 不结束循环", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-term-part-"));
+  await writeFile(path.join(directory, "a.txt"), "hi\n", "utf8");
+  await writeFile(path.join(directory, "b.txt"), "hi\n", "utf8");
+  await writeFile(path.join(directory, "c.txt"), "hi\n", "utf8");
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([
+    {
+      toolCalls: [
+        toolCall("r1", "Read", "a.txt", { file_path: "a.txt" }),
+        toolCall("r2", "Read", "b.txt", { file_path: "b.txt" }),
+      ],
+    },
+    {
+      toolCalls: [
+        toolCall("r3", "Read", "c.txt", { file_path: "c.txt" }),
+      ],
+    },
+    { text: "完成", done: true },
+  ]);
+  let executed = 0;
+  const tools = new ToolExecutor(directory);
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, signal, options) => {
+    executed += 1;
+    return await originalExecute(call, signal, options);
+  };
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("trust"),
+    tools,
+    approve: async () => ({ granted: true }),
+    afterToolCall: (call, result) => ({
+      ...result,
+      terminate: call.id === "r1",
+    }),
+  });
+  await loop.run();
+  assert.equal(executed, 3, "部分 terminate 不终止循环，后续轮继续执行");
+  assert.equal(events.at(-1)?.type, "done");
+});
+
+test("terminate 与 steer 交互：steer 优先于 terminate", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-term-steer-"));
+  await writeFile(path.join(directory, "a.txt"), "hi\n", "utf8");
+  await writeFile(path.join(directory, "b.txt"), "hi\n", "utf8");
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([
+    {
+      toolCalls: [
+        toolCall("t1", "Read", "a.txt", { file_path: "a.txt" }),
+        toolCall("t2", "Read", "b.txt", { file_path: "b.txt" }),
+      ],
+    },
+    { text: "完成", done: true },
+  ]);
+  let loop: AgentLoop | undefined;
+  loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("trust"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: true }),
+    afterToolCall: (call, result) => {
+      if (call.id === "t1") loop?.steer();
+      return { ...result, terminate: true };
+    },
+  });
+  await loop.run();
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "permission_denied" &&
+        (event as Extract<AgentEvent, { type: "permission_denied" }>).call
+          .id === "t2",
+    ),
+    "steer 后批次剩余调用被拒绝",
+  );
+  assert.notEqual(events.at(-1)?.type, "done", "steer 路径不 emit done");
+});
+
+test("terminate 无法绕过 finalOnly：final 阶段工具被拒", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-term-final-"));
+  await writeFile(path.join(directory, "a.txt"), "hi\n", "utf8");
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([
+    {
+      toolCalls: [
+        toolCall("t1", "Read", "a.txt", { file_path: "a.txt" }),
+      ],
+    },
+    { text: "总结", done: true },
+  ]);
+  let executed = 0;
+  const tools = new ToolExecutor(directory);
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, signal, options) => {
+    executed += 1;
+    return await originalExecute(call, signal, options);
+  };
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("trust"),
+    tools,
+    approve: async () => ({ granted: true }),
+    beforeTurn: async () => ({ finalOnly: true }),
+    afterToolCall: (_call, result) => ({ ...result, terminate: true }),
+  });
+  await loop.run();
+  assert.equal(executed, 0, "final 阶段工具被拒绝，不执行");
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "permission_denied" &&
+        (event as Extract<AgentEvent, { type: "permission_denied" }>).reason.includes("纯总结"),
+    ),
+  );
+});

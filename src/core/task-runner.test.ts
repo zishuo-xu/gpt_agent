@@ -522,3 +522,51 @@ test("writable 子代理继承 deny：../ 折叠路径同样被拦截", async ()
     "路径折叠形态同样受会话 deny 约束",
   );
 });
+
+test("afterToolCall 透传到子代理循环", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-task-hook-"));
+  await mkdir(path.join(cwd, "src"), { recursive: true });
+  await writeFile(
+    path.join(cwd, "src", "auth.ts"),
+    "export function refreshToken() {}\n",
+    "utf8",
+  );
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const runner = new TaskRunner({
+    cwd,
+    bus,
+    mode: "trust",
+    client: new ScriptedClient([
+      response("", [
+        {
+          id: "grep-1",
+          tool: "Grep",
+          target: "refreshToken",
+          args: { pattern: "refreshToken", path: "." },
+        },
+      ]),
+      response(
+        "Conclusion: 找到。\nKey evidence: src/auth.ts:1\nUnconfirmed: 无。",
+      ),
+    ]),
+    afterToolCall: (_call, result) => ({
+      ...result,
+      summary: `[子代理] ${result.summary}`,
+    }),
+  });
+  const result = await runner.run(
+    { description: "检索", prompt: "检索 refreshToken" },
+    new AbortController().signal,
+  );
+  assert.ok(String(result.output).includes("找到"));
+  const grepResult = events.find(
+    (event) =>
+      event.type === "task_event" && event.eventType === "tool_result",
+  );
+  assert.ok(grepResult, "子代理工具结果经 task_event 转发");
+  if (grepResult?.type === "task_event") {
+    assert.match(String(grepResult.summary ?? ""), /^\[子代理\]/);
+  }
+});

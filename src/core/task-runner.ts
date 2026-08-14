@@ -51,6 +51,8 @@ export interface TaskRunnerOptions {
   timeoutMs?: number;
   /** 文件工具实现（可注入记忆留档钩子等）；缺省新建 */
   files?: AtomicFileTools;
+  /** afterToolCall 钩子（P0-4）：透传到子代理循环（子代理收尾协议面） */
+  afterToolCall?: AgentLoopOptions["afterToolCall"];
 }
 
 /** 子代理默认超时：15 分钟（无界探索会拖住主任务，参照生产测试 P5 观察） */
@@ -77,6 +79,7 @@ export class TaskRunner {
   readonly #steerLoops: Set<AgentLoop>;
   readonly #timeoutMs: number;
   readonly #files: AtomicFileTools | undefined;
+  readonly #afterToolCall: TaskRunnerOptions["afterToolCall"];
 
   constructor(options: TaskRunnerOptions) {
     this.#cwd = options.cwd;
@@ -92,6 +95,7 @@ export class TaskRunner {
     this.#steerLoops = options.steerLoops ?? new Set();
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS;
     this.#files = options.files;
+    this.#afterToolCall = options.afterToolCall;
   }
 
   /** 配置变更后替换子代理模型客户端 */
@@ -246,6 +250,9 @@ export class TaskRunner {
       maxTurns: 40,
       ...(this.#recordTrace
         ? { recordTrace: this.#recordTrace }
+        : {}),
+      ...(this.#afterToolCall
+        ? { afterToolCall: this.#afterToolCall }
         : {}),
     });
 

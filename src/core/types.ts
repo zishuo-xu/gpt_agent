@@ -266,6 +266,8 @@ export interface ToolExecutionResult {
   isError?: boolean;
   /** 文件操作跟踪（P0-3）：压缩摘要携带；可选，旧事件回放无此字段也兼容 */
   fileOps?: FileOps;
+  /** 批次终止语义（P0-4）：批次内全部已执行工具 terminate 时结束循环（子代理收尾协议化） */
+  terminate?: boolean;
 }
 
 export interface ApprovalAnswer {

@@ -83,6 +83,7 @@ export function emitToolResult(
 }
 
 /** 执行 + 结果回灌（异常转为 isError 结果），串行/并行批次共用。
+    transform（P0-4 afterToolCall）在 emit 前应用：事件流与模型回灌均反映改写后的结果。
     返回最终结果（P0-3 起供调用方累计 FileOps 等）。 */
 export async function executeTool(
   bus: AgentEventBus,
@@ -95,12 +96,19 @@ export async function executeTool(
     signal: AbortSignal;
     ms: number;
     onData?: (chunk: string) => void;
+    transform?: (
+      result: ToolExecutionResult,
+    ) => ToolExecutionResult | void | Promise<ToolExecutionResult | void>;
   },
 ): Promise<ToolExecutionResult> {
   try {
-    const result = await tools.execute(options.call, options.signal, {
+    const raw = await tools.execute(options.call, options.signal, {
       ...(options.onData ? { onData: options.onData } : {}),
     });
+    const transformed = options.transform
+      ? await options.transform(raw)
+      : undefined;
+    const result = transformed ?? raw;
     return emitToolResult(bus, model, traceTools, {
       call: options.call,
       result,
@@ -108,13 +116,17 @@ export async function executeTool(
       ms: options.ms,
     });
   } catch (error) {
-    const result: ToolExecutionResult = {
+    const raw: ToolExecutionResult = {
       summary:
         error instanceof Error ? error.message : "工具执行发生未知错误",
     };
+    const transformed = options.transform
+      ? await options.transform({ ...raw, isError: true })
+      : undefined;
+    const result = transformed ?? { ...raw, isError: true };
     return emitToolResult(bus, model, traceTools, {
       call: options.call,
-      result: { ...result, isError: true },
+      result,
       permission: options.permission,
       ms: options.ms,
     });

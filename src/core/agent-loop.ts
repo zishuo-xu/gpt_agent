@@ -105,6 +105,12 @@ export interface AgentLoopOptions {
   retryBaseDelayMs?: number;
   /** 工具并行执行（参照 Pi 默认 parallel）：同一批全部无需审批时并发执行 */
   parallelTools?: boolean;
+  /** afterToolCall 钩子（P0-4，参照 Pi）：工具结果 emit 前改写（脱敏/再截断/错误改写）。
+      钩子抛错保留原结果，不中断主循环。 */
+  afterToolCall?: (
+    call: ToolCall,
+    result: ToolExecutionResult,
+  ) => ToolExecutionResult | void | Promise<ToolExecutionResult | void>;
   recordTrace?: (trace: {
     request?: unknown;
     response?: unknown;
@@ -137,6 +143,7 @@ export class AgentLoop {
   readonly #retryMaxRetries: number;
   readonly #retryBaseDelayMs: number;
   readonly #parallelTools: boolean;
+  readonly #afterToolCall: AgentLoopOptions["afterToolCall"];
   /** 缓存浪费度量状态：上一轮 input、上一轮时间、已见压缩数 */
   #prevInputTokens = 0;
   #prevTurnAtMs = 0;
@@ -167,6 +174,7 @@ export class AgentLoop {
     this.#retryMaxRetries = options.retryMaxRetries ?? 3;
     this.#retryBaseDelayMs = options.retryBaseDelayMs ?? 2_000;
     this.#parallelTools = options.parallelTools ?? false;
+    this.#afterToolCall = options.afterToolCall;
   }
 
   interrupt(): void {
@@ -288,17 +296,31 @@ export class AgentLoop {
     });
   }
 
+  /** P0-4 afterToolCall：emit 前应用；钩子抛错保留原结果（可选增强不得中断主循环） */
+  async #applyAfterToolCall(
+    call: ToolCall,
+    result: ToolExecutionResult,
+  ): Promise<ToolExecutionResult> {
+    if (!this.#afterToolCall) return result;
+    try {
+      return (await this.#afterToolCall(call, result)) ?? result;
+    } catch {
+      return result;
+    }
+  }
+
   /**
    * 并行工具执行（参照 Pi 的 parallel 模式）：deny/finalOnly 直接拒绝（同步回灌），
    * 其余并发执行；执行完成后按 assistant 原始顺序统一回灌事件与模型消息。
    * 审批（ask）不在此路径——含 ask 的批次由调用方退化为串行。
+   * 返回批次是否全部已执行工具 terminate（P0-4：全部 terminate 时调用方结束循环）。
    */
   async #executeBatchParallel(
     verdicts: Array<{ call: ToolCall; verdict: PermissionVerdict }>,
     turnPolicy: { stop?: boolean; finalOnly?: boolean } | undefined,
     signal: AbortSignal,
     traceTools: ToolTraceItem[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     // 先统一 emit tool_call（与串行路径一致）：事件流完整，崩溃恢复时
     // tool_result 按 callId 配对不丢（此前并行路径缺 tool_call 事件导致恢复丢失）
     for (const { call } of verdicts) {
@@ -341,18 +363,28 @@ export class AgentLoop {
       }
     });
     const settled = await Promise.all(executions);
+    let allTerminated = true;
     for (const item of settled) {
       const { call, verdict } = item;
-      if (item.state === "skipped") continue;
-      if (item.state === "denied") continue; // trace 已在 executions 内记录
-      this.#mergeFileOps(item.result);
+      if (item.state === "skipped") {
+        allTerminated = false;
+        continue;
+      }
+      if (item.state === "denied") {
+        allTerminated = false; // trace 已在 executions 内记录
+        continue;
+      }
+      const result = await this.#applyAfterToolCall(call, item.result!);
+      this.#mergeFileOps(result);
+      if (result.terminate !== true) allTerminated = false;
       emitToolResult(this.#bus, this.#model, traceTools, {
         call,
-        result: item.result!,
+        result,
         permission: verdict,
         ms: Date.now() - item.toolStartedAt,
       });
     }
+    return allTerminated;
   }
 
   async run(): Promise<void> {
@@ -557,7 +589,7 @@ export class AgentLoop {
             verdict: this.#permissions.judge(call),
           }));
           if (verdicts.every((item) => item.verdict !== "ask")) {
-            await this.#executeBatchParallel(
+            const allTerminated = await this.#executeBatchParallel(
               verdicts,
               turnPolicy,
               signal,
@@ -565,6 +597,10 @@ export class AgentLoop {
             );
             recordTurn();
             if (this.#steerRequested) {
+              return;
+            }
+            if (allTerminated) {
+              this.#bus.emit({ type: "done" });
               return;
             }
             if (turn.done) {
@@ -575,6 +611,7 @@ export class AgentLoop {
           }
         }
 
+        let allTerminated = true;
         for (const call of calls) {
           const toolStartedAt = Date.now();
           if (signal.aborted) {
@@ -590,6 +627,7 @@ export class AgentLoop {
               permission: "steered",
               ms: Date.now() - toolStartedAt,
             });
+            allTerminated = false;
             continue;
           }
           this.#bus.emit({ type: "tool_call", call });
@@ -600,6 +638,7 @@ export class AgentLoop {
               permission: "task_box_deny",
               ms: Date.now() - toolStartedAt,
             });
+            allTerminated = false;
             continue;
           }
           const verdict = this.#permissions.judge(call);
@@ -610,6 +649,7 @@ export class AgentLoop {
               permission: "deny",
               ms: Date.now() - toolStartedAt,
             });
+            allTerminated = false;
             continue;
           }
           if (verdict === "ask") {
@@ -633,6 +673,7 @@ export class AgentLoop {
                 permission: "user_denied",
                 ms: Date.now() - toolStartedAt,
               });
+              allTerminated = false;
               // 拒绝来自 steer 取消挂起审批：直接结束本批，不再执行剩余工具
               if (this.#steerRequested) break;
               continue;
@@ -650,15 +691,22 @@ export class AgentLoop {
               signal,
               ms: toolStartedAt,
               onData: this.#makeOnToolData(call.id),
+              transform: (raw) => this.#applyAfterToolCall(call, raw),
             },
           );
           this.#mergeFileOps(result);
+          if (result.terminate !== true) allTerminated = false;
         }
 
         recordTurn();
 
         if (this.#steerRequested) {
           // steer 后不发 done：退出循环让会话优先消费插队消息
+          return;
+        }
+        // P0-4 批次终止：全部已执行工具 terminate 后结束循环（与 turn.done 同语义）
+        if (allTerminated && calls.length > 0) {
+          this.#bus.emit({ type: "done" });
           return;
         }
         if (turn.done) {
