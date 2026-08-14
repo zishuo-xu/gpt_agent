@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ConfigService, ConfigValidationError } from "./service.js";
-import { CONFIG_SCHEMA } from "./schema.js";
+import { CONFIG_SCHEMA, type PublicModelProviderConfig } from "./schema.js";
 
 async function fixture(): Promise<ConfigService> {
   const root = await mkdtemp(path.join(os.tmpdir(), "myagent-config-"));
@@ -26,7 +26,7 @@ test("第三方渠道可保存，API Key 读取时不返回明文", async () => 
     apiKey: "secret-key",
     hasApiKey: false,
     models: ["deepseek-chat", "deepseek-reasoner"],
-  });
+  } as unknown as PublicModelProviderConfig);
   config.models.explore = {
     providerId: "deepseek",
     model: "deepseek-chat",
@@ -46,7 +46,7 @@ test("第三方渠道可保存，API Key 读取时不返回明文", async () => 
 test("API Key 留空保存时保留原值", async () => {
   const service = await fixture();
   const config = await service.readPublic("project");
-  config.providers[0]!.apiKey = "first-key";
+  (config.providers[0]! as { apiKey: string }).apiKey = "first-key";
   await service.write("project", config);
 
   const next = await service.readPublic("project");
@@ -111,7 +111,7 @@ test("项目层只存覆盖项，生效配置为全局与项目的深合并", as
     apiKey: "global-secret",
     hasApiKey: false,
     models: ["coding-model"],
-  });
+  } as unknown as PublicModelProviderConfig);
   global.models.main = {
     providerId: "third-party",
     model: "coding-model",
@@ -172,7 +172,7 @@ test("角色模型 fallback 链与各自单价可持久化", async () => {
     apiKey: "backup-key",
     hasApiKey: false,
     models: ["backup-model"],
-  });
+  } as unknown as PublicModelProviderConfig);
   config.models.main.fallbacks = [
     {
       providerId: "backup",

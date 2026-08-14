@@ -7,7 +7,6 @@ import {
   extractHttpDetail,
   modelErrorGuidance,
   modelErrorGuidanceText,
-  RetryPolicy,
 } from "./error-policy.js";
 
 test("HTTP 状态码分类：429/5xx 可重试，401/403 不可重试", () => {

@@ -9,8 +9,13 @@ function assistant(
     ? never
     : Array<{ id: string; tool: string; target?: string; args: Record<string, unknown> }>,
   thinking?: string,
-) {
-  return { role: "assistant" as const, content, toolCalls, ...(thinking ? { thinking } : {}) };
+): ConversationMessage {
+  return {
+    role: "assistant" as const,
+    content,
+    toolCalls: toolCalls.map((call) => ({ ...call, target: call.target ?? "" })),
+    ...(thinking ? { thinking } : {}),
+  };
 }
 
 test("transformMessages：不合规 toolCallId 重写为 Anthropic 合规格式且映射一致", () => {
@@ -25,6 +30,8 @@ test("transformMessages：不合规 toolCallId 重写为 Anthropic 合规格式�
       toolName: "Read",
       target: "a.ts",
       content: "内容",
+    
+      isError: false,
     },
     {
       role: "tool",
@@ -32,6 +39,8 @@ test("transformMessages：不合规 toolCallId 重写为 Anthropic 合规格式�
       toolName: "Bash",
       target: "ls",
       content: "内容2",
+    
+      isError: false,
     },
   ];
   const transformed = transformMessages(messages);
@@ -52,8 +61,8 @@ test("transformMessages：不合规 toolCallId 重写为 Anthropic 合规格式�
 
 test("transformMessages：空 content 的 tool 消息补占位", () => {
   const messages: ConversationMessage[] = [
-    { role: "tool", toolCallId: "t1", toolName: "Bash", target: "ls", content: "" },
-    { role: "tool", toolCallId: "t2", toolName: "Read", target: "a.ts", content: "正常内容" },
+    { role: "tool" as const, toolCallId: "t1", toolName: "Bash", target: "ls", content: "", isError: false },
+    { role: "tool" as const, toolCallId: "t2", toolName: "Read", target: "a.ts", content: "正常内容", isError: false },
   ];
   const transformed = transformMessages(messages);
   assert.equal(
@@ -78,7 +87,7 @@ test("transformMessages：相邻 assistant 消息合并（半截回合聚合）"
       content: "",
       toolCalls: [{ id: "c1", tool: "Read", target: "a.ts", args: { filePath: "a.ts" } }],
     },
-    { role: "tool", toolCallId: "c1", toolName: "Read", target: "a.ts", content: "内容", isError: false },
+    { role: "tool" as const, toolCallId: "c1", toolName: "Read", target: "a.ts", content: "内容", isError: false },
   ];
   const transformed = transformMessages(messages);
   const assistants = transformed.filter((m) => m.role === "assistant");
@@ -100,7 +109,7 @@ test("transformMessages：孤儿 toolCall 补合成 tool 消息（未配对不�
       ],
     },
     // c2 有配对，c1 是孤儿（中断批次留在内存）
-    { role: "tool", toolCallId: "c2", toolName: "Bash", target: "ls", content: "ok", isError: false },
+    { role: "tool" as const, toolCallId: "c2", toolName: "Bash", target: "ls", content: "ok", isError: false },
   ];
   const transformed = transformMessages(messages);
   const tools = transformed.filter((m) => m.role === "tool") as Array<

@@ -7,13 +7,13 @@ const T0 = "2026-08-09T10:00:00.000Z";
 const T1 = "2026-08-09T10:35:00.000Z";
 
 function record(ts: string, event: AgentEvent) {
-  return { seq: 0, ts, event };
+  return { seq: 0, ts, sessionId: "s1", branchId: "main", event };
 }
 
-function runStarted(ts = T0): AgentEvent {
+function runStarted(taskId = "task-1"): AgentEvent {
   return {
     type: "run_started",
-    taskId: "task-1",
+    taskId,
     description: "巡检仓库",
     permissionMode: "normal",
     hardRules: [],
@@ -22,11 +22,11 @@ function runStarted(ts = T0): AgentEvent {
 
 function runFinished(
   status: "completed" | "interrupted" | "failed" = "completed",
-  ts = T1,
+  taskId = "task-1",
 ): AgentEvent {
   return {
     type: "run_finished",
-    taskId: "task-1",
+    taskId,
     status,
     ...(status === "completed" ? { reason: "done" } : {}),
   };
@@ -39,11 +39,11 @@ function textChunks(chunks: string[]): AgentEvent[] {
 test("提取收尾总结：最后一段助手文本 + todo 快照 + 时间范围", () => {
   const events: AgentEvent[] = [
     runStarted(),
-    { type: "todo_update", todos: [{ id: "a", text: "检查", status: "pending" }] },
+    { type: "todo_update", todos: [{ id: "a", content: "检查", status: "pending" }] },
     ...textChunks(["中间过程文本", "，不是总结"]),
-    { type: "tool_call", call: { id: "c1", tool: "Bash", target: "ls" } },
+    { type: "tool_call", call: { id: "c1", tool: "Bash", target: "ls", args: {} } },
     { type: "tool_result", callId: "c1", summary: "ok" },
-    { type: "todo_update", todos: [{ id: "a", text: "检查", status: "done" }] },
+    { type: "todo_update", todos: [{ id: "a", content: "检查", status: "completed" }] },
     ...textChunks(["收尾总结：", "全部检查通过，", "改动见上。"]),
     runFinished(),
   ];
@@ -54,7 +54,7 @@ test("提取收尾总结：最后一段助手文本 + todo 快照 + 时间范围
   assert.equal(run.status, "completed");
   assert.equal(run.reason, "done");
   assert.equal(run.summary, "收尾总结：全部检查通过，改动见上。");
-  assert.deepEqual(run.todos, [{ id: "a", text: "检查", status: "done" }]);
+  assert.deepEqual(run.todos, [{ id: "a", content: "检查", status: "completed" }]);
   assert.equal(run.startedAt, T0);
   assert.equal(run.finishedAt, T1);
   assert.equal(run.durationMs, 35 * 60_000);
@@ -64,7 +64,7 @@ test("text_delta 跨段合并：只取收尾最后一段助手文本", () => {
   const events: AgentEvent[] = [
     runStarted(),
     ...textChunks(["第一段回答", "（继续）"]),
-    { type: "tool_call", call: { id: "c1", tool: "Bash", target: "ls" } },
+    { type: "tool_call", call: { id: "c1", tool: "Bash", target: "ls", args: {} } },
     { type: "tool_result", callId: "c1", summary: "ok" },
     ...textChunks(["最终收尾段落", "（总结完毕）"]),
     runFinished(),
@@ -104,9 +104,9 @@ test("多轮任务：取最后一次配对的总结", () => {
     ...textChunks(["第一轮总结"]),
     runFinished(),
     // 第二轮（续跑）
-    { ...runStarted(), taskId: "task-2" },
+    runStarted("task-2"),
     ...textChunks(["第二轮总结"]),
-    { ...runFinished("interrupted"), taskId: "task-2" },
+    runFinished("interrupted", "task-2"),
   ];
   const run = extractRunSummary(events.map((event) => record(T1, event)));
   assert.ok(run);

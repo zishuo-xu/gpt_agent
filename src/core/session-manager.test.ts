@@ -507,9 +507,6 @@ test("被放弃路径小于阈值不触发分支摘要", async () => {
   const stateDir = await mkdtemp(
     path.join(os.tmpdir(), "myagent-bs2-state-"),
   );
-  const homeDir = await mkdtemp(
-    path.join(os.tmpdir(), "myagent-bs2-home-"),
-  );
   const main = new ScriptedClient([response("短回答")]);
   const cheap = new ScriptedClient([response("摘要")]);
   const session = new AgentSession({
@@ -567,7 +564,6 @@ test("会话标题写入事件流并在恢复时还原", async () => {
 
   // 恢复：标题以事件流为准（index.json 已废除，事件流是唯一来源）
   const configService = new ConfigService({ cwd, homeDir });
-  let restoredTitle = "";
   const restoredManager = new AgentSessionManager({
     cwd,
     stateDir,
@@ -652,12 +648,12 @@ test("buildRoleClientChain：链顺序为 [选中模型, ...fallbacks] 且 prici
       main: {
         providerId: "primary",
         model: "main-model",
-        pricing: { inputPerMillionCny: 3, outputPerMillionCny: 12 },
+        pricing: { inputPerMillionCny: 3, outputPerMillionCny: 12, cachedInputPerMillionCny: 0.5 },
         fallbacks: [
           {
             providerId: "backup",
             model: "backup-model",
-            pricing: { inputPerMillionCny: 1, outputPerMillionCny: 4 },
+            pricing: { inputPerMillionCny: 1, outputPerMillionCny: 4, cachedInputPerMillionCny: 0.2 },
           },
         ],
       },
@@ -731,11 +727,11 @@ test("buildRoleClientChain：供应商缺失或不可用时降级为即抛客户
 
   assert.equal(chain.length, 2);
   await assert.rejects(
-    chain[0]!.client.complete({ messages: [] }),
+    chain[0]!.client.complete({ system: "", messages: [], tools: [], signal: new AbortController().signal }),
     /explore 角色引用了不存在的供应商：ghost/,
   );
   await assert.rejects(
-    chain[1]!.client.complete({ messages: [] }),
+    chain[1]!.client.complete({ system: "", messages: [], tools: [], signal: new AbortController().signal }),
     /已禁用/,
   );
 });

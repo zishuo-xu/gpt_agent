@@ -23,7 +23,7 @@ import {
   type RunTaskOptions,
 } from "./run-task.js";
 import { AgentSession } from "./session.js";
-import type { AgentEvent } from "./types.js";
+import type { AgentEvent, RecordedEvent } from "./types.js";
 
 class ScriptedClient implements ModelClient {
   readonly #responses: ModelResponse[];
@@ -536,7 +536,7 @@ test("parseRunCommand --approve-timeout / --auto-allow 解析与校验", () => {
     /--approve-timeout/,
   );
   assert.throws(
-    () => parseRunCommand("/run x --auto-allow ",""),
+    () => parseRunCommand("/run x --auto-allow ", new Date("2026-08-09T12:00:00.000Z")),
     /--auto-allow/,
   );
   // 序列化往返（崩溃恢复续跑语义一致）
@@ -834,7 +834,7 @@ test("账本恢复：进程重启后 restore 重放 ledger_update 事件重建�
     mode: "normal",
     model: new ConversationAgentModel(new ScriptedClient([]), []),
     stateDir,
-    restoredEvents: records as Parameters<typeof AgentSession>[0]["restoredEvents"],
+    restoredEvents: records as unknown as RecordedEvent[],
   });
 
   // 账本从事件流投影重建：单元为 done（系统自动记录）

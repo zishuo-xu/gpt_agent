@@ -15,6 +15,7 @@ function request(signal = new AbortController().signal): CompletionRequest {
   return {
     system: "system",
     messages: [{ role: "user", content: "hello" }],
+    tools: [],
     signal,
   };
 }
@@ -77,12 +78,14 @@ test("全部候选失败时抛可识别错误（含底层原因，供回合级�
 
 test("流式：首候选中途失败顺延第二候选重放完整请求，done 携带 model 与 fallbacks", async () => {
   const primary: ModelClient = {
+    complete: () => Promise.reject(new Error("测试仅走 stream")),
     async *stream() {
       yield { type: "text_delta", text: "半截" };
       throw new ModelHttpError(500, "stream broke");
     },
   };
   const backup: ModelClient = {
+    complete: () => Promise.reject(new Error("测试仅走 stream")),
     async *stream() {
       yield { type: "text_delta", text: "完整回答" };
       yield {
@@ -100,7 +103,7 @@ test("流式：首候选中途失败顺延第二候选重放完整请求，done 
   let finalResponse: ModelResponse | undefined;
   for await (const chunk of fallback.stream!(request())) {
     if (chunk.type === "text_delta") chunks.push(chunk.text);
-    else finalResponse = chunk.response;
+    else if (chunk.type === "done") finalResponse = chunk.response;
   }
   // 已知权衡：首候选已吐出的 text_delta 在重放时重复
   assert.deepEqual(chunks, ["半截", "完整回答"]);
@@ -117,6 +120,7 @@ test("流式：全部候选失败抛 ModelRetriesExhaustedError（含底层原�
     {
       id: "provider-a/main",
       client: {
+        complete: () => Promise.reject(new Error("测试仅走 stream")),
         async *stream() {
           throw new ModelHttpError(503, "still down");
         },
@@ -145,6 +149,7 @@ test("流式：abort 时立即透传不 fallback", async () => {
     {
       id: "provider-a/main",
       client: {
+        complete: () => Promise.reject(new Error("测试仅走 stream")),
         async *stream() {
           primaryCalls += 1;
           controller.abort();
@@ -155,6 +160,7 @@ test("流式：abort 时立即透传不 fallback", async () => {
     {
       id: "provider-b/backup",
       client: {
+        complete: () => Promise.reject(new Error("测试仅走 stream")),
         async *stream() {
           backupCalls += 1;
           yield {

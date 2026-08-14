@@ -42,7 +42,7 @@ test("状态切换：user/ask/done/need_user/error/interrupted 驱动 status", (
   assert.equal(machine.status, "idle");
   machine.apply({ type: "user", text: "hi" }, deps);
   assert.equal(machine.status, "running");
-  machine.apply({ type: "ask_permission", call: { id: "c" }, risk: "r", detail: "d" }, deps);
+  machine.apply({ type: "ask_permission", call: { id: "c", tool: "Bash", target: "ls", args: {} }, risk: "r", detail: "d" }, deps);
   assert.equal(machine.status, "waiting_permission");
   machine.apply({ type: "done" }, deps);
   assert.equal(machine.status, "done");

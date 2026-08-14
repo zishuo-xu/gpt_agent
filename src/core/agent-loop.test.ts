@@ -19,6 +19,8 @@ class ScriptedModel implements AgentModel {
   #turns: ModelTurn[];
   /** acceptToolResult 回灌记录（用于断言工具结果如何反馈模型） */
   readonly results: Array<{ call: ToolCall; isError: boolean }> = [];
+  /** 流式 thinking 推送（AgentModel 可选面；测试注入模拟流式模型） */
+  onThinkingDelta?: (text: string) => void;
 
   constructor(turns: ModelTurn[]) {
     this.#turns = [...turns];
@@ -309,7 +311,7 @@ test("thinking 推理内容：非流式一次性发射，流式增量逐块发�
   model2.next = (async () => {
     model2.onThinkingDelta?.("首先考虑");
     model2.onThinkingDelta?.("再决定");
-    return streamNext(undefined as never);
+    return streamNext();
   }) as ScriptedModel["next"];
   await new AgentLoop({
     bus: bus2,

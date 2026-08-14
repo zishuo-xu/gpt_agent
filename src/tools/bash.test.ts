@@ -64,10 +64,6 @@ test("未截断的输出不落盘", async () => {
   assert.equal(details.fullOutputPath, undefined);
 });
 
-function longRunningCommand(pidFile: string): string {
-  return `${process.execPath} -e "require('fs').writeFileSync('${pidFile}', String(process.pid)); setInterval(() => {}, 1000)"`;
-}
-
 test("Abort 会 kill 子进程并返回已收集的部分输出", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-bash-"));
   const pidFile = path.join(directory, "child.pid");

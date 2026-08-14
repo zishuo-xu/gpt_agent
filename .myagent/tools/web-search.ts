@@ -428,7 +428,11 @@ export default definePluginTool({
     required: ["query"],
     additionalProperties: false,
   },
-  async run(args, signal, runtimeConfig) {
+  async run(
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+    runtimeConfig: PluginToolRuntimeConfig,
+  ) {
     const query = String(args.query ?? "").trim();
     if (!query) {
       return {

@@ -88,7 +88,7 @@ export default definePluginTool({
     required: ["url"],
     additionalProperties: false,
   },
-  async run(args, signal) {
+  async run(args: Record<string, unknown>, signal: AbortSignal) {
     const url = String(args.url ?? "").trim();
     if (!/^https?:\/\//i.test(url)) {
       return {
@@ -100,9 +100,11 @@ export default definePluginTool({
     const maxChars = clampInteger(args.max_chars, 500, 50_000, 8_000);
     const cookies = String(args.cookies ?? "").trim() || undefined;
     try {
-      const { status, text: raw } = await fetchPageText(url, signal, {
-        cookies,
-      });
+      const { status, text: raw } = await fetchPageText(
+        url,
+        signal,
+        cookies ? { cookies } : {},
+      );
       if (status >= 400) {
         return {
           summary: `HTTP ${status}`,

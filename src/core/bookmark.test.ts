@@ -14,7 +14,7 @@ import { AgentSessionManager } from "./session-manager.js";
 import { ConfigService } from "../config/service.js";
 
 class ScriptedClient implements ModelClient {
-  async complete(request: CompletionRequest): Promise<ModelResponse> {
+  async complete(_request: CompletionRequest): Promise<ModelResponse> {
     return {
       text: "完成",
       toolCalls: [],

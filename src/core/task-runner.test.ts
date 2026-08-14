@@ -458,7 +458,7 @@ test("writable 子代理继承父会话 deny 规则（/run 硬边界不可绕过
     ]),
   });
 
-  const result = await runner.run(
+  await runner.run(
     {
       description: "修改 secret",
       prompt: "修改 secret.txt",

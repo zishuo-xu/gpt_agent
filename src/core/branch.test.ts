@@ -65,7 +65,7 @@ test("branchesFromEvents：从 branch_switch 事件重建分支（label/forkSeq 
       },
       "ab12cd",
     ),
-    event(3, { type: "user", text: "继续", queueId: undefined }, "ab12cd"),
+    event(3, { type: "user", text: "继续" }, "ab12cd"),
   ]);
   assert.equal(branches.length, 2);
   assert.deepEqual(branches[1], {

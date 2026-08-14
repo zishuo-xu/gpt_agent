@@ -364,6 +364,8 @@ test("压缩切点按 token 预算并保持轮次完整（tool 不与其 assista
       toolName: "Read",
       target: "a.ts",
       content: "r1",
+    
+      isError: false,
     },
     { role: "user", content: "u2" },
     { role: "assistant", content: `a2 ${"x".repeat(2000)}`, toolCalls: [] },
@@ -381,6 +383,8 @@ test("压缩切点按 token 预算并保持轮次完整（tool 不与其 assista
       toolName: "Bash",
       target: "ls",
       content: "r3",
+    
+      isError: false,
     },
   ];
   // 预算穿越第二轮（大消息）：切点必须回退到 u2，recent 从轮次起点开始

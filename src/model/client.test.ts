@@ -9,7 +9,7 @@ import {
 } from "../tools/tool-definitions.js";
 
 /** 测试缺省全量工具集（client 层已不再提供默认值，调用方显式传入） */
-const ALL_TOOLS = toolDefinitionsFor();
+const ALL_TOOLS = toolDefinitionsFor(undefined);
 
 function provider(
   protocol: ModelProviderConfig["protocol"],
@@ -67,7 +67,7 @@ test("OpenAI-compatible 响应转换为统一工具调用", async () => {
 
   const result = await client.complete({
     system: "system",
-    messages: [{ role: "user", content: "检查代码" }],
+    messages: [{ role: "user" as const, content: "检查代码" }],
     signal: new AbortController().signal,
     tools: ALL_TOOLS,
   });
@@ -174,7 +174,7 @@ test("OpenAI-compatible 响应解析 finish_reason 为 stopReason", async () => 
 
   const result = await client.complete({
     system: "system",
-    messages: [{ role: "user", content: "检查代码" }],
+    messages: [{ role: "user" as const, content: "检查代码" }],
     signal: new AbortController().signal,
     tools: ALL_TOOLS,
   });
@@ -199,7 +199,7 @@ test("Anthropic 响应解析 stop_reason 为 stopReason", async () => {
 
   const result = await client.complete({
     system: "system",
-    messages: [{ role: "user", content: "检查代码" }],
+    messages: [{ role: "user" as const, content: "检查代码" }],
     signal: new AbortController().signal,
     tools: ALL_TOOLS,
   });
@@ -225,7 +225,7 @@ test("cacheRetention=none 时 Anthropic 请求省略 cache_control（摘要不�
   );
   const base = {
     system: "system",
-    messages: [{ role: "user", content: "检查代码" }],
+    messages: [{ role: "user" as const, content: "检查代码" }],
     tools: ALL_TOOLS,
     signal: new AbortController().signal,
   };
@@ -267,9 +267,9 @@ test("Anthropic 消息级缓存断点：首条（非末尾）user 消息标记�
   const base = {
     system: "system",
     messages: [
-      { role: "user", content: "第一轮" },
-      { role: "assistant", content: "回答", toolCalls: [] },
-      { role: "user", content: "第二轮" },
+      { role: "user" as const, content: "第一轮" },
+      { role: "assistant" as const, content: "回答", toolCalls: [] },
+      { role: "user" as const, content: "第二轮" },
     ],
     tools: ALL_TOOLS,
     signal: new AbortController().signal,
@@ -295,7 +295,7 @@ test("Anthropic 消息级缓存断点：首条（非末尾）user 消息标记�
   // 单消息（首条即末尾）不加断点
   await client.complete({
     ...base,
-    messages: [{ role: "user", content: "单轮" }],
+    messages: [{ role: "user" as const, content: "单轮" }],
   });
   assert.equal(
     requestBody.messages[0].cache_control,
@@ -350,7 +350,7 @@ test("Anthropic tool_use 与 tool_result 正确往返", async () => {
   const result = await client.complete({
     system: "system",
     messages: [
-      { role: "user", content: "修改" },
+      { role: "user" as const, content: "修改" },
       {
         role: "assistant",
         content: "",
@@ -424,7 +424,7 @@ test("模型参数原样透传，客户端不做键名转换（校验交给工�
   const result = await client.complete({
     system: "system",
     messages: [
-      { role: "user", content: "先读 a 再读 b" },
+      { role: "user" as const, content: "先读 a 再读 b" },
       {
         role: "assistant",
         content: "",
@@ -481,7 +481,7 @@ test("请求级 tools 子集：只注入指定工具（OpenAI）", async () => {
 
   await client.complete({
     system: "system",
-    messages: [{ role: "user", content: "探索" }],
+    messages: [{ role: "user" as const, content: "探索" }],
     signal: new AbortController().signal,
     tools: toolDefinitionsFor(EXPLORE_TOOL_NAMES),
   });
@@ -512,7 +512,7 @@ test("请求级 tools 空数组：Anthropic 请求不带任何工具定义", asy
 
   await client.complete({
     system: "system",
-    messages: [{ role: "user", content: "压缩" }],
+    messages: [{ role: "user" as const, content: "压缩" }],
     signal: new AbortController().signal,
     tools: [],
   });
@@ -590,16 +590,16 @@ test("OpenAI 流式响应逐段推送 text_delta 并累积分片工具调用", a
   );
 
   const chunks: string[] = [];
-  let done: { text: string; toolCalls: any[]; usage: any } | undefined;
+  let done: { text: string; toolCalls: any[]; usage: any; stopReason?: string } | undefined;
   for await (const chunk of client.stream({
     system: "system",
-    messages: [{ role: "user", content: "读文件" }],
+    messages: [{ role: "user" as const, content: "读文件" }],
     signal: new AbortController().signal,
     tools: ALL_TOOLS,
   })) {
     if (chunk.type === "text_delta") {
       chunks.push(chunk.text);
-    } else {
+    } else if (chunk.type === "done") {
       done = chunk.response;
     }
   }
@@ -685,16 +685,16 @@ test("Anthropic 流式响应解析 content_block 事件并累积 input_json_delt
   );
 
   const chunks: string[] = [];
-  let done: { text: string; toolCalls: any[]; usage: any } | undefined;
+  let done: { text: string; toolCalls: any[]; usage: any; stopReason?: string } | undefined;
   for await (const chunk of client.stream({
     system: "system",
-    messages: [{ role: "user", content: "改文件" }],
+    messages: [{ role: "user" as const, content: "改文件" }],
     signal: new AbortController().signal,
     tools: ALL_TOOLS,
   })) {
     if (chunk.type === "text_delta") {
       chunks.push(chunk.text);
-    } else {
+    } else if (chunk.type === "done") {
       done = chunk.response;
     }
   }
@@ -775,6 +775,7 @@ test("已注册的插件工具名通过运行时守卫（openai-compatible 响�
       system: "",
       messages: [],
       tools: ALL_TOOLS,
+      signal: new AbortController().signal,
     });
     assert.equal(response.toolCalls[0]?.tool, "WebFetch");
     assert.equal(response.toolCalls[0]?.target, "https://example.com");
@@ -823,6 +824,7 @@ test("插件工具 target 取 query 主参（搜索类工具）", async () => {
       system: "",
       messages: [],
       tools: ALL_TOOLS,
+      signal: new AbortController().signal,
     });
     assert.equal(response.toolCalls[0]?.tool, "WebSearch");
     assert.equal(response.toolCalls[0]?.target, "Rust 2024 edition");
@@ -854,7 +856,7 @@ test("Anthropic thinking：开启时请求含 thinking 参数，响应解析 thi
 
   const result = await client.complete({
     system: "system",
-    messages: [{ role: "user", content: "问题" }],
+    messages: [{ role: "user" as const, content: "问题" }],
     signal: new AbortController().signal,
     tools: [],
   });
@@ -975,7 +977,7 @@ test("OpenAI：reasoning_content 解析为 thinking；历史 thinking 降级为�
 
   const result = await client.complete({
     system: "system",
-    messages: [{ role: "user", content: "问题" }],
+    messages: [{ role: "user" as const, content: "问题" }],
     signal: new AbortController().signal,
     tools: [],
   });
@@ -1025,7 +1027,7 @@ test("Anthropic 流式：thinking_delta 累积为 thinking", async () => {
   let finalResponse: any;
   for await (const chunk of client.stream!({
     system: "system",
-    messages: [{ role: "user", content: "问题" }],
+    messages: [{ role: "user" as const, content: "问题" }],
     signal: new AbortController().signal,
     tools: [],
   })) {
@@ -1066,7 +1068,7 @@ test("OpenAI 流式：reasoning_content 增量实时推送为 thinking_delta", a
   let finalResponse: any;
   for await (const chunk of client.stream!({
     system: "system",
-    messages: [{ role: "user", content: "问题" }],
+    messages: [{ role: "user" as const, content: "问题" }],
     signal: new AbortController().signal,
     tools: [],
   })) {
@@ -1094,7 +1096,7 @@ test("Anthropic thinking：默认开启（未显式配置即携带 thinking 参�
   );
   await client.complete({
     system: "system",
-    messages: [{ role: "user", content: "hi" }],
+    messages: [{ role: "user" as const, content: "hi" }],
     signal: new AbortController().signal,
     tools: [],
   });
@@ -1123,7 +1125,7 @@ test("Anthropic thinking：模型不支持（400 含 thinking）自动降级不�
   );
   const result = await client.complete({
     system: "system",
-    messages: [{ role: "user", content: "hi" }],
+    messages: [{ role: "user" as const, content: "hi" }],
     signal: new AbortController().signal,
     tools: [],
   });
@@ -1147,7 +1149,7 @@ test("Anthropic thinking：非 thinking 相关 400 不降级重试", async () =>
   await assert.rejects(
     client.complete({
       system: "system",
-      messages: [{ role: "user", content: "hi" }],
+      messages: [{ role: "user" as const, content: "hi" }],
       signal: new AbortController().signal,
       tools: [],
     }),
@@ -1189,12 +1191,12 @@ test("Anthropic 流式：模型不支持 thinking（400 含 thinking）降级重
   let finalResponse: any;
   for await (const chunk of client.stream!({
     system: "system",
-    messages: [{ role: "user", content: "hi" }],
+    messages: [{ role: "user" as const, content: "hi" }],
     signal: new AbortController().signal,
     tools: [],
   })) {
     if (chunk.type === "text_delta") chunks.push(chunk.text);
-    else finalResponse = chunk.response;
+    else if (chunk.type === "done") finalResponse = chunk.response;
   }
   assert.equal(calls, 2, "第一次带 thinking 400，第二次降级重试");
   assert.deepEqual(chunks, ["降级回答"], "降级后不重复输出");

@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  pluginToolRegistry,
-  PluginToolRegistry,
-} from "../shared/plugin-tool.js";
+import { pluginToolRegistry } from "../shared/plugin-tool.js";
 import {
   EXPLORE_TOOL_NAMES,
   getAllToolDefinitions,

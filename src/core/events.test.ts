@@ -87,7 +87,6 @@ test("SessionStore 单次写失败不断链：后续事件照常落盘，flush �
   await store.flush();
 
   // 制造一次写失败：目录被替换成同名普通文件，mkdir recursive 失败
-  const filePath = path.join(directory, "session.jsonl");
   const dirPath = path.join(directory, "sub");
   await writeFile(dirPath, "not-a-dir", "utf8");
   const store2 = new SessionStore(path.join(dirPath, "nested.jsonl"), "s1");

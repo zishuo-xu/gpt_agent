@@ -15,9 +15,7 @@ function createBus() {
   };
 }
 
-function stubFetch(
-  responses: Array<{ status?: number }> = [],
-): {
+function stubFetch(): {
   calls: Array<{ url: string; body: unknown }>;
   restore: () => void;
 } {
@@ -48,8 +46,8 @@ test("任务完成时推送通用 JSON", async () => {
   bus.emit({ type: "done" });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(fetch.calls.length, 1);
-  assert.equal(fetch.calls[0].url, "https://example.com/hook");
-  assert.deepEqual(fetch.calls[0].body, {
+  assert.equal(fetch.calls[0]!.url, "https://example.com/hook");
+  assert.deepEqual(fetch.calls[0]!.body, {
     title: "任务完成",
     body: "会话「测试会话」已完成。",
   });
@@ -67,7 +65,7 @@ test("企业微信机器人使用 msgtype 格式", async () => {
   });
   bus.emit({ type: "done" });
   await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.deepEqual(fetch.calls[0].body, {
+  assert.deepEqual(fetch.calls[0]!.body, {
     msgtype: "text",
     text: { content: "[MyAgent] 任务完成\n会话「会话A」已完成。" },
   });
@@ -90,10 +88,10 @@ test("出错与审批超时均推送", async () => {
   });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(fetch.calls.length, 2);
-  assert.equal(fetch.calls[0].body.title, "任务出错");
-  assert.match(fetch.calls[0].body.body, /模型调用失败/);
-  assert.equal(fetch.calls[1].body.title, "审批超时");
-  assert.match(fetch.calls[1].body.body, /已自动拒绝：Bash rm -rf/);
+  assert.equal((fetch.calls[0]!.body as { title: string }).title, "任务出错");
+  assert.match((fetch.calls[0]!.body as { body: string }).body, /模型调用失败/);
+  assert.equal((fetch.calls[1]!.body as { title: string }).title, "审批超时");
+  assert.match((fetch.calls[1]!.body as { body: string }).body, /已自动拒绝：Bash rm -rf/);
   notifier.dispose();
   fetch.restore();
 });
@@ -125,7 +123,7 @@ test("飞书自定义机器人使用 msg_type 格式", async () => {
   });
   bus.emit({ type: "done" });
   await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.deepEqual(fetch.calls[0].body, {
+  assert.deepEqual(fetch.calls[0]!.body, {
     msg_type: "text",
     content: { text: "[MyAgent] 任务完成\n会话「会话A」已完成。" },
   });
@@ -168,6 +166,7 @@ test("run_finished 终态推送：completed 附带耗时/费用摘要", async ()
       totalMissedCostCny: 0,
       todos: [],
       toolCallCount: 8,
+      costByModel: [],
       kind: "run",
     }),
   });
@@ -179,11 +178,11 @@ test("run_finished 终态推送：completed 附带耗时/费用摘要", async ()
   });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(fetch.calls.length, 1);
-  assert.equal(fetch.calls[0].body.title, "任务已完成");
-  assert.match(fetch.calls[0].body.body, /「巡检任务」的无人值守任务已完成/);
-  assert.match(fetch.calls[0].body.body, /耗时 35 分钟/);
-  assert.match(fetch.calls[0].body.body, /费用 ¥0\.42/);
-  assert.match(fetch.calls[0].body.body, /输入 12345 tokens/);
+  assert.equal((fetch.calls[0]!.body as { title: string }).title, "任务已完成");
+  assert.match((fetch.calls[0]!.body as { body: string }).body, /「巡检任务」的无人值守任务已完成/);
+  assert.match((fetch.calls[0]!.body as { body: string }).body, /耗时 35 分钟/);
+  assert.match((fetch.calls[0]!.body as { body: string }).body, /费用 ¥0\.42/);
+  assert.match((fetch.calls[0]!.body as { body: string }).body, /输入 12345 tokens/);
   notifier.dispose();
   fetch.restore();
 });
@@ -199,9 +198,9 @@ test("run_finished failed/interrupted 推送对应终态", async () => {
   bus.emit({ type: "run_finished", taskId: "t2", status: "interrupted" });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(fetch.calls.length, 2);
-  assert.equal(fetch.calls[0].body.title, "任务已失败");
-  assert.match(fetch.calls[0].body.body, /（error）/);
-  assert.equal(fetch.calls[1].body.title, "任务已中断");
+  assert.equal((fetch.calls[0]!.body as { title: string }).title, "任务已失败");
+  assert.match((fetch.calls[0]!.body as { body: string }).body, /（error）/);
+  assert.equal((fetch.calls[1]!.body as { title: string }).title, "任务已中断");
   notifier.dispose();
   fetch.restore();
 });
@@ -227,6 +226,7 @@ test("run 会话的 done 不双推（由 run_finished 覆盖）；交互会话�
       totalMissedCostCny: 0,
       todos: [],
       toolCallCount: 0,
+      costByModel: [],
       kind: "run",
     }),
   });
@@ -234,7 +234,7 @@ test("run 会话的 done 不双推（由 run_finished 覆盖）；交互会话�
   bus.emit({ type: "run_finished", taskId: "t1", status: "completed" });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(fetch.calls.length, 1, "run 会话只推 run_finished，不推 done");
-  assert.equal(fetch.calls[0].body.title, "任务已完成");
+  assert.equal((fetch.calls[0]!.body as { title: string }).title, "任务已完成");
   notifier.dispose();
   fetch.restore();
 });
@@ -260,6 +260,7 @@ test("通用网关推送附带结构化字段（status/cost/tokens/sessionId/dur
       totalMissedCostCny: 0,
       todos: [],
       toolCallCount: 2,
+      costByModel: [],
       kind: "run",
     }),
   });
@@ -271,7 +272,7 @@ test("通用网关推送附带结构化字段（status/cost/tokens/sessionId/dur
   });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(fetch.calls.length, 1);
-  assert.deepEqual(fetch.calls[0].body, {
+  assert.deepEqual(fetch.calls[0]!.body, {
     title: "任务已失败",
     body: "会话「任务D」的无人值守任务已失败（error）。耗时 40 分钟 · 费用 ¥0.66 · 输入 8000 tokens",
     status: "failed",
@@ -306,19 +307,20 @@ test("企业微信/飞书机器人格式不携带结构化字段（文本格式�
       totalMissedCostCny: 0,
       todos: [],
       toolCallCount: 0,
+      costByModel: [],
       kind: "run",
     }),
   });
   bus.emit({ type: "run_finished", taskId: "t1", status: "completed" });
   await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.deepEqual(fetch.calls[0].body, {
+  assert.deepEqual(fetch.calls[0]!.body, {
     msgtype: "text",
     text: {
       content:
         "[MyAgent] 任务已完成\n会话「会话E」的无人值守任务已完成。耗时 0 分钟 · 费用 ¥0.01 · 输入 100 tokens",
     },
   });
-  assert.equal(fetch.calls[0].body.status, undefined);
+  assert.equal((fetch.calls[0]!.body as { status?: unknown }).status, undefined);
   notifier.dispose();
   fetch.restore();
 });

@@ -85,7 +85,7 @@ test("abortableSleep：中止立即 reject AbortError；预中止直接 reject",
   // 预中止信号
   const pre = new AbortController();
   pre.abort();
-  await assert.rejects(abortableSleep(10_000, pre.signal), (error: unknown) => error.name === "AbortError");
+  await assert.rejects(abortableSleep(10_000, pre.signal), (error: unknown) => (error as Error).name === "AbortError");
   assert.equal(abortError().name, "AbortError");
 });
 

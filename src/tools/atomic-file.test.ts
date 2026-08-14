@@ -41,8 +41,8 @@ test("MultiEdit 任一项失败时不落下半成品", async () => {
   await files.read(filePath);
   await assert.rejects(
     files.multiEdit(filePath, [
-      { oldString: "alpha", newString: "omega" },
-      { oldString: "missing", newString: "value" },
+      { old_string: "alpha", new_string: "omega" },
+      { old_string: "missing", new_string: "value" },
     ]),
     /未找到/,
   );
@@ -96,7 +96,7 @@ test("审批预览与最终 Edit 使用同一变换并包含三行上下文", as
 });
 
 test("snapshot 注入：write/edit 提交前调用且携带旧内容", async () => {
-  const { directory, filePath } = await fixture();
+  const { filePath } = await fixture();
   const calls: Array<{ file: string; before: string | null }> = [];
   const files = new AtomicFileTools(undefined, {
     snapshot: async (file, before) => {

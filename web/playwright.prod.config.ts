@@ -1,4 +1,8 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "@playwright/test";
+
+// 仓库根目录动态解析：与 dev 配置（playwright.config.ts）一致，主目录与 worktree 均可运行
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 /**
  * 生产级长任务场景配置：独立服务器实例（3300）+ 生产测试工作区
@@ -18,8 +22,7 @@ export default defineConfig({
     viewport: { width: 1280, height: 800 },
   },
   webServer: {
-    command:
-      "HOME=/tmp/prod-test-home tsx /Users/xuzishuo/Documents/gpt_agent/src/cli.ts --web --port 3300",
+    command: `HOME=/tmp/prod-test-home ${repoRoot}node_modules/.bin/tsx ${repoRoot}src/cli.ts --web --port 3300`,
     url: "http://127.0.0.1:3300/api/health",
     reuseExistingServer: false,
     timeout: 60_000,

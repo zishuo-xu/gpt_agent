@@ -88,7 +88,7 @@ test("tick：onDue 抛错 → retry 顺延，第 4 次失败丢弃", async () =>
 test("tick：onDue 返回 false（预算护栏）→ postpone 顺延 24h 不重试", async () => {
   const { hub, scheduler, task } = await fixture();
   const now = new Date("2026-08-09T09:00:30.000Z");
-  await hub.tick(now, async () => false);
+  await hub.tick(now, () => false);
   const current = scheduler.list().find((item) => item.id === task.id);
   assert.ok(current);
   assert.equal(current.attempts, undefined, "预算顺延不计入失败次数");

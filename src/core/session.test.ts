@@ -5,18 +5,13 @@ import path from "node:path";
 import test from "node:test";
 import { ConversationAgentModel } from "./agent-model.js";
 import { AgentSession } from "./session.js";
-import type {
-  AgentSessionEvent,
-  AgentSessionSummary,
-} from "./session.js";
+import type { AgentSessionEvent } from "./session.js";
 import type {
   CompletionRequest,
-  ConversationMessage,
   ModelClient,
   ModelResponse,
-  ToolCall,
 } from "../model/types.js";
-import type { PermissionRule } from "./types.js";
+import type { PermissionRule, ToolCall } from "./types.js";
 
 /**
  * AgentSession 直接单测：会话状态机 / 审批流 / 插队 / 中断 / 分支 /
@@ -147,8 +142,12 @@ async function setup(
     mode: options.mode ?? "normal",
     model,
     stateDir,
-    permissionRules: options.permissionRules,
-    restoredEvents: options.restoredEvents,
+    ...(options.permissionRules
+      ? { permissionRules: options.permissionRules }
+      : {}),
+    ...(options.restoredEvents
+      ? { restoredEvents: options.restoredEvents }
+      : {}),
   });
   const collector = new EventCollector(session);
   return { session, collector, cwd, stateDir };
@@ -201,7 +200,9 @@ test("审批批准流：ask → 批准 → 工具执行 → 完成", async () =>
   const inputPromise = session.sendInput("运行 pwd");
   const ask = await collector.waitFor("ask_permission");
   assert.equal(session.summary().status, "waiting_permission");
-  const callId = String(ask.event.call.id);
+  const callId = String(
+    (ask.event as { call: ToolCall }).call.id,
+  );
   assert.equal(session.resolvePermission(callId, true), true);
   await inputPromise;
   // 工具真实执行（临时目录 cwd），结果回灌
@@ -229,7 +230,9 @@ test("审批拒绝流：ask → 拒绝 → permission_denied → 模型纠偏后
   );
   const inputPromise = session.sendInput("删除 x");
   const ask = await collector.waitFor("ask_permission");
-  const callId = String(ask.event.call.id);
+  const callId = String(
+    (ask.event as { call: ToolCall }).call.id,
+  );
   session.resolvePermission(callId, false);
   await inputPromise;
   const denied = collector.eventsOf("permission_denied");
@@ -260,7 +263,11 @@ test("steer 插队：运行中发送插队消息 → user_queued 且优先处理
   await first;
   const queued = collector.eventsOf("user_queued");
   assert.equal(queued.length, 1);
-  assert.equal(queued[0]!.event.steer, true, "插队消息带 steer 标记");
+  assert.equal(
+    (queued[0]!.event as { steer?: boolean }).steer,
+    true,
+    "插队消息带 steer 标记",
+  );
   // 两条 user 消息都进入会话
   const users = collector.eventsOf("user");
   assert.equal(users.length, 2);
@@ -303,8 +310,15 @@ test("分支：fork 后切换 → branch_switch 事件 + 树结构", async () =>
   session.switchBranch("main");
   const switched = collector.eventsOf("branch_switch");
   assert.equal(switched.length, 2);
-  assert.equal(switched[0]!.event.branchId, branchId, "fork 切换至新分支");
-  assert.equal(switched[1]!.event.branchId, "main");
+  assert.equal(
+    (switched[0]!.event as { branchId: string }).branchId,
+    branchId,
+    "fork 切换至新分支",
+  );
+  assert.equal(
+    (switched[1]!.event as { branchId: string }).branchId,
+    "main",
+  );
   assert.equal(session.currentBranchId(), "main");
 });
 
@@ -368,6 +382,8 @@ test("restore：恢复事件流 + 检测崩溃残留的中断任务", async () =
       taskOptions: {
         description: "崩溃任务",
         permission: "normal",
+        hardRules: [],
+        semanticBounds: [],
       },
     },
   };
@@ -394,13 +410,18 @@ test("/run 任务：run_started → 完成 → run_finished + 权限档恢复", 
   });
   const started = collector.eventsOf("run_started");
   assert.equal(started.length, 1);
-  const taskId = started[0]!.event.taskId;
+  const taskId = (started[0]!.event as { taskId: string }).taskId;
   assert.ok(taskId, "任务 id 非空");
   const finished = collector.eventsOf("run_finished");
   assert.equal(finished.length, 1);
-  assert.equal(finished[0]!.event.taskId, taskId, "run_finished 配对同一任务");
-  assert.equal(finished[0]!.event.status, "completed");
-  assert.equal(finished[0]!.event.reason, "done");
+  const finishedEvent = finished[0]!.event as {
+    taskId: string;
+    status: string;
+    reason?: string;
+  };
+  assert.equal(finishedEvent.taskId, taskId, "run_finished 配对同一任务");
+  assert.equal(finishedEvent.status, "completed");
+  assert.equal(finishedEvent.reason, "done");
   // 权限档任务期 trust → 结束后恢复 normal
   assert.equal(session.summary().permissionMode, "normal");
 });

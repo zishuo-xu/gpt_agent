@@ -259,14 +259,14 @@ test("端到端：strict 档多步审批流程", async () => {
 
   // Read 在 strict 下自动放行，Edit 需要审批
   await new Promise<void>((resolve) => { notifyApproval = resolve; });
-  const first = permissionRequests[0];
+  const first = permissionRequests[0]!;
   session.resolvePermission(first.callId, true);
 
   // Bash 需要第二次审批（可能已经到达）
   if (permissionRequests.length < 2) {
     await new Promise<void>((resolve) => { notifyApproval = resolve; });
   }
-  session.resolvePermission(permissionRequests[1].callId, {
+  session.resolvePermission(permissionRequests[1]!.callId, {
     granted: true,
     scope: "session",
   });
@@ -276,8 +276,8 @@ test("端到端：strict 档多步审批流程", async () => {
   const summary = session.summary();
   assert.equal(summary.status, "done");
   assert.equal(permissionRequests.length, 2);
-  assert.equal(permissionRequests[0].tool, "Edit");
-  assert.equal(permissionRequests[1].tool, "Bash");
+  assert.equal(permissionRequests[0]!.tool, "Edit");
+  assert.equal(permissionRequests[1]!.tool, "Bash");
 
   const source = await readFile(path.join(cwd, "src", "math.ts"), "utf8");
   assert.ok(source.includes("return a + b;"));

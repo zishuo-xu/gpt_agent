@@ -324,8 +324,8 @@ test("Grep caseInsensitive:true 匹配不同大小写", async () => {
   );
   const lines = String(result.output).split("\n");
   assert.equal(lines.length, 2, "caseInsensitive:true 应匹配两行（sayHello 和 SAY_HELLO）");
-  assert.match(lines[0], /hello\.ts:1:/);
-  assert.match(lines[1], /hello\.ts:2:/);
+  assert.match(lines[0]!, /hello\.ts:1:/);
+  assert.match(lines[1]!, /hello\.ts:2:/);
 });
 
 test("Grep caseInsensitive:false 只匹配精确大小写", async () => {
@@ -349,7 +349,7 @@ test("Grep caseInsensitive:false 只匹配精确大小写", async () => {
   );
   const lines = String(result.output).split("\n");
   assert.equal(lines.length, 1, "caseInsensitive:false 应只匹配一行（小写 parse）");
-  assert.match(lines[0], /utils\.ts:1:/);
+  assert.match(lines[0]!, /utils\.ts:1:/);
 });
 
 test("插件工具经注册表分发执行，未注册名返回失败结果", async () => {

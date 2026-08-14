@@ -78,9 +78,9 @@ test("formatEffectiveConfig：摘要包含权限/规则计数/角色模型/上�
   const config: MyAgentConfig = {
     providers: [],
     models: {
-      main: { providerId: "p1", model: "m1", pricing: {} },
-      cheap: { providerId: "p1", model: "m2", pricing: {} },
-      explore: { providerId: "p2", model: "m3", pricing: {} },
+      main: { providerId: "p1", model: "m1", pricing: { inputPerMillionCny: 1, outputPerMillionCny: 2, cachedInputPerMillionCny: 0.2 } },
+      cheap: { providerId: "p1", model: "m2", pricing: { inputPerMillionCny: 1, outputPerMillionCny: 2, cachedInputPerMillionCny: 0.2 } },
+      explore: { providerId: "p2", model: "m3", pricing: { inputPerMillionCny: 1, outputPerMillionCny: 2, cachedInputPerMillionCny: 0.2 } },
     },
     permissions: {
       mode: "normal",
@@ -96,7 +96,9 @@ test("formatEffectiveConfig：摘要包含权限/规则计数/角色模型/上�
       compactAtEstimatedTokens: 90000,
       keepRecentTokens: 20000,
     },
-    server: { host: "0.0.0.0", password: "secret" },
+    server: { host: "0.0.0.0", password: "secret", apiToken: "" },
+    notify: { webhook: "", desktop: false },
+    behavior: { showCacheMissNotices: false, parallelTools: false, crossProjectMemory: true, enablePlugins: true },
   };
   const text = formatEffectiveConfig(config);
   assert.match(text, /权限档：normal · 审批超时 60000ms/);

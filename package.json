@@ -13,15 +13,16 @@
     "build:web": "vite build --config web/vite.config.ts",
     "dev": "tsx src/cli.ts",
     "web": "npm run build:web && tsx src/cli.ts --web",
-    "test": "tsx --test \"src/**/*.test.ts\" \"tests/**/*.test.ts\" && TSX_TSCONFIG_PATH=web/tsconfig.json tsx --test \"web/src/**/*.test.tsx\"",
-    "test:coverage": "tsx --test --experimental-test-coverage --test-coverage-lines=85 --test-coverage-functions=75 --test-coverage-branches=80 \"src/**/*.test.ts\" \"tests/**/*.test.ts\" && TSX_TSCONFIG_PATH=web/tsconfig.json tsx --test --experimental-test-coverage --test-coverage-lines=60 --test-coverage-functions=75 --test-coverage-branches=60 \"web/src/**/*.test.tsx\"",
+    "test": "tsx --test \"src/**/*.test.ts\" && TSX_TSCONFIG_PATH=web/tsconfig.json tsx --test \"web/src/**/*.test.tsx\"",
+    "test:coverage": "tsx --test --experimental-test-coverage --test-coverage-lines=85 --test-coverage-functions=75 --test-coverage-branches=80 \"src/**/*.test.ts\" && TSX_TSCONFIG_PATH=web/tsconfig.json tsx --test --experimental-test-coverage --test-coverage-lines=60 --test-coverage-functions=75 --test-coverage-branches=60 \"web/src/**/*.test.tsx\"",
     "test:e2e": "playwright test --config web/playwright.config.ts",
     "test:e2e:prod": "playwright test --config web/playwright.prod.config.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit && tsc -p web/tsconfig.json --noEmit"
   },
   "engines": {
     "node": ">=22"
   },
+  "packageManager": "pnpm@10.33.0",
   "dependencies": {
     "@hono/node-server": "^1.19.0",
     "ajv": "^8.20.0",
