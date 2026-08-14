@@ -65,6 +65,7 @@ describe("buildTrajectoryTurns（轨迹回合分组）", () => {
     assert.equal(turn.thinking, "The user has a bug", "推理增量按回合合并");
     assert.equal(turn.reply, "已修复，测试通过。", "回复增量按回合合并");
     assert.equal(turn.tools.length, 1);
+    assert.equal(turn.tools[0]!.name, "Edit", "工具名单独提取供 chips 展示");
     assert.match(turn.tools[0]!.title, /^Edit a\.ts$/);
     assert.match(turn.tools[0]!.detail, /参数：/);
     assert.match(turn.tools[0]!.detail, /结果：\n-x\n\+y/, "工具结果展示 diff");
@@ -101,6 +102,7 @@ describe("buildTrajectoryTurns（轨迹回合分组）", () => {
       }),
     ]);
     assert.equal(turns[0]!.tools.length, 1);
+    assert.equal(turns[0]!.tools[0]!.name, "Bash");
     assert.match(turns[0]!.tools[0]!.detail, /无返回/);
   });
 
@@ -138,5 +140,26 @@ describe("buildTrajectoryTurns（轨迹回合分组）", () => {
     assert.equal(turns.length, 1);
     assert.match(turns[0]!.userText, /无用户消息/);
     assert.equal(turns[0]!.reply, "只有回复");
+  });
+
+  it("子代理（task_start/task_end）并入工具阶段，name 为 Task", () => {
+    const turns = buildTrajectoryTurns([
+      record(1, "2026-08-14T10:00:00.000Z", { type: "user", text: "派子代理" }),
+      record(2, "2026-08-14T10:00:01.000Z", {
+        type: "task_start",
+        taskId: "t-1",
+        description: "搜索鉴权代码",
+      }),
+      record(3, "2026-08-14T10:00:05.000Z", {
+        type: "task_end",
+        taskId: "t-1",
+        summary: "找到 3 处",
+        status: "completed",
+      }),
+    ]);
+    assert.equal(turns[0]!.tools.length, 1);
+    assert.equal(turns[0]!.tools[0]!.name, "Task");
+    assert.match(turns[0]!.tools[0]!.title, /子代理：搜索鉴权代码/);
+    assert.equal(turns[0]!.tools[0]!.status, "ok", "task_end 完成 → ok");
   });
 });

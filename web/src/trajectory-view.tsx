@@ -21,6 +21,8 @@ export interface TrajectoryTurn {
   thinking?: string;
   /** 工具调用 / 子代理（参数 + 配对结果 + 状态） */
   tools: Array<{
+    /** 工具名（chips 展示用，不含目标） */
+    name: string;
     title: string;
     detail: string;
     /** 结果状态：ok 成功 / error 失败 / none 无返回 */
@@ -35,6 +37,9 @@ const STATUS_MARK: Record<"ok" | "error" | "none", string> = {
   error: "✗",
   none: "·",
 };
+
+/** 折叠摘要行最多展示的工具 chips 数，超出折叠为 +N */
+const CHIP_LIMIT = 6;
 
 function toolResultMap(
   events: SessionEvent[],
@@ -143,6 +148,7 @@ export function buildTrajectoryTurns(
           : "none"
         : "none";
       current!.tools.push({
+        name: event.call.tool,
         title: `${event.call.tool} ${event.call.target}`,
         detail: toolDetail(event.call.tool, event.call.target, args, result),
         status,
@@ -151,6 +157,7 @@ export function buildTrajectoryTurns(
       const index = current!.tools.length;
       taskIndex.set(event.taskId, index);
       current!.tools.push({
+        name: "Task",
         title: `子代理：${event.description}`,
         detail: `子代理任务：${event.description}\n状态：进行中`,
         status: "none",
@@ -231,7 +238,11 @@ export function TrajectoryTable(props: {
       </div>
       <div className="trajectory-table-scroll">
         {turns.map((turn) => (
-          <TurnCard key={turn.userSeq} turn={turn} />
+          <TurnCard
+            key={turn.userSeq}
+            turn={turn}
+            defaultOpen={turns.length === 1}
+          />
         ))}
         {turns.length === 0 && (
           <p className="trajectory-table-empty">该会话暂无步骤事件。</p>
@@ -241,9 +252,16 @@ export function TrajectoryTable(props: {
   );
 }
 
-/** 回合卡片：默认折叠为摘要行（#序号 + 用户输入摘要 + 阶段概览），点击展开四阶段 */
-function TurnCard({ turn }: { turn: TrajectoryTurn }) {
-  const [open, setOpen] = useState(false);
+/** 回合卡片：默认折叠为摘要行（#序号 + 用户输入摘要 + 阶段概览 + 工具 chips），
+    单回合（turns.length === 1）时默认展开四阶段 */
+function TurnCard({
+  turn,
+  defaultOpen = false,
+}: {
+  turn: TrajectoryTurn;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const stageSummary = [
     turn.thinking ? "推理" : "",
     turn.tools.length > 0 ? `${turn.tools.length} 次工具` : "",
@@ -269,6 +287,24 @@ function TurnCard({ turn }: { turn: TrajectoryTurn }) {
         )}
         <time>{formatTime(turn.userTs)}</time>
       </button>
+      {!open && turn.tools.length > 0 && (
+        <div className="trajectory-turn-chips">
+          {turn.tools.slice(0, CHIP_LIMIT).map((tool, index) => (
+            <span
+              key={index}
+              className={`trajectory-chip tool-status-${tool.status}`}
+              title={tool.title}
+            >
+              {STATUS_MARK[tool.status]} {tool.name}
+            </span>
+          ))}
+          {turn.tools.length > CHIP_LIMIT && (
+            <span className="trajectory-chip trajectory-chip-more">
+              +{turn.tools.length - CHIP_LIMIT}
+            </span>
+          )}
+        </div>
+      )}
       {open && (
         <div className="trajectory-turn-body">
           <section className="trajectory-stage stage-user">

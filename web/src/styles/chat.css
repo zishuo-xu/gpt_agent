@@ -2177,6 +2177,30 @@
   font-size: 10px;
 }
 
+
+/* 折叠摘要行的工具 chips：状态色小标签，超出折叠为 +N */
+.trajectory-turn-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 12px 8px;
+}
+
+.trajectory-chip {
+  padding: 1px 8px;
+  border: 1px solid #2c3643;
+  border-radius: 10px;
+  background: #10161e;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.trajectory-chip-more {
+  color: #748091;
+}
+
 .trajectory-turn-body {
   display: flex;
   flex-direction: column;
@@ -2289,15 +2313,15 @@
 }
 
 /* 工具状态色：成功绿 / 失败红 / 无返回灰 */
-.trajectory-block-label.tool-status-ok {
+.tool-status-ok {
   color: #7be2a5;
 }
 
-.trajectory-block-label.tool-status-error {
+.tool-status-error {
   color: #ff9d9d;
 }
 
-.trajectory-block-label.tool-status-none {
+.tool-status-none {
   color: #8d99a9;
 }
 
