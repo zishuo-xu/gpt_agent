@@ -390,3 +390,65 @@ test("插件工具经注册表分发执行，未注册名返回失败结果", as
   assert.equal(missing.isError, true);
   assert.match(String(missing.output), /未注册/);
 });
+
+test("isParallelSafe：内置写工具顺序、只读工具并行", () => {
+  const executor = new ToolExecutor(process.cwd());
+  assert.equal(executor.isParallelSafe("Edit"), false);
+  assert.equal(executor.isParallelSafe("MultiEdit"), false);
+  assert.equal(executor.isParallelSafe("Write"), false);
+  assert.equal(executor.isParallelSafe("Bash"), false);
+  assert.equal(executor.isParallelSafe("Read"), true);
+  assert.equal(executor.isParallelSafe("Grep"), true);
+  assert.equal(executor.isParallelSafe("Glob"), true);
+  assert.equal(executor.isParallelSafe("TodoWrite"), true);
+  assert.equal(executor.isParallelSafe("Task"), true);
+});
+
+test("isParallelSafe：插件声明优先，缺省按只读名启发式", () => {
+  const registry = new PluginToolRegistry();
+  registry.register({
+    name: "WebSearchX",
+    description: "网络搜索",
+    inputSchema: {},
+    run: async () => ({ summary: "ok" }),
+  });
+  registry.register({
+    name: "MutateState",
+    description: "修改外部状态",
+    inputSchema: {},
+    executionMode: "parallel",
+    run: async () => ({ summary: "ok" }),
+  });
+  registry.register({
+    name: "ReadFromDB",
+    description: "读数据库",
+    inputSchema: {},
+    executionMode: "sequential",
+    run: async () => ({ summary: "ok" }),
+  });
+  const executor = new ToolExecutor(
+    process.cwd(),
+    undefined,
+    undefined,
+    undefined,
+    registry,
+  );
+  assert.equal(executor.isParallelSafe("WebSearchX"), true, "只读名启发式 → 并行");
+  assert.equal(executor.isParallelSafe("MutateState"), true, "声明 parallel 覆盖启发式");
+  assert.equal(executor.isParallelSafe("ReadFromDB"), false, "声明 sequential 覆盖启发式");
+});
+
+test("插件 executionMode 非法值注册被拒绝", () => {
+  const registry = new PluginToolRegistry();
+  assert.throws(
+    () =>
+      registry.register({
+        name: "BadMode",
+        description: "非法模式",
+        inputSchema: {},
+        executionMode: "banana",
+        run: async () => ({ summary: "ok" }),
+      }),
+    /executionMode/,
+  );
+});

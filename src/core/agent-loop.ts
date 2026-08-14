@@ -22,7 +22,7 @@ import {
   errorMessageOf,
   retryAfterMsOf,
 } from "../model/error-policy.js";
-import { isToolName, TOOL_NAMES } from "../shared/tool-names.js";
+import { isToolName, looksReadOnlyToolName, TOOL_NAMES } from "../shared/tool-names.js";
 import { usageCostCny } from "../utils/cost.js";
 import { abortableSleep } from "../utils/sleep.js";
 
@@ -523,13 +523,15 @@ export class AgentLoop {
           recordTurn();
           continue;
         }
-        // 并行试点：同一批全部预检通过（allow/deny、无 ask）时并发执行，
-        // 结果按原始顺序回灌（模型协议要求 tool 消息与 tool_use 顺序一致）
+        // 并行试点：同一批全部预检通过（allow/deny、无 ask）且全部并行安全时并发执行，
+        // 结果按原始顺序回灌（模型协议要求 tool 消息与 tool_use 顺序一致）；
+        // 含任一顺序工具（写类/Bash）的批次整批退化为串行（P0-1）
         if (
           this.#parallelTools &&
           calls.length > 1 &&
           !signal.aborted &&
-          !this.#steerRequested
+          !this.#steerRequested &&
+          calls.every((call) => this.#tools.isParallelSafe(call.tool))
         ) {
           const verdicts = calls.map((call) => ({
             call,
@@ -696,23 +698,8 @@ function riskFor(call: ToolCall): string {
   if (call.tool === TOOL_NAMES[7]) return "将新建或完整覆盖文件"; // Write
   // 插件/MCP 工具：按工具名启发式区分只读与写操作（内置 Edit/MultiEdit 保持原文案）。
   // 注意不能用 \b 词边界：snake_case/camelCase 名称中下划线是 \w，动词没有边界
-  if (!isToolName(call.tool) && looksReadOnlyTool(call.tool)) {
+  if (!isToolName(call.tool) && looksReadOnlyToolName(call.tool)) {
     return "只读操作，不修改文件；执行前可查看详细参数";
   }
   return "将修改文件；执行前可查看精确 diff";
-}
-
-/** 工具名按驼峰边界与分隔符切段后，任一动词段命中只读词表即视为只读 */
-function looksReadOnlyTool(toolName: string): boolean {
-  const segments = toolName
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/);
-  const READONLY_VERBS = new Set([
-    "list", "read", "get", "search", "query", "fetch", "lookup", "status",
-    "info", "show", "inspect", "view", "describe", "check", "ping", "stat",
-    "peek", "head", "tail", "whoami", "print", "echo", "find", "ls", "dir",
-    "tree", "schema", "version", "help", "cat",
-  ]);
-  return segments.some((segment) => READONLY_VERBS.has(segment));
 }

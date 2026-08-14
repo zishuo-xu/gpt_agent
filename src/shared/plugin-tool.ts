@@ -51,6 +51,9 @@ export interface PluginTool {
   inputSchema: Record<string, unknown>;
   /** 声明式配置（可选）；无需配置的插件可不声明，run 第三参为 undefined */
   config?: PluginToolConfigDecl;
+  /** 执行模式（P0-1）：sequential = 该工具必须串行执行（含此类工具的批次整批退化为串行）；
+      parallel = 可与其他工具并发。缺省按工具名只读启发式判定（只读名 → parallel，否则 → sequential）。 */
+  executionMode?: "sequential" | "parallel";
   /** run 超时（毫秒，可选）：超时返回失败结果不抛；缺省 60s（与 MCP 调用超时一致） */
   timeoutMs?: number;
   run(
@@ -122,6 +125,15 @@ export class PluginToolRegistry {
     }
     if (isToolName(tool.name)) {
       throw new Error(`插件工具名与内置工具冲突：${tool.name}`);
+    }
+    if (
+      tool.executionMode !== undefined &&
+      tool.executionMode !== "sequential" &&
+      tool.executionMode !== "parallel"
+    ) {
+      throw new Error(
+        `插件“${tool.name}”executionMode 非法：${String(tool.executionMode)}（仅支持 sequential / parallel）`,
+      );
     }
     if (
       typeof tool.description !== "string" ||

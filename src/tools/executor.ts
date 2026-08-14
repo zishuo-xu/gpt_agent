@@ -16,6 +16,11 @@ import {
   pluginToolRegistry,
   type PluginToolRegistry,
 } from "../shared/plugin-tool.js";
+import {
+  isToolName,
+  looksReadOnlyToolName,
+} from "../shared/tool-names.js";
+import { SEQUENTIAL_TOOL_NAMES } from "./tool-definitions.js";
 import { TOOL_OUTPUT_LIMITS, truncateToolText } from "./truncate.js";
 
 interface ReadArgs {
@@ -110,6 +115,16 @@ export class ToolExecutor {
     listener: ((filePath: string) => void | Promise<void>) | undefined,
   ): void {
     this.#fileWrittenListener = listener;
+  }
+
+  /** 工具是否可并行执行（P0-1）：内置查顺序集；插件查声明，缺省按只读名启发式
+      （保守：非只读名视为顺序，避免未知插件写操作混入并行批次） */
+  isParallelSafe(tool: string): boolean {
+    if (isToolName(tool)) return !SEQUENTIAL_TOOL_NAMES.has(tool);
+    const plugin = this.#plugins.get(tool);
+    if (plugin?.executionMode === "parallel") return true;
+    if (plugin?.executionMode === "sequential") return false;
+    return looksReadOnlyToolName(tool);
   }
 
   async execute(

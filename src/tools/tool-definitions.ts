@@ -15,6 +15,15 @@ export const EXPLORE_TOOL_NAMES: readonly ToolName[] = [
   "TodoWrite",
 ];
 
+/** 顺序执行的内置工具（P0-1）：并行模式下含任一此类工具的批次整批退化为串行。
+    写类工具需互斥（防同批写竞争），Bash 副作用不可并行。 */
+export const SEQUENTIAL_TOOL_NAMES: ReadonlySet<ToolName> = new Set([
+  "Edit",
+  "MultiEdit",
+  "Write",
+  "Bash",
+]);
+
 /** 全量工具 = 内置 + 插件注册表（进程启动时由 loader 填充）。
     会话内工具集固定约束与内置工具相同。 */
 export function getAllToolDefinitions(): ToolDefinition[] {

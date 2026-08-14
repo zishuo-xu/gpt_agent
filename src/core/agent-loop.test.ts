@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ToolExecutor } from "../tools/executor.js";
+import { PluginToolRegistry } from "../shared/plugin-tool.js";
 import {
   AgentLoop,
   jitteredBackoff,
@@ -724,13 +725,25 @@ test("重试期间 abort：立即中止且不再发起请求", async () => {
   assert.ok(calls >= 1);
 });
 
-test("并行模式：同一批无需审批的工具并发执行（总时长 < 串行总和）", async () => {
+test("并行模式：全并行安全工具批次并发执行（总时长 < 串行总和）", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-par-"));
+  const registry = new PluginToolRegistry();
+  registry.register({
+    name: "SlowProbe",
+    description: "慢速只读探测",
+    inputSchema: {},
+    executionMode: "parallel",
+    run: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return { summary: "probe done" };
+    },
+  });
   const model = new ScriptedModel([
     {
       text: "",
       toolCalls: [
-        toolCall("p1", "Bash", "sleep 0.4", { command: "sleep 0.4" }),
-        toolCall("p2", "Bash", "sleep 0.4", { command: "sleep 0.4" }),
+        toolCall("p1", "SlowProbe", "probe-1", {}),
+        toolCall("p2", "SlowProbe", "probe-2", {}),
       ],
     },
     { text: "并行完成", done: true },
@@ -741,9 +754,15 @@ test("并行模式：同一批无需审批的工具并发执行（总时长 < �
   const loop = new AgentLoop({
     bus,
     model,
-    // trust 档：Bash 默认放行（normal 档 Bash 需审批，批次会退化为串行——审批优先）
+    // trust 档：插件工具自动放行（normal 档需审批，批次会退化为串行——审批优先）
     permissions: new PermissionEngine("trust"),
-    tools: new ToolExecutor(process.cwd()),
+    tools: new ToolExecutor(
+      directory,
+      undefined,
+      undefined,
+      undefined,
+      registry,
+    ),
     approve: async () => ({ granted: true }),
     parallelTools: true,
   });
@@ -752,7 +771,7 @@ test("并行模式：同一批无需审批的工具并发执行（总时长 < �
   const elapsed = Date.now() - startedAt;
   assert.ok(
     elapsed < 700,
-    `两个 0.4s 命令应并发执行（实际 ${elapsed}ms）`,
+    `两个 0.4s 只读探测应并发执行（实际 ${elapsed}ms）`,
   );
   assert.equal(
     events.filter((event) => event.type === "tool_result").length,
@@ -772,6 +791,49 @@ test("并行模式：同一批无需审批的工具并发执行（总时长 < �
     ["p1", "p2"],
     "tool_call 事件覆盖全部并发调用",
   );
+});
+
+test("并行模式：批次含顺序工具（Bash）时整批退化为串行", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-serial-batch-"));
+  await writeFile(path.join(directory, "a.txt"), "before\n", "utf8");
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([
+    {
+      text: "",
+      toolCalls: [
+        toolCall("b1", "Bash", "sleep 0.3", { command: "sleep 0.3" }),
+        toolCall("b2", "Read", "a.txt", { file_path: "a.txt" }),
+      ],
+    },
+    { text: "串行完成", done: true },
+  ]);
+  const tools = new ToolExecutor(directory);
+  const executionOrder: string[] = [];
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, signal, options) => {
+    executionOrder.push(`start:${call.id}`);
+    const result = await originalExecute(call, signal, options);
+    executionOrder.push(`end:${call.id}`);
+    return result;
+  };
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("trust"),
+    tools,
+    approve: async () => ({ granted: true }),
+    parallelTools: true,
+  });
+  await loop.run();
+  // 批次含顺序工具（Bash）→ 整批串行：Read 必须等 Bash 结束后才开始
+  assert.deepEqual(executionOrder, [
+    "start:b1",
+    "end:b1",
+    "start:b2",
+    "end:b2",
+  ]);
 });
 
 test("并行模式：批次含 ask 工具时退化为串行并正常审批", async () => {
