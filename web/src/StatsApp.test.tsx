@@ -237,4 +237,34 @@ describe("StatsApp（任务统计面板）", () => {
     assert.ok(!container.querySelector(".stats-modal"), "关闭后模态应移除");
     fetch.restore();
   });
+
+  it("默认项目取 defaultKey（服务器默认项目）而非大厅", async () => {
+    window.localStorage.removeItem("stats.project");
+    const requested: string[] = [];
+    const fetch = stubFetch({
+      "/api/projects": () => ({
+        projects: [
+          { key: "lobby", name: "大厅（不操作文件）", lobby: true },
+          { key: "proj-a", name: "项目A" },
+        ],
+        defaultKey: "proj-a",
+      }),
+      "/api/stats?project=proj-a": () => {
+        requested.push("proj-a");
+        return { totals: {}, byDay: [], byModel: [], sessions: [] };
+      },
+      "/api/stats?project=lobby": () => {
+        requested.push("lobby");
+        return { totals: {}, byDay: [], byModel: [], sessions: [] };
+      },
+    });
+    const { container } = await setup();
+    assert.deepEqual(
+      requested,
+      ["proj-a"],
+      "默认应请求 defaultKey 项目而非大厅（lobby 恒排列表第一）",
+    );
+    assert.ok(container.textContent?.includes("项目A"));
+    fetch.restore();
+  });
 });

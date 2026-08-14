@@ -188,4 +188,35 @@ describe("ScheduledApp（定时任务面板）", () => {
     assert.ok(container.textContent?.includes("当前项目暂无定时任务"));
     fetch.restore();
   });
+
+  it("默认项目取 defaultKey（服务器默认项目）而非大厅", async () => {
+    window.localStorage.removeItem("scheduled.project");
+    const requested: string[] = [];
+    const fetch = stubFetch({
+      "/api/projects": () => ({
+        projects: [
+          { key: "lobby", name: "大厅（不操作文件）", lobby: true },
+          { key: "proj-a", name: "项目A" },
+        ],
+        defaultKey: "proj-a",
+      }),
+      "/api/scheduled?project=proj-a": () => {
+        requested.push("proj-a");
+        return { tasks: [] };
+      },
+      "/api/scheduled?project=lobby": () => {
+        requested.push("lobby");
+        return { tasks: [] };
+      },
+    });
+    const { container } = await setup();
+    assert.deepEqual(
+      requested,
+      ["proj-a"],
+      "默认应请求 defaultKey 项目而非大厅（lobby 恒排列表第一）",
+    );
+    assert.ok(container.textContent?.includes("项目A"));
+    fetch.restore();
+});
+
 });

@@ -147,8 +147,12 @@ export function StatsApp() {
       const next = (payload.projects ?? []) as ProjectEntry[];
       setProjects(next);
       const remembered = window.localStorage.getItem("stats.project");
+      // 默认项目顺序：上次记忆 → 服务器默认项目（启动目录）→ 列表第一项。
+      // 不能用 next[0] 兜底大厅：/api/projects 恒把大厅排第一，首次打开
+      // 会串成大厅数据（用户当前项目上下文脱节）
       const initial =
         next.find((project) => project.key === remembered)?.key ??
+        (payload.defaultKey as string | undefined) ??
         next[0]?.key ??
         "";
       setCurrentProject(initial);
