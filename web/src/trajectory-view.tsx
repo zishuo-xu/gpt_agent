@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { SessionEvent } from "./session-display";
+import { RichText } from "./session-rich-text";
 
 /**
  * 轨迹视图（任务统计面板内"每个任务点开"）：
@@ -18,11 +19,22 @@ export interface TrajectoryTurn {
   userText: string;
   /** 模型推理过程（thinking_delta 按回合合并） */
   thinking?: string;
-  /** 工具调用（参数 + 配对结果） */
-  tools: Array<{ title: string; detail: string }>;
+  /** 工具调用 / 子代理（参数 + 配对结果 + 状态） */
+  tools: Array<{
+    title: string;
+    detail: string;
+    /** 结果状态：ok 成功 / error 失败 / none 无返回 */
+    status: "ok" | "error" | "none";
+  }>;
   /** 模型最终回复（text_delta 按回合合并） */
   reply?: string;
 }
+
+const STATUS_MARK: Record<"ok" | "error" | "none", string> = {
+  ok: "✓",
+  error: "✗",
+  none: "·",
+};
 
 function toolResultMap(
   events: SessionEvent[],
@@ -76,7 +88,7 @@ function toolDetail(
 }
 
 /** 事件流 → 回合分组：user 事件开新回合，thinking/text 增量按回合合并，
-    工具调用配对 tool_result 展示结果；子代理/系统事件并入回合的附注 */
+    工具调用配对 tool_result 展示结果，子代理（task_start/end）并入工具阶段 */
 export function buildTrajectoryTurns(
   events: SessionEvent[],
 ): TrajectoryTurn[] {
@@ -89,10 +101,11 @@ export function buildTrajectoryTurns(
         userTs: string;
         userText: string;
         thinking?: string;
-        tools: Array<{ title: string; detail: string }>;
+        tools: TrajectoryTurn["tools"];
         reply?: string;
       }
     | undefined;
+  const taskIndex = new Map<string, number>();
 
   const startTurn = (seq: number, ts: string, text: string): void => {
     current = {
@@ -122,10 +135,37 @@ export function buildTrajectoryTurns(
     } else if (event.type === "tool_call") {
       const result = toolResults.get(event.call.id);
       const args = event.call.args ?? {};
+      const status: "ok" | "error" | "none" = result
+        ? result.diff !== undefined ||
+            result.output !== undefined ||
+            result.summary !== undefined
+          ? "ok"
+          : "none"
+        : "none";
       current!.tools.push({
         title: `${event.call.tool} ${event.call.target}`,
         detail: toolDetail(event.call.tool, event.call.target, args, result),
+        status,
       });
+    } else if (event.type === "task_start") {
+      const index = current!.tools.length;
+      taskIndex.set(event.taskId, index);
+      current!.tools.push({
+        title: `子代理：${event.description}`,
+        detail: `子代理任务：${event.description}\n状态：进行中`,
+        status: "none",
+      });
+    } else if (event.type === "task_end") {
+      const index = taskIndex.get(event.taskId);
+      if (index !== undefined && current!.tools[index]) {
+        const existing = current!.tools[index]!;
+        current!.tools[index] = {
+          // task_end 无 description：保留 task_start 时的标题
+          ...existing,
+          detail: `${existing.detail}\n\n结果：${event.summary}\n状态：${event.status === "completed" ? "完成" : event.status}`,
+          status: event.status === "completed" ? "ok" : "error",
+        };
+      }
     }
   }
   return turns;
@@ -143,11 +183,10 @@ function formatTime(iso: string): string {
 /** 可折叠内容块：标题行 + 点击展开详情 */
 function ExpandBlock(props: {
   label: string;
-  meta?: string;
+  labelClass?: string;
   content: string;
-  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(props.defaultOpen ?? false);
+  const [open, setOpen] = useState(false);
   return (
     <div className={`trajectory-block-item${open ? " open" : ""}`}>
       <button
@@ -155,10 +194,11 @@ function ExpandBlock(props: {
         onClick={() => setOpen((value) => !value)}
       >
         <span className="trajectory-block-caret">{open ? "▾" : "▸"}</span>
-        <span className="trajectory-block-label">{props.label}</span>
-        {props.meta && (
-          <span className="trajectory-block-meta">{props.meta}</span>
-        )}
+        <span
+          className={`trajectory-block-label${props.labelClass ? ` ${props.labelClass}` : ""}`}
+        >
+          {props.label}
+        </span>
       </button>
       {open && (
         <pre className="trajectory-block-content">{props.content}</pre>
@@ -240,7 +280,8 @@ export function TrajectoryTable(props: {
                     {turn.tools.map((tool, index) => (
                       <ExpandBlock
                         key={`${turn.userSeq}-${index}`}
-                        label={tool.title}
+                        label={`${STATUS_MARK[tool.status]} ${tool.title}`}
+                        labelClass={`tool-status-${tool.status}`}
                         content={tool.detail}
                       />
                     ))}
@@ -256,9 +297,9 @@ export function TrajectoryTable(props: {
                       返回 · {turn.reply.length} 字
                     </span>
                   </div>
-                  <pre className="trajectory-stage-content">
-                    {turn.reply}
-                  </pre>
+                  <div className="trajectory-stage-content rich">
+                    <RichText text={turn.reply} />
+                  </div>
                 </section>
               )}
             </div>

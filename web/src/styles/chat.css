@@ -2244,6 +2244,63 @@
   background: #0d131b;
 }
 
+/* 回复阶段：RichText markdown 渲染（继承全局消息样式，仅做间距收拢） */
+.trajectory-stage-content.rich {
+  font: 12px/1.7 -apple-system, "PingFang SC", sans-serif;
+  white-space: normal;
+  padding: 8px 14px 12px;
+}
+
+.trajectory-stage-content.rich p {
+  margin: 0 0 6px;
+}
+
+.trajectory-stage-content.rich p:last-child {
+  margin-bottom: 0;
+}
+
+.trajectory-stage-content.rich h2,
+.trajectory-stage-content.rich h3,
+.trajectory-stage-content.rich h4 {
+  margin: 10px 0 6px;
+}
+
+.trajectory-stage-content.rich ul,
+.trajectory-stage-content.rich ol {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+
+.trajectory-stage-content.rich li {
+  margin-bottom: 3px;
+}
+
+.trajectory-stage-content.rich code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: #1b2430;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.trajectory-stage-content.rich .code-block {
+  max-height: 220px;
+  overflow: auto;
+}
+
+/* 工具状态色：成功绿 / 失败红 / 无返回灰 */
+.trajectory-block-label.tool-status-ok {
+  color: #7be2a5;
+}
+
+.trajectory-block-label.tool-status-error {
+  color: #ff9d9d;
+}
+
+.trajectory-block-label.tool-status-none {
+  color: #8d99a9;
+}
+
 /* 工具阶段：每个工具一个可折叠行 */
 .trajectory-stage-tools {
   display: flex;
