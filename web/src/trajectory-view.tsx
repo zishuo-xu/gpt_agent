@@ -201,27 +201,65 @@ export function TrajectoryTable(props: {
               <time>{formatTime(turn.userTs)}</time>
             </header>
             <div className="trajectory-turn-body">
-              <ExpandBlock
-                label="用户输入"
-                content={turn.userText}
-                defaultOpen
-              />
+              <section className="trajectory-stage stage-user">
+                <div className="trajectory-stage-head">
+                  <span className="trajectory-stage-icon">👤</span>
+                  <span className="trajectory-stage-label">用户</span>
+                  <span className="trajectory-stage-meta">
+                    输入 · {turn.userText.length} 字
+                  </span>
+                </div>
+                <pre className="trajectory-stage-content">
+                  {turn.userText}
+                </pre>
+              </section>
               {turn.thinking && (
-                <ExpandBlock label="推理过程" content={turn.thinking} />
+                <section className="trajectory-stage stage-thinking">
+                  <div className="trajectory-stage-head">
+                    <span className="trajectory-stage-icon">🧠</span>
+                    <span className="trajectory-stage-label">推理</span>
+                    <span className="trajectory-stage-meta">
+                      {turn.thinking.length} 字
+                    </span>
+                  </div>
+                  <pre className="trajectory-stage-content">
+                    {turn.thinking}
+                  </pre>
+                </section>
               )}
-              {turn.tools.map((tool, index) => (
-                <ExpandBlock
-                  key={`${turn.userSeq}-${index}`}
-                  label={tool.title}
-                  content={tool.detail}
-                />
-              ))}
+              {turn.tools.length > 0 && (
+                <section className="trajectory-stage stage-tools">
+                  <div className="trajectory-stage-head">
+                    <span className="trajectory-stage-icon">🔧</span>
+                    <span className="trajectory-stage-label">工具</span>
+                    <span className="trajectory-stage-meta">
+                      {turn.tools.length} 次调用
+                    </span>
+                  </div>
+                  <div className="trajectory-stage-tools">
+                    {turn.tools.map((tool, index) => (
+                      <ExpandBlock
+                        key={`${turn.userSeq}-${index}`}
+                        label={tool.title}
+                        content={tool.detail}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
               {turn.reply && (
-                <ExpandBlock
-                  label="模型回复"
-                  content={turn.reply}
-                  defaultOpen
-                />
+                <section className="trajectory-stage stage-reply">
+                  <div className="trajectory-stage-head">
+                    <span className="trajectory-stage-icon">🤖</span>
+                    <span className="trajectory-stage-label">回复</span>
+                    <span className="trajectory-stage-meta">
+                      返回 · {turn.reply.length} 字
+                    </span>
+                  </div>
+                  <pre className="trajectory-stage-content">
+                    {turn.reply}
+                  </pre>
+                </section>
               )}
             </div>
           </section>

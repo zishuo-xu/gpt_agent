@@ -2098,7 +2098,7 @@
   }
 }
 
-/* ========== 轨迹视图（任务统计 → 每个任务点开，回合结构化） ========== */
+/* ========== 轨迹视图（任务统计 → 每个任务点开，回合×四阶段结构化） ========== */
 .trajectory-table {
   display: flex;
   flex-direction: column;
@@ -2133,14 +2133,14 @@
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 /* 回合卡片 */
 .trajectory-turn {
   border: 1px solid #2c3643;
   border-radius: 8px;
-  background: #141b24;
+  background: #10161e;
   overflow: hidden;
 }
 
@@ -2182,13 +2182,76 @@
   flex-direction: column;
 }
 
-/* 可折叠内容块 */
-.trajectory-block-item {
-  border-bottom: 1px solid #1f2834;
+/* 四阶段区块：用户 / 推理 / 工具 / 回复 */
+.trajectory-stage {
+  border-left: 3px solid transparent;
 }
 
-.trajectory-block-item:last-child {
-  border-bottom: none;
+.trajectory-stage + .trajectory-stage {
+  border-top: 1px solid #1f2834;
+}
+
+.stage-user {
+  border-left-color: #4a6fa5;
+}
+
+.stage-thinking {
+  border-left-color: #c9a227;
+}
+
+.stage-tools {
+  border-left-color: #3d8ee8;
+}
+
+.stage-reply {
+  border-left-color: #2f8f5b;
+}
+
+.trajectory-stage-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #141b24;
+  font-size: 10px;
+}
+
+.trajectory-stage-icon {
+  flex: 0 0 auto;
+}
+
+.trajectory-stage-label {
+  font-weight: 750;
+  color: #b9c1cc;
+}
+
+.trajectory-stage-meta {
+  margin-left: auto;
+  color: #5b6b7c;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.trajectory-stage-content {
+  margin: 0;
+  padding: 8px 14px 10px;
+  font: 11px/1.65 var(--mono);
+  color: #c9d4e0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 220px;
+  overflow: auto;
+  background: #0d131b;
+}
+
+/* 工具阶段：每个工具一个可折叠行 */
+.trajectory-stage-tools {
+  display: flex;
+  flex-direction: column;
+}
+
+.trajectory-block-item {
+  border-top: 1px solid #1f2834;
 }
 
 .trajectory-block-toggle {
@@ -2196,7 +2259,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 7px 12px;
+  padding: 7px 14px;
   border: none;
   background: transparent;
   color: #9aa6b6;
@@ -2228,16 +2291,9 @@
   color: #8fc3ff;
 }
 
-.trajectory-block-meta {
-  flex: 0 0 auto;
-  color: #748091;
-  font-size: 10px;
-  font-family: var(--mono);
-}
-
 .trajectory-block-content {
   margin: 0;
-  padding: 8px 12px 12px 32px;
+  padding: 8px 14px 10px 34px;
   font: 11px/1.6 var(--mono);
   color: #b9c1cc;
   white-space: pre-wrap;
