@@ -440,13 +440,15 @@ test("isParallelSafe：插件声明优先，缺省按只读名启发式", () => 
 
 test("插件 executionMode 非法值注册被拒绝", () => {
   const registry = new PluginToolRegistry();
+  // 类型断言模拟"非编译期类型"的运行时值（如动态配置传入）
+  const badMode = "banana" as "sequential" | "parallel";
   assert.throws(
     () =>
       registry.register({
         name: "BadMode",
         description: "非法模式",
         inputSchema: {},
-        executionMode: "banana",
+        executionMode: badMode,
         run: async () => ({ summary: "ok" }),
       }),
     /executionMode/,
