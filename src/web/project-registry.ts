@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -92,6 +92,9 @@ export class ProjectRegistry {
           updatedAt?: string;
         };
         if (typeof meta.cwd !== "string" || !meta.cwd) continue;
+        // 目录已删除的残留项目（e2e/临时目录清理后 project.json 仍在）不再列出，
+        // 否则幽灵项目会淹没项目切换器（同名 basename 无法区分）
+        if (!existsSync(meta.cwd)) continue;
         // 大厅是合成项目（key=lobby），其真实临时目录不重复列出
         if (meta.cwd === lobbyCwd) continue;
         byCwd.set(meta.cwd, {
