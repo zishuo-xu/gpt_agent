@@ -36,35 +36,35 @@ Pi 是交互式对坐 agent：答一轮即停，用户始终在场。MyAgent 为
 
 按优先级排序。**P0 为直接提升自主运行质量；P1 为成本精度与扩展性；P2 为体验补充。**
 
-### P0-1 工具级执行模式声明（executionMode）
+### P0-1 工具级执行模式声明（executionMode）——已落地 2026-08-14
 
 - **Pi**：工具自身声明 `executionMode: "sequential"`，循环按批次内是否有顺序工具决定并行/串行（`agent-loop.ts:419-425`）。
-- **现状**：我们只有会话级 `parallelTools` 布尔开关 + ask 批次退化。Write/Edit 两个写同一文件在并行批次中会竞争。
-- **改法**：`ToolExecutor` 工具定义加 `executionMode?: "sequential"`（Write/Edit/MultiEdit/Bash 默认顺序），AgentLoop 批次判定改为"批次内存在顺序工具 → 整批串行"（可精细到仅顺序工具串行、读工具仍并行，Pi 未做此细分，可超越）。
+- **现状**：`SEQUENTIAL_TOOL_NAMES`（Edit/MultiEdit/Write/Bash）+ 插件 `executionMode` 声明（缺省只读名启发式），AgentLoop 批次含任一顺序工具整批退化为串行（`agent-loop.ts` 并行条件）。
+- ~~改法~~：`ToolExecutor` 工具定义加 `executionMode?: "sequential"`（Write/Edit/MultiEdit/Bash 默认顺序），AgentLoop 批次判定改为"批次内存在顺序工具 → 整批串行"（可精细到仅顺序工具串行、读工具仍并行，Pi 未做此细分，可超越）。
 - **落点**：`src/shared/`（工具协议）+ `src/core/agent-loop.ts:505` + `src/tools/executor.ts`。
 - **风险**：低。行为仅影响开启 parallelTools 的会话。
 
-### P0-2 写入串行化队列（file-mutation-queue 参照）
+### P0-2 写入串行化队列（file-mutation-queue 参照）——已落地 2026-08-14
 
 - **Pi**：`tools/file-mutation-queue.ts` 将文件写入排入队列串行执行。
-- **现状**：我们有 `atomic-file.ts`（EditJournal，sha256 前后哈希回滚追踪），防的是"原子性"，不是"并行写同一文件的逻辑竞争"。
-- **改法**：按目标路径 hash 分桶的写队列：同路径写互斥，不同路径写可并行。与 P0-1 配合后并行安全。
+- **现状**：`AtomicFileTools` 内按 resolve 路径分桶的 promise 链——同路径写互斥（覆盖读-算-写全流程，防 lost update；web server 同进程多会话共享实例时跨会话同样生效），异路径写并行。
+- ~~改法~~：按目标路径 hash 分桶的写队列：同路径写互斥，不同路径写可并行。与 P0-1 配合后并行安全。
 - **落点**：`src/tools/` 新增，executor 写入路径接入。
 - **风险**：低。纯增量。
 
-### P0-3 文件操作跟踪进压缩（FileOperations）
+### P0-3 文件操作跟踪进压缩（FileOperations）——已落地 2026-08-14
 
 - **Pi**：compaction 摘要携带 readFiles/modifiedFiles，且跨压缩传承（`compaction.ts:extractFileOperations`）——模型压缩后仍知道动过哪些文件。
-- **现状**：我们的压缩摘要只有对话总结（`agent-model.ts:158-242`），文件操作信息随旧消息一起蒸发。
-- **改法**：AgentLoop 每轮累计 tool 的 Read/Write/Edit 目标路径；compact 时将文件操作清单拼进摘要请求的 user 消息，onCompacted 结果带 fileOps。
+- **现状**：`ToolExecutionResult.fileOps`（Read → read；Edit/MultiEdit/Write → modified，相对路径）→ AgentLoop 累计 → `AgentModel.setFileOps` 注入 → 压缩摘要请求追加 "Files read/modified" 段落 → `context_compacted` 事件携带 fileOps。
+- ~~改法~~：AgentLoop 每轮累计 tool 的 Read/Write/Edit 目标路径；compact 时将文件操作清单拼进摘要请求的 user 消息，onCompacted 结果带 fileOps。
 - **落点**：`agent-model.ts` + `agent-loop.ts`（tool_result 路径收集）。
 - **风险**：低。摘要 prompt 变化需同步压缩模板。
 
-### P0-4 afterToolCall 钩子 + 工具级 terminate 语义
+### P0-4 afterToolCall 钩子 + 工具级 terminate 语义——已落地 2026-08-14
 
 - **Pi**：`afterToolCall` 可改写结果 content/details/usage/terminate（`agent-loop.ts:724-751`）；批次内全部工具 terminate=true 则结束循环（`agent-loop.ts:582-584`）。
-- **现状**：我们没有结果改写钩子；批次终止只有模型 `turn.done` 与 TaskBox `finalOnly`。
-- **改法**：
+- **现状**：`AgentLoopOptions.afterToolCall`（emit 前改写，抛错保留原结果）+ `ToolExecutionResult.terminate`（批次内全部已执行工具 terminate → emit done 结束循环；steer 优先于 terminate，finalOnly 天然不可绕过）；`TaskRunnerOptions.afterToolCall` 透传子代理循环。
+- ~~改法~~：
   - AgentLoop 增加可选 `afterToolCall`（脱敏、输出再截断、错误改写）；
   - `ToolExecutionResult` 加 `terminate?: boolean`，批次全部 terminate 时结束循环（子代理收尾协议化）。
 - **落点**：`agent-loop.ts` + `types.ts`。
@@ -118,3 +118,4 @@ Pi 是交互式对坐 agent：答一轮即停，用户始终在场。MyAgent 为
 ## 6. 决策记录
 
 - **2026-08-09**：确立"Pi 为循环骨架与度量语义参照源，无人值守三件套（任务盒/权限/子代理）为自主差异"的定位；P0 四项（executionMode、写队列、文件操作入压缩、afterToolCall/terminate）列为下一迭代候选，按"低风险先行"顺序实施：P0-1 → P0-2 → P0-3 → P0-4。
+- **2026-08-14**：P0 四项全部落地（P0-1 executionMode 批次退化串行 / P0-2 写入串行化队列 / P0-3 FileOps 进压缩 / P0-4 afterToolCall + terminate），设计见 docs/superpowers/specs/2026-08-14-p0-parallel-safety-and-compaction-design.md；细粒度"顺序工具串行、读工具仍并行"（P0-1 的可超越项）留作后续。
