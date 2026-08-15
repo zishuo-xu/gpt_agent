@@ -566,6 +566,7 @@ export function StatsApp() {
                   </span>
                 </div>
                 <button
+                  className="stats-modal-close"
                   onClick={() => setTrajectoryFor(null)}
                 >
                   ×

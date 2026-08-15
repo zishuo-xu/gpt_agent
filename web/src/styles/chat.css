@@ -2148,10 +2148,33 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   padding: 8px 12px;
-  background: #1b2430;
+  border: none;
   border-bottom: 1px solid #2c3643;
+  background: #1b2430;
+  color: inherit;
+  font: inherit;
   font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.trajectory-turn-head:hover {
+  background: #1e2937;
+}
+
+.trajectory-turn-meta {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid #2c3643;
+  border-radius: 10px;
+  background: #10161e;
+  color: #8d99a9;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .trajectory-turn-index {

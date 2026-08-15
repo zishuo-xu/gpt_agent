@@ -425,13 +425,20 @@
   border-bottom: 1px solid #2b3441;
 }
 
-.stats-modal-head h2 {
+.stats-modal-head h2,
+.stats-modal-head h3 {
   max-width: 480px;
   margin: 4px 0 0;
   overflow: hidden;
   font-size: 14px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 轨迹弹窗内容多，加宽 */
+.stats-modal-trajectory {
+  width: min(860px, calc(100vw - 48px));
 }
 
 .stats-modal-close {
