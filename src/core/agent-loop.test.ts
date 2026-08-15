@@ -1504,3 +1504,39 @@ test("ask_permission 无模型文本时不携带 purpose", async () => {
   assert.ok(ask && ask.type === "ask_permission");
   assert.equal(ask.purpose, undefined);
 });
+
+test("purpose 超长时保留开头加省略号（不从中段截断）", async () => {
+  const bus = new AgentEventBus();
+  const askEvents: AgentEvent[] = [];
+  bus.subscribe((event) => {
+    if (event.type === "ask_permission") askEvents.push(event);
+  });
+  const longText =
+    "由于目录里有 `.git` 会导致 create-vite 交互提示，我改为在临时子目录脚手架后移入根目录，这样最稳妥可靠且不会卡在交互。";
+  const model = new ScriptedModel([
+    {
+      text: longText,
+      toolCalls: [
+        toolCall("bash-1", "Bash", "pnpm install", {
+          command: "pnpm install",
+        }),
+      ],
+    },
+  ]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor("/tmp"),
+    approve: async () => ({ granted: true }),
+  });
+  await loop.run();
+  const ask = askEvents[0];
+  assert.ok(ask && ask.type === "ask_permission");
+  assert.ok(ask.purpose, "应携带 purpose");
+  assert.ok(
+    (ask.purpose ?? "").startsWith("由于目录里有"),
+    "保留开头而非从中段截断",
+  );
+  assert.ok((ask.purpose ?? "").endsWith("…"));
+});

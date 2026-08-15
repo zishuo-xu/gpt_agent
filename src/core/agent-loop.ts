@@ -789,7 +789,7 @@ function isTruncatedStopReason(reason: string | undefined): boolean {
   return reason === "max_tokens" || reason === "length";
 }
 
-/** ask_permission.purpose：取模型文本最后一行（清理空白，截 80 字符） */
+/** ask_permission.purpose：取模型文本最后一行（清理空白，超长保留开头并加省略号） */
 function lastTextPurpose(text: string): string | undefined {
   const lines = text
     .split("\n")
@@ -797,7 +797,7 @@ function lastTextPurpose(text: string): string | undefined {
     .filter(Boolean);
   const last = lines[lines.length - 1];
   if (!last) return undefined;
-  return last.length > 80 ? last.slice(-80) : last;
+  return last.length > 80 ? `${last.slice(0, 80)}…` : last;
 }
 
 function riskFor(call: ToolCall): string {
