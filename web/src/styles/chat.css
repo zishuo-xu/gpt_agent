@@ -2136,6 +2136,11 @@
   gap: 12px;
 }
 
+/* 回合卡片不被 flex 压缩——内容（推理全文）决定滚动区高度 */
+.trajectory-table-scroll > .trajectory-turn {
+  flex: 0 0 auto;
+}
+
 /* 回合卡片 */
 .trajectory-turn {
   border: 1px solid #2c3643;
@@ -2258,8 +2263,26 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   padding: 6px 12px;
+  border: none;
   background: #141b24;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+  font-size: 10px;
+}
+
+.trajectory-stage-toggle:hover {
+  background: #182230;
+}
+
+.trajectory-stage-caret {
+  color: #5b6b7c;
   font-size: 10px;
 }
 
@@ -2286,8 +2309,6 @@
   color: #c9d4e0;
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 220px;
-  overflow: auto;
   background: #0d131b;
 }
 

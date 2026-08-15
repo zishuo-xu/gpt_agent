@@ -252,6 +252,28 @@ export function TrajectoryTable(props: {
   );
 }
 
+/** 推理阶段：默认折叠为标题行（超长推理全文点击展开，避免撑爆弹窗） */
+function ThinkingStage({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className={`trajectory-stage stage-thinking${open ? " open" : ""}`}>
+      <button
+        className="trajectory-stage-head trajectory-stage-toggle"
+        onClick={() => setOpen((value) => !value)}
+        title={open ? "收起推理全文" : "展开推理全文"}
+      >
+        <span className="trajectory-stage-icon">🧠</span>
+        <span className="trajectory-stage-label">推理</span>
+        <span className="trajectory-stage-meta">
+          {text.length} 字 · {open ? "收起" : "展开"}
+        </span>
+        <span className="trajectory-stage-caret">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && <pre className="trajectory-stage-content">{text}</pre>}
+    </section>
+  );
+}
+
 /** 回合卡片：默认折叠为摘要行（#序号 + 用户输入摘要 + 阶段概览 + 工具 chips），
     单回合（turns.length === 1）时默认展开四阶段 */
 function TurnCard({
@@ -310,29 +332,18 @@ function TurnCard({
           <section className="trajectory-stage stage-user">
             <div className="trajectory-stage-head">
               <span className="trajectory-stage-icon">👤</span>
-                  <span className="trajectory-stage-label">用户</span>
-                  <span className="trajectory-stage-meta">
-                    输入 · {turn.userText.length} 字
-                  </span>
-                </div>
-                <pre className="trajectory-stage-content">
-                  {turn.userText}
-                </pre>
-              </section>
-              {turn.thinking && (
-                <section className="trajectory-stage stage-thinking">
-                  <div className="trajectory-stage-head">
-                    <span className="trajectory-stage-icon">🧠</span>
-                    <span className="trajectory-stage-label">推理</span>
-                    <span className="trajectory-stage-meta">
-                      {turn.thinking.length} 字
-                    </span>
-                  </div>
-                  <pre className="trajectory-stage-content">
-                    {turn.thinking}
-                  </pre>
-                </section>
-              )}
+              <span className="trajectory-stage-label">用户</span>
+              <span className="trajectory-stage-meta">
+                输入 · {turn.userText.length} 字
+              </span>
+            </div>
+            <pre className="trajectory-stage-content">
+              {turn.userText}
+            </pre>
+          </section>
+          {turn.thinking && (
+            <ThinkingStage text={turn.thinking} />
+          )}
               {turn.tools.length > 0 && (
                 <section className="trajectory-stage stage-tools">
                   <div className="trajectory-stage-head">
