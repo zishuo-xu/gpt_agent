@@ -790,9 +790,23 @@ function isTruncatedStopReason(reason: string | undefined): boolean {
 function riskFor(call: ToolCall): string {
   if (call.tool === TOOL_NAMES[8]) {
     // Bash
-    const command = (call.args as { command?: string }).command ?? call.target;
+    const raw = (call.args as { command?: string }).command ?? call.target;
+    // 去 cd 前缀后匹配：`cd <dir> && pnpm install` 与裸 `pnpm install` 同规则
+    const command = raw.replace(/^(?:cd\s+\S+\s*(?:&&|;)\s*)+/, "");
     if (/^(npm|pnpm|yarn) (install|add|remove|rm)\b/.test(command)) {
       return "将修改依赖清单与 lock 文件";
+    }
+    if (/^(npm|pnpm|yarn) create\b/.test(command)) {
+      return "将生成项目脚手架文件";
+    }
+    if (/^git init\b/.test(command)) {
+      return "将初始化 git 仓库";
+    }
+    if (/^git commit\b/.test(command)) {
+      return "将创建本地提交";
+    }
+    if (/^(npx|pnpm dlx)\b/.test(command)) {
+      return "将下载并执行包（脚手架/一次性命令）";
     }
     if (/^git push\b/.test(command)) return "将向远端推送提交";
     if (

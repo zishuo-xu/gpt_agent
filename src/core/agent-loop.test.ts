@@ -1372,3 +1372,77 @@ test("done 校验：未传 getTodos（子代理等）不拦截", async () => {
     "无 warn 通知",
   );
 });
+
+test("riskFor：cd 前缀不再绕过依赖安装规则", async () => {
+  const bus = new AgentEventBus();
+  const askEvents: Array<{ risk: string; target: string }> = [];
+  bus.subscribe((event) => {
+    if (event.type === "ask_permission") {
+      askEvents.push({ risk: event.risk, target: event.call.target });
+    }
+  });
+  const model = new ScriptedModel([
+    {
+      text: "安装依赖。",
+      toolCalls: [
+        toolCall("bash-1", "Bash", "cd /tmp/proj && pnpm install", {
+          command: "cd /tmp/proj && pnpm install",
+        }),
+      ],
+    },
+  ]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor("/tmp"),
+    approve: async () => ({ granted: true }),
+  });
+  await loop.run();
+  assert.equal(askEvents.length, 1);
+  assert.equal(askEvents[0]?.risk, "将修改依赖清单与 lock 文件");
+});
+
+test("riskFor：pnpm create / git init / git commit / npx 有明确翻译", async () => {
+  const bus = new AgentEventBus();
+  const risks: Array<{ risk: string; target: string }> = [];
+  bus.subscribe((event) => {
+    if (event.type === "ask_permission") {
+      risks.push({ risk: event.risk, target: event.call.target });
+    }
+  });
+  const model = new ScriptedModel([
+    {
+      text: "脚手架与提交。",
+      toolCalls: [
+        toolCall("b1", "Bash", "pnpm create vite . --template react-ts", {
+          command: "pnpm create vite . --template react-ts",
+        }),
+        toolCall("b2", "Bash", "git init", { command: "git init" }),
+        toolCall("b3", "Bash", "git commit -m init", {
+          command: "git commit -m init",
+        }),
+        toolCall("b4", "Bash", "npx prettier --check .", {
+          command: "npx prettier --check .",
+        }),
+      ],
+    },
+  ]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor("/tmp"),
+    approve: async () => ({ granted: true }),
+  });
+  await loop.run();
+  assert.deepEqual(
+    risks.map((item) => item.risk),
+    [
+      "将生成项目脚手架文件",
+      "将初始化 git 仓库",
+      "将创建本地提交",
+      "将下载并执行包（脚手架/一次性命令）",
+    ],
+  );
+});
