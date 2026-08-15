@@ -111,8 +111,16 @@ export function buildTrajectoryTurns(
       }
     | undefined;
   const taskIndex = new Map<string, number>();
+  /** 当前回复段（text_delta 累积）；遇到新工具调用即弃旧段——
+      模型在工具循环间输出的过程说明不进"回复"，只保留最后一段正式答复 */
+  let replySegment = "";
+  const flushReply = (): void => {
+    if (replySegment && current) current.reply = replySegment;
+    replySegment = "";
+  };
 
   const startTurn = (seq: number, ts: string, text: string): void => {
+    flushReply();
     current = {
       index: turns.length + 1,
       userSeq: seq,
@@ -136,8 +144,9 @@ export function buildTrajectoryTurns(
     if (event.type === "thinking_delta") {
       current!.thinking = (current!.thinking ?? "") + event.text;
     } else if (event.type === "text_delta") {
-      current!.reply = (current!.reply ?? "") + event.text;
+      replySegment += event.text;
     } else if (event.type === "tool_call") {
+      flushReply();
       const result = toolResults.get(event.call.id);
       const args = event.call.args ?? {};
       const status: "ok" | "error" | "none" = result
@@ -154,6 +163,7 @@ export function buildTrajectoryTurns(
         status,
       });
     } else if (event.type === "task_start") {
+      flushReply();
       const index = current!.tools.length;
       taskIndex.set(event.taskId, index);
       current!.tools.push({
@@ -175,6 +185,7 @@ export function buildTrajectoryTurns(
       }
     }
   }
+  flushReply();
   return turns;
 }
 

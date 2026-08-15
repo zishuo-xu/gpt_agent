@@ -130,6 +130,47 @@ describe("buildTrajectoryTurns（轨迹回合分组）", () => {
     assert.match(detail, /"code": 0/);
   });
 
+  it("工具循环中间的过程文本不进回复，只保留最后一段", () => {
+    const turns = buildTrajectoryTurns([
+      record(1, "2026-08-14T10:00:00.000Z", { type: "user", text: "查股价" }),
+      record(2, "2026-08-14T10:00:01.000Z", {
+        type: "text_delta",
+        text: "我来搜索一下。",
+      }),
+      record(3, "2026-08-14T10:00:02.000Z", {
+        type: "tool_call",
+        call: { id: "c1", tool: "WebSearch", target: "x", args: {} },
+      }),
+      record(4, "2026-08-14T10:00:03.000Z", {
+        type: "tool_result",
+        callId: "c1",
+        summary: "ok",
+      }),
+      record(5, "2026-08-14T10:00:04.000Z", {
+        type: "text_delta",
+        text: "搜到了，再抓一下详情。",
+      }),
+      record(6, "2026-08-14T10:00:05.000Z", {
+        type: "tool_call",
+        call: { id: "c2", tool: "WebFetch", target: "y", args: {} },
+      }),
+      record(7, "2026-08-14T10:00:06.000Z", {
+        type: "tool_result",
+        callId: "c2",
+        summary: "ok",
+      }),
+      record(8, "2026-08-14T10:00:07.000Z", {
+        type: "text_delta",
+        text: "最终分析：明天看涨。",
+      }),
+    ]);
+    assert.equal(
+      turns[0]!.reply,
+      "最终分析：明天看涨。",
+      "只保留最后一段，中间过程说明被丢弃",
+    );
+  });
+
   it("无用户消息的会话兜底归入一个回合", () => {
     const turns = buildTrajectoryTurns([
       record(1, "2026-08-14T10:00:01.000Z", {
