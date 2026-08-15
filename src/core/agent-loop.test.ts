@@ -1446,3 +1446,61 @@ test("riskFor：pnpm create / git init / git commit / npx 有明确翻译", asyn
     ],
   );
 });
+
+test("ask_permission 携带 purpose（本轮最近模型文本末行）", async () => {
+  const bus = new AgentEventBus();
+  const askEvents: AgentEvent[] = [];
+  bus.subscribe((event) => {
+    if (event.type === "ask_permission") askEvents.push(event);
+  });
+  const model = new ScriptedModel([
+    {
+      text: "模板已生成。安装依赖并加入 Vitest。",
+      toolCalls: [
+        toolCall("bash-1", "Bash", "pnpm install", {
+          command: "pnpm install",
+        }),
+      ],
+    },
+  ]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor("/tmp"),
+    approve: async () => ({ granted: true }),
+  });
+  await loop.run();
+  assert.equal(askEvents.length, 1);
+  const ask = askEvents[0];
+  assert.ok(ask && ask.type === "ask_permission");
+  assert.equal(ask.purpose, "模板已生成。安装依赖并加入 Vitest。");
+});
+
+test("ask_permission 无模型文本时不携带 purpose", async () => {
+  const bus = new AgentEventBus();
+  const askEvents: AgentEvent[] = [];
+  bus.subscribe((event) => {
+    if (event.type === "ask_permission") askEvents.push(event);
+  });
+  const model = new ScriptedModel([
+    {
+      toolCalls: [
+        toolCall("bash-1", "Bash", "pnpm install", {
+          command: "pnpm install",
+        }),
+      ],
+    },
+  ]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor("/tmp"),
+    approve: async () => ({ granted: true }),
+  });
+  await loop.run();
+  const ask = askEvents[0];
+  assert.ok(ask && ask.type === "ask_permission");
+  assert.equal(ask.purpose, undefined);
+});

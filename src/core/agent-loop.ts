@@ -697,10 +697,12 @@ export class AgentLoop {
             const detail = await this.#tools
               .preview(call, signal)
               .catch(() => "");
+            const purpose = lastTextPurpose(this.#recentModelText);
             this.#bus.emit({
               type: "ask_permission",
               call,
               risk: riskFor(call),
+              ...(purpose ? { purpose } : {}),
               ...(detail ? { detail } : {}),
             });
             const answer = await this.#approve(call, signal);
@@ -785,6 +787,17 @@ function modelErrorTrace(error: unknown):
 /** 输出长度截断的终止原因（Anthropic stop_reason=max_tokens / OpenAI finish_reason=length） */
 function isTruncatedStopReason(reason: string | undefined): boolean {
   return reason === "max_tokens" || reason === "length";
+}
+
+/** ask_permission.purpose：取模型文本最后一行（清理空白，截 80 字符） */
+function lastTextPurpose(text: string): string | undefined {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (!last) return undefined;
+  return last.length > 80 ? last.slice(-80) : last;
 }
 
 function riskFor(call: ToolCall): string {

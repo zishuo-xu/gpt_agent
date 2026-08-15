@@ -181,6 +181,8 @@ export type AgentEvent =
       call: ToolCall;
       risk: string;
       detail?: string;
+      /** Agent 本轮意图（最近模型文本末行，≤80 字符；老会话无此字段） */
+      purpose?: string;
     }
   | { type: "permission_denied"; call: ToolCall; reason: string }
   | {

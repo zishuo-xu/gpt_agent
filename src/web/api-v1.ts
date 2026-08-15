@@ -362,6 +362,7 @@ function mapV1Event(
         callId: event.call.id,
         tool: event.call.tool,
         risk: event.risk,
+        ...(event.purpose ? { purpose: event.purpose } : {}),
       };
     case "run_started":
       return { ...base, type: "run.started", description: event.description };

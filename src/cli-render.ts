@@ -46,6 +46,7 @@ export function createEventRenderer(options: {
       output(
         `  需要审批：${event.risk}\n` +
           `  ${event.call.tool}(${event.call.target})\n` +
+          `${event.purpose ? `  目的：${event.purpose}\n` : ""}` +
           `${event.detail ? `${event.detail}\n` : ""}` +
           "  输入 y/n；/allow session|project|global 可记住；/deny 可附留言。\n",
       );

@@ -92,6 +92,7 @@ test("v1 事件映射：白名单类型多对一折叠", () => {
       type: "ask_permission",
       call: { id: "c2", tool: "Write", target: "b.ts", args: {} },
       risk: "写文件",
+      purpose: "生成首页组件",
     }),
     record(7, {
       type: "run_started",
@@ -122,7 +123,7 @@ test("v1 事件映射：白名单类型多对一折叠", () => {
     { seq: 3, ts: "2026-08-09T10:00:00.000Z", type: "assistant.thinking", text: "思考中" },
     { seq: 4, ts: "2026-08-09T10:00:00.000Z", type: "tool.call", tool: "Read", target: "src/a.ts", args: { file_path: "src/a.ts" } },
     { seq: 5, ts: "2026-08-09T10:00:00.000Z", type: "tool.result", tool: "Read", summary: "读取成功", isError: false },
-    { seq: 6, ts: "2026-08-09T10:00:00.000Z", type: "approval.request", callId: "c2", tool: "Write", risk: "写文件" },
+    { seq: 6, ts: "2026-08-09T10:00:00.000Z", type: "approval.request", callId: "c2", tool: "Write", risk: "写文件", purpose: "生成首页组件" },
     { seq: 7, ts: "2026-08-09T10:00:00.000Z", type: "run.started", description: "修复测试" },
     { seq: 8, ts: "2026-08-09T10:00:00.000Z", type: "run.finished", status: "completed", reason: "done" },
     {

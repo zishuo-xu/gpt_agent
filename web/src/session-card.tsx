@@ -146,6 +146,9 @@ export function ApprovalCard(props: {
         )}
       </div>
       <p>{event.risk}</p>
+      {event.purpose && (
+        <p className="approval-purpose">目的：{event.purpose}</p>
+      )}
       <DiffOrOutput text={String(event.detail || event.call.target)} />
       {!resolved && (
         <>
