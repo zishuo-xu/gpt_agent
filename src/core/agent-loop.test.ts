@@ -44,6 +44,12 @@ class ScriptedModel implements AgentModel {
   setFileOps(ops: FileOps): void {
     this.fileOpsSnapshots.push(ops);
   }
+
+  /** done 校验注入的 user 消息记录 */
+  readonly userMessages: string[] = [];
+  addUserMessage(content: string): void {
+    this.userMessages.push(content);
+  }
 }
 
 function toolCall(
@@ -1288,5 +1294,81 @@ test("terminate 无法绕过 finalOnly：final 阶段工具被拒", async () => 
         event.type === "permission_denied" &&
         (event as Extract<AgentEvent, { type: "permission_denied" }>).reason.includes("纯总结"),
     ),
+  );
+});
+
+test("done 校验：todo 有未完成项时软拦截（最多 2 次），第 3 次宣布完成放行", async () => {
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([
+    { done: true },
+    { done: true },
+    { done: true },
+  ]);
+  const todos = [{ id: "t1", content: "写核心逻辑", status: "pending" as const }];
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor("/tmp"),
+    approve: async () => ({ granted: true }),
+    getTodos: () => todos,
+  });
+  await loop.run();
+  const doneEvents = events.filter((event) => event.type === "done");
+  const warnEvents = events.filter(
+    (event) => event.type === "notify" && event.level === "warn",
+  );
+  assert.equal(doneEvents.length, 1, "第 3 次宣布完成才放行");
+  assert.equal(warnEvents.length, 2, "前两次拦截各发一条 warn 通知");
+  assert.equal(model.userMessages.length, 2, "注入两条提示消息");
+  assert.match(model.userMessages[0] ?? "", /仍有 1 项未完成/);
+  assert.match(model.userMessages[0] ?? "", /写核心逻辑（pending）/);
+});
+
+test("done 校验：todo 全部 completed 时直接放行", async () => {
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([{ done: true }]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor("/tmp"),
+    approve: async () => ({ granted: true }),
+    getTodos: () => [
+      { id: "t1", content: "写核心逻辑", status: "completed" as const },
+    ],
+  });
+  await loop.run();
+  assert.equal(
+    events.filter((event) => event.type === "done").length,
+    1,
+    "无未完成项直接完成",
+  );
+  assert.equal(model.userMessages.length, 0);
+});
+
+test("done 校验：未传 getTodos（子代理等）不拦截", async () => {
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([{ done: true }]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor("/tmp"),
+    approve: async () => ({ granted: true }),
+  });
+  await loop.run();
+  assert.equal(events.filter((event) => event.type === "done").length, 1);
+  assert.equal(model.userMessages.length, 0);
+  assert.equal(
+    events.filter((event) => event.type === "notify").length,
+    0,
+    "无 warn 通知",
   );
 });

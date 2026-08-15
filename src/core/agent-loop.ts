@@ -14,6 +14,7 @@ import type {
   ApprovalHandler,
   FileOps,
   ModelPricing,
+  TodoItem,
   ToolCall,
   ToolExecutionResult,
 } from "./types.js";
@@ -75,6 +76,8 @@ export interface AgentModel {
     isError?: boolean,
   ): void;
   acceptToolDenied?(call: ToolCall, reason: string): void;
+  /** done 校验注入提示消息（可选；未实现则跳过拦截） */
+  addUserMessage?(content: string): void;
   /** 文件操作跟踪（P0-3）：压缩时携带，压缩后模型仍知道动过哪些文件 */
   setFileOps?(ops: FileOps): void;
   onTextDelta?: ((text: string) => void) | undefined;
@@ -111,6 +114,8 @@ export interface AgentLoopOptions {
     call: ToolCall,
     result: ToolExecutionResult,
   ) => ToolExecutionResult | void | Promise<ToolExecutionResult | void>;
+  /** todo 快照读取（done 校验用；不传则跳过未完成检查） */
+  getTodos?: () => TodoItem[];
   recordTrace?: (trace: {
     request?: unknown;
     response?: unknown;
@@ -144,6 +149,7 @@ export class AgentLoop {
   readonly #retryBaseDelayMs: number;
   readonly #parallelTools: boolean;
   readonly #afterToolCall: AgentLoopOptions["afterToolCall"];
+  readonly #getTodos: AgentLoopOptions["getTodos"];
   /** 缓存浪费度量状态：上一轮 input、上一轮时间、已见压缩数 */
   #prevInputTokens = 0;
   #prevTurnAtMs = 0;
@@ -155,6 +161,10 @@ export class AgentLoop {
   #steerRequested = false;
   /** 文件操作跟踪（P0-3）：累计 read/modified 相对路径，注入模型供压缩摘要携带 */
   readonly #fileOps = { read: new Set<string>(), modified: new Set<string>() };
+  /** done 软拦截次数（防死循环上限 2） */
+  #doneInterventions = 0;
+  /** 本轮模型文本累计（ask_permission 的 purpose 来源） */
+  #recentModelText = "";
 
   constructor(options: AgentLoopOptions) {
     this.#bus = options.bus;
@@ -175,6 +185,7 @@ export class AgentLoop {
     this.#retryBaseDelayMs = options.retryBaseDelayMs ?? 2_000;
     this.#parallelTools = options.parallelTools ?? false;
     this.#afterToolCall = options.afterToolCall;
+    this.#getTodos = options.getTodos;
   }
 
   interrupt(): void {
@@ -187,6 +198,29 @@ export class AgentLoop {
       工具调用并结束循环，让会话优先处理插队的用户消息。 */
   steer(): void {
     this.#steerRequested = true;
+  }
+
+  /** done 软拦截：todo 有未完成项时注入提示消息并继续循环（最多 2 次）。
+      返回 true 表示已拦截（不 emit done）。 */
+  #interceptDoneIfNeeded(): boolean {
+    const todos = this.#getTodos?.() ?? [];
+    const incomplete = todos.filter((todo) => todo.status !== "completed");
+    if (incomplete.length === 0 || this.#doneInterventions >= 2) {
+      return false;
+    }
+    this.#doneInterventions += 1;
+    const list = incomplete
+      .map((todo) => `- ${todo.content}（${todo.status}）`)
+      .join("\n");
+    this.#model.addUserMessage?.(
+      `系统提示：你宣布任务完成，但任务清单仍有 ${incomplete.length} 项未完成或未更新：\n${list}\n请先更新任务清单（完成的项标记 completed，放弃的项在回复中说明原因），并运行项目已配置的验证命令（build/test/lint/typecheck 中存在的；项目无验证命令时在回复中说明）。若确实已全部完成，直接再次宣布完成即可。`,
+    );
+    this.#bus.emit({
+      type: "notify",
+      level: "warn",
+      message: `完成声明已拦截：任务清单仍有 ${incomplete.length} 项未完成或未更新，已提示 Agent 处理`,
+    });
+    return true;
   }
 
   /**
@@ -398,6 +432,7 @@ export class AgentLoop {
       let streamedThinking = false;
       this.#model.onTextDelta = (text) => {
         streamedText = true;
+        this.#recentModelText += text;
         this.#bus.emit({ type: "text_delta", text });
       };
       this.#model.onThinkingDelta = (text) => {
@@ -406,6 +441,8 @@ export class AgentLoop {
       };
       let turnCount = 0;
       while (!signal.aborted) {
+        // 每轮重置模型文本累计（ask_permission 的 purpose 只反映本轮意图）
+        this.#recentModelText = "";
         if (
           this.#maxTurns !== undefined &&
           turnCount >= this.#maxTurns
@@ -468,6 +505,7 @@ export class AgentLoop {
         }
         // 如果流式回调已经发出了文本，不再重复发出
         if (turn.text && !streamedText) {
+          this.#recentModelText += turn.text;
           this.#bus.emit({ type: "text_delta", text: turn.text });
         }
         streamedText = false;
@@ -604,6 +642,9 @@ export class AgentLoop {
               return;
             }
             if (turn.done) {
+              if (this.#interceptDoneIfNeeded()) {
+                continue;
+              }
               this.#bus.emit({ type: "done" });
               return;
             }
@@ -710,6 +751,9 @@ export class AgentLoop {
           return;
         }
         if (turn.done) {
+          if (this.#interceptDoneIfNeeded()) {
+            continue;
+          }
           this.#bus.emit({ type: "done" });
           return;
         }

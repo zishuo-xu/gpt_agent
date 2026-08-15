@@ -343,6 +343,15 @@ test("成本与 todo 累计：cost_update/todo_update 反映到 summary", async 
           }),
         ],
       }),
+      response("全部完成。", {
+        toolCalls: [
+          toolCall("todo-2", "TodoWrite", "", {
+            todos: [
+              { id: "a", content: "第一步", status: "completed" },
+            ],
+          }),
+        ],
+      }),
       response("完成。", {
         usage: { input: 100, output: 50, cached: 30 },
         model: "deepseek-v4-flash",
@@ -355,8 +364,8 @@ test("成本与 todo 累计：cost_update/todo_update 反映到 summary", async 
   await inputPromise;
   const summary = session.summary();
   assert.equal(summary.todos[0]?.content, "第一步");
-  assert.equal(summary.totalInputTokens, 112);
-  assert.equal(summary.totalOutputTokens, 53);
+  assert.equal(summary.totalInputTokens, 124);
+  assert.equal(summary.totalOutputTokens, 56);
   assert.equal(summary.costByModel.length, 1);
   assert.equal(summary.costByModel[0]!.model, "deepseek-v4-flash");
   assert.equal(summary.costByModel[0]!.tokens, 150);

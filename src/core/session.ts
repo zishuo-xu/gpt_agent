@@ -608,6 +608,7 @@ export class AgentSession {
           modelRole: "main",
           modelCompactCount: () => this.#model.compactionCount,
           parallelTools: this.#parallelTools,
+          getTodos: () => this.#state.todos(),
           recordTrace: (trace) => this.#traceStore.record(trace),
         });
         this.#activeLoop = loop;
