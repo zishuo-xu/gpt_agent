@@ -75,6 +75,29 @@ export function statusLabel(status: string): string {
  * 事件流 → 显示条目：单次遍历完成 delta 合并、call/result 配对、
  * 审批 resolved 判定，渲染层不再做 O(n) 回看。
  */
+/** 模型偶尔把"[思考过程]"标记及后续英文思考写入正式回复——显示层剥离：
+    命中行开始丢弃，直到遇到含中文的行恢复（中文正式内容保留） */
+export function stripThoughtNotes(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let skipping = false;
+  for (const line of lines) {
+    if (/^\s*\[思考过程\]/.test(line)) {
+      skipping = true;
+      continue;
+    }
+    if (skipping) {
+      if (/[\u4e00-\u9fff]/.test(line)) {
+        skipping = false;
+      } else {
+        continue;
+      }
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
 export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
   const toolResults = new Map<string, Record<string, any>>();
   const deniedReasons = new Map<string, string>();
@@ -161,7 +184,13 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
           text += nextEvent.text;
           nextEvent = events[index + 1]?.event;
         }
-        items.push({ kind: "message", seq, ts, author: "assistant", text });
+        items.push({
+          kind: "message",
+          seq,
+          ts,
+          author: "assistant",
+          text: stripThoughtNotes(text),
+        });
         break;
       }
       case "thinking_delta": {

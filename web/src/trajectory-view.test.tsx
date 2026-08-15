@@ -5,6 +5,7 @@ import {
   buildTrajectoryTurns,
   formatDuration,
 } from "./trajectory-view";
+import { stripThoughtNotes } from "./session-display";
 
 /** 构造一条事件（seq 自增） */
 function record(
@@ -202,6 +203,20 @@ describe("buildTrajectoryTurns（轨迹回合分组）", () => {
     assert.equal(formatDuration(7000), "7.0s");
     assert.equal(formatDuration(125000), "2m05s");
     assert.equal(formatDuration(undefined), "");
+  });
+
+  it("stripThoughtNotes：剥离 [思考过程] 标记及其后的英文思考，保留中文正式内容", () => {
+    const input = `[思考过程]
+Now run the conversion with node and verify the output.
+第 4 步完成：sample.md 已创建。
+[思考过程]
+The user wants stdin support. Let me check the file.
+增强完成，验证通过。`;
+    assert.equal(
+      stripThoughtNotes(input),
+      "第 4 步完成：sample.md 已创建。\n增强完成，验证通过。",
+    );
+    assert.equal(stripThoughtNotes("纯中文回复，无思考标记。"), "纯中文回复，无思考标记。");
   });
 
   it("无用户消息的会话兜底归入一个回合", () => {

@@ -153,6 +153,7 @@ export function ApprovalCard(props: {
             <button
               className="approve-button"
               disabled={props.pendingPermissionCallId === callId}
+              title="只放行这一次调用"
               onClick={() =>
                 void props.onPermission(callId, true, "once")
               }
@@ -163,6 +164,7 @@ export function ApprovalCard(props: {
             </button>
             <button
               disabled={props.pendingPermissionCallId === callId}
+              title="本会话内相同命令/文件不再审批（内置工具按精确调用匹配）"
               onClick={() =>
                 void props.onPermission(callId, true, "session")
               }
@@ -173,6 +175,7 @@ export function ApprovalCard(props: {
             </button>
             <button
               disabled={props.pendingPermissionCallId === callId}
+              title="写入项目权限配置，该项目内相同命令/文件不再审批"
               onClick={() =>
                 void props.onPermission(callId, true, "project")
               }
@@ -183,6 +186,7 @@ export function ApprovalCard(props: {
             </button>
             <button
               disabled={props.pendingPermissionCallId === callId}
+              title="写入全局权限配置，所有项目相同命令/文件不再审批"
               onClick={() =>
                 void props.onPermission(callId, true, "global")
               }

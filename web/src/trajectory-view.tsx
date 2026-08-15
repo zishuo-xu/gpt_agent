@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { SessionEvent } from "./session-display";
+import { stripThoughtNotes, type SessionEvent } from "./session-display";
 import { RichText } from "./session-rich-text";
 
 /**
@@ -465,7 +465,7 @@ function TurnCard({
                     </span>
                   </div>
                   <div className="trajectory-stage-content rich">
-                    <RichText text={turn.reply} />
+                    <RichText text={stripThoughtNotes(turn.reply)} />
                   </div>
                 </section>
               )}
