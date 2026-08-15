@@ -773,6 +773,18 @@ async function runCli(): Promise<void> {
   function subscribeToSession(target: AgentSession): () => void {
     return target.subscribe((record) => {
       renderEvent(record.event);
+      // 0 工具调用完成提示：模型未调用任何工具就宣布完成（问答场景无碍，
+      // 编码/搭建任务时提醒用户检查产出——Web 端任务清单有同义警告条）
+      if (record.event.type === "done") {
+        const toolCalls = target
+          .events()
+          .filter((item) => item.event.type === "tool_call").length;
+        if (toolCalls === 0) {
+          output.write(
+            "\n⚠ Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，结果可能不完整，请检查产出或让 Agent 重新执行。\n",
+          );
+        }
+      }
       if (!closed) safePrompt(true);
     });
   }

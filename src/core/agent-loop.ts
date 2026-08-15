@@ -201,7 +201,8 @@ export class AgentLoop {
   }
 
   /** done 软拦截：todo 有未完成项时注入提示消息并继续循环（最多 2 次）。
-      返回 true 表示已拦截（不 emit done）。 */
+      返回 true 表示已拦截（不 emit done）。
+      注：0 工具调用完成的提示在 CLI/Web 渲染层输出（不污染事件流，避免纯文本问答误报）。 */
   #interceptDoneIfNeeded(): boolean {
     const todos = this.#getTodos?.() ?? [];
     const incomplete = todos.filter((todo) => todo.status !== "completed");

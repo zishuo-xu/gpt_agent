@@ -445,7 +445,7 @@ describe("SessionRail 任务清单（三态标记 + 完成矛盾警告）", () =
       totalCachedTokens: 0,
       totalCostCny: 0,
       todos: [],
-      toolCallCount: 0,
+      toolCallCount: 5,
       kind: "interactive",
     };
     await act(async () => {
@@ -470,6 +470,102 @@ describe("SessionRail 任务清单（三态标记 + 完成矛盾警告）", () =
     const warning = container.querySelector(".rail-todo-warning");
     assert.ok(warning, "应显示矛盾警告条");
     assert.match(warning?.textContent ?? "", /仍有 1 项任务未完成/);
+    await act(async () => root.unmount());
+  });
+});
+
+describe("SessionRail 0 工具调用完成警告", () => {
+  it("status=done 且 toolCallCount=0 时显示未执行工具警告", async () => {
+    const [{ act }, { createRoot }, { SessionRail }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./session-rail"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const selected = {
+      id: "s1",
+      title: "会话",
+      status: "done",
+      permissionMode: "normal",
+      createdAt: "2026-08-09T10:00:00.000Z",
+      updatedAt: "2026-08-09T10:00:00.000Z",
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCachedTokens: 0,
+      totalCostCny: 0,
+      todos: [],
+      toolCallCount: 0,
+      kind: "interactive",
+    };
+    await act(async () => {
+      root.render(
+        <SessionRail
+          branches={[]}
+          currentBranchId="main"
+          busy={false}
+          userTurns={[]}
+          bookmarks={[]}
+          latestTodos={[]}
+          selected={selected as never}
+          showDetail
+          onSwitchBranch={() => {}}
+          onScrollToSeq={() => {}}
+          onToggleBookmark={() => {}}
+        />,
+      );
+    });
+    const warning = container.querySelector(".rail-todo-warning");
+    assert.ok(warning, "应显示 0 工具调用警告条");
+    assert.match(warning?.textContent ?? "", /未调用任何工具/);
+    await act(async () => root.unmount());
+  });
+
+  it("toolCallCount>0 时不显示 0 工具警告", async () => {
+    const [{ act }, { createRoot }, { SessionRail }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./session-rail"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const selected = {
+      id: "s1",
+      title: "会话",
+      status: "done",
+      permissionMode: "normal",
+      createdAt: "2026-08-09T10:00:00.000Z",
+      updatedAt: "2026-08-09T10:00:00.000Z",
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCachedTokens: 0,
+      totalCostCny: 0,
+      todos: [],
+      toolCallCount: 5,
+      kind: "interactive",
+    };
+    await act(async () => {
+      root.render(
+        <SessionRail
+          branches={[]}
+          currentBranchId="main"
+          busy={false}
+          userTurns={[]}
+          bookmarks={[]}
+          latestTodos={[]}
+          selected={selected as never}
+          showDetail
+          onSwitchBranch={() => {}}
+          onScrollToSeq={() => {}}
+          onToggleBookmark={() => {}}
+        />,
+      );
+    });
+    assert.equal(container.querySelector(".rail-todo-warning"), null);
     await act(async () => root.unmount());
   });
 });

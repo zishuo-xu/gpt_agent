@@ -1396,7 +1396,7 @@ test("riskFor：cd 前缀不再绕过依赖安装规则", async () => {
     model,
     permissions: new PermissionEngine("normal"),
     tools: new ToolExecutor("/tmp"),
-    approve: async () => ({ granted: true }),
+    approve: async () => ({ granted: false }),
   });
   await loop.run();
   assert.equal(askEvents.length, 1);
@@ -1433,7 +1433,7 @@ test("riskFor：pnpm create / git init / git commit / npx 有明确翻译", asyn
     model,
     permissions: new PermissionEngine("normal"),
     tools: new ToolExecutor("/tmp"),
-    approve: async () => ({ granted: true }),
+    approve: async () => ({ granted: false }),
   });
   await loop.run();
   assert.deepEqual(
@@ -1541,3 +1541,5 @@ test("purpose 超长时保留开头加省略号（不从中段截断）", async 
   );
   assert.ok((ask.purpose ?? "").endsWith("…"));
 });
+
+
