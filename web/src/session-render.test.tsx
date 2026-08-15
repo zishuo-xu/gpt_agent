@@ -366,3 +366,110 @@ describe("ItemCard（会话展示组件全分支）", () => {
 });
 
 
+
+describe("SessionRail 任务清单（三态标记 + 完成矛盾警告）", () => {
+  it("completed 显示 ✓、in_progress 显示 →、pending 显示 ○", async () => {
+    const [{ act }, { createRoot }, { SessionRail }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./session-rail"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const selected = {
+      id: "s1",
+      title: "会话",
+      status: "running",
+      permissionMode: "normal",
+      createdAt: "2026-08-09T10:00:00.000Z",
+      updatedAt: "2026-08-09T10:00:00.000Z",
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCachedTokens: 0,
+      totalCostCny: 0,
+      todos: [],
+      toolCallCount: 0,
+      kind: "interactive",
+    };
+    const todos = [
+      { id: "a", content: "完成项", status: "completed" },
+      { id: "b", content: "进行中", status: "in_progress" },
+      { id: "c", content: "待办项", status: "pending" },
+    ];
+    await act(async () => {
+      root.render(
+        <SessionRail
+          branches={[]}
+          currentBranchId="main"
+          busy={false}
+          userTurns={[]}
+          bookmarks={[]}
+          latestTodos={todos as never}
+          selected={selected as never}
+          showDetail
+          onSwitchBranch={() => {}}
+          onScrollToSeq={() => {}}
+          onToggleBookmark={() => {}}
+        />,
+      );
+    });
+    const checks = Array.from(container.querySelectorAll(".todo-check"));
+    assert.deepEqual(
+      checks.map((node) => node.textContent),
+      ["✓", "→", "○"],
+    );
+    await act(async () => root.unmount());
+  });
+
+  it("status=done 且有未完成 todo 时显示矛盾警告条", async () => {
+    const [{ act }, { createRoot }, { SessionRail }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./session-rail"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const selected = {
+      id: "s1",
+      title: "会话",
+      status: "done",
+      permissionMode: "normal",
+      createdAt: "2026-08-09T10:00:00.000Z",
+      updatedAt: "2026-08-09T10:00:00.000Z",
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCachedTokens: 0,
+      totalCostCny: 0,
+      todos: [],
+      toolCallCount: 0,
+      kind: "interactive",
+    };
+    await act(async () => {
+      root.render(
+        <SessionRail
+          branches={[]}
+          currentBranchId="main"
+          busy={false}
+          userTurns={[]}
+          bookmarks={[]}
+          latestTodos={[
+            { id: "a", content: "写核心逻辑", status: "pending" },
+          ] as never}
+          selected={selected as never}
+          showDetail
+          onSwitchBranch={() => {}}
+          onScrollToSeq={() => {}}
+          onToggleBookmark={() => {}}
+        />,
+      );
+    });
+    const warning = container.querySelector(".rail-todo-warning");
+    assert.ok(warning, "应显示矛盾警告条");
+    assert.match(warning?.textContent ?? "", /仍有 1 项任务未完成/);
+    await act(async () => root.unmount());
+  });
+});

@@ -1198,6 +1198,22 @@
 .rail-todo.in_progress .todo-check {
   border-color: #759cff;
   box-shadow: 0 0 0 2px rgba(110, 155, 255, 0.14);
+  color: #cfe0ff;
+}
+
+.rail-todo .todo-check {
+  color: #9aa7b5;
+}
+
+.rail-todo-warning {
+  margin: 8px 0;
+  padding: 6px 8px;
+  border: 1px solid #c98a2b;
+  border-radius: 6px;
+  background: rgba(201, 138, 43, 0.12);
+  color: #e8b45a;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .rail-kv {

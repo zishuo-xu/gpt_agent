@@ -188,6 +188,15 @@ export function SessionApp(props: { initialSessionId?: string }) {
     return update.event.todos ?? selected?.todos ?? [];
   }, [visibleEvents, selected]);
 
+  // 存在任务清单时自动展开详情右栏（从 0 搭建场景：用户默认看到任务进度）
+  const autoExpandedRef = useRef(false);
+  useEffect(() => {
+    if (!autoExpandedRef.current && latestTodos.length > 0) {
+      autoExpandedRef.current = true;
+      setShowDetail(true);
+    }
+  }, [latestTodos]);
+
   async function refreshSessions() {
     const response = await fetch(projectUrl("/api/sessions"));
     if (!response.ok) return;

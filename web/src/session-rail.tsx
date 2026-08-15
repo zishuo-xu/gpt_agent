@@ -110,6 +110,20 @@ export function SessionRail(props: {
       {props.showDetail && (
         <>
           <RailCard title="任务清单">
+            {props.selected.status === "done" &&
+              props.latestTodos.some(
+                (todo) => todo.status !== "completed",
+              ) && (
+                <div className="rail-todo-warning">
+                  Agent 已宣布完成，但仍有{" "}
+                  {
+                    props.latestTodos.filter(
+                      (todo) => todo.status !== "completed",
+                    ).length
+                  }{" "}
+                  项任务未完成或未更新
+                </div>
+              )}
             {props.latestTodos.length === 0 ? (
               <p className="rail-empty">
                 Agent 建立 todo 后会显示在这里。
@@ -123,7 +137,9 @@ export function SessionRail(props: {
                   <span className="todo-check">
                     {todo.status === "completed"
                       ? "✓"
-                      : ""}
+                      : todo.status === "in_progress"
+                        ? "→"
+                        : "○"}
                   </span>
                   <span>{todo.content}</span>
                 </div>
