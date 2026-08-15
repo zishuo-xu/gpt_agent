@@ -27,6 +27,10 @@
 - 触发范围：仅 `turn.done`（模型宣布完成），不影响 `allTerminated`（P0-4 terminate 语义，子代理收尾）与子代理循环（TaskRunner 不传 getTodos）。
 - 不做硬拒绝：无 todo 的会话（闲聊/单步任务）不受影响（getTodos 返回空即放行）。
 
+### A-3 0 工具调用完成提示（渲染层，实施补充）
+
+真实回归发现：模型可能不建 todo 直接宣布完成（done 拦截依赖 todo 存在，覆盖不到）。补充：会话 done 且累计工具调用数为 0 时，CLI 输出提示、Web 任务清单区域显示警告条（"Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，结果可能不完整"）。实现于渲染层（cli.ts 订阅回调 + web SessionRail rail 顶部），不污染事件流——避免纯文本问答触发事件级 warn（branch 测试曾受影响，故不放 agent-loop）。
+
 ## B. 审批卡片信息质量
 
 ### B-1 风险翻译规则库扩充（src/core/agent-loop.ts riskFor）
