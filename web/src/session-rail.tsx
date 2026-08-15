@@ -32,6 +32,13 @@ export function SessionRail(props: {
 }) {
   return (
     <aside className="session-rail">
+      {props.selected.status === "done" &&
+        props.selected.toolCallCount === 0 && (
+          <div className="rail-todo-warning">
+            Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，
+            结果可能不完整，请检查或让 Agent 重新执行
+          </div>
+        )}
       <RailCard title="分支树">
         {props.branches.length === 0 ? (
           <p className="rail-empty">
@@ -110,13 +117,6 @@ export function SessionRail(props: {
       {props.showDetail && (
         <>
           <RailCard title="任务清单">
-            {props.selected.status === "done" &&
-              props.selected.toolCallCount === 0 && (
-                <div className="rail-todo-warning">
-                  Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，
-                  结果可能不完整，请检查或让 Agent 重新执行
-                </div>
-              )}
             {props.selected.status === "done" &&
               props.latestTodos.some(
                 (todo) => todo.status !== "completed",
