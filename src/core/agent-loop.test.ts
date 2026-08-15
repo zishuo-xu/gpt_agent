@@ -1512,7 +1512,8 @@ test("purpose 超长时保留开头加省略号（不从中段截断）", async 
     if (event.type === "ask_permission") askEvents.push(event);
   });
   const longText =
-    "由于目录里有 `.git` 会导致 create-vite 交互提示，我改为在临时子目录脚手架后移入根目录，这样最稳妥可靠且不会卡在交互。";
+    "由于目录里有 `.git` 会导致 create-vite 交互提示，我改为在临时子目录脚手架后移入根目录，这样最稳妥可靠且不会卡在交互。" +
+    "另外还要注意 vite 8 需要 vitest 4.x 的 peer 依赖兼容性，先装 latest 再根据报错调整版本。";
   const model = new ScriptedModel([
     {
       text: longText,
