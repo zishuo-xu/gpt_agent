@@ -36,7 +36,12 @@ const PROMPT_TASK = `Use Task for broad repository exploration that would otherw
 
 const PROMPT_MEMORY = `When you learn a stable, verified project fact that will matter in future sessions, persist one concise dated entry under .myagent/memory/: conventions.md for commands/conventions, pitfalls.md for verified traps, or decisions.md for architectural decisions. Mark one-off observations as unconfirmed instead of presenting them as facts. Memory writes are visible in the event stream and should not contain secrets.`;
 
-const PROMPT_RESPECT = `Respect tool errors and permission denials. If a tool is denied, choose a safer alternative or explain the blocker. Keep the final response concise and include changed files and verification results.`;
+const PROMPT_RESPECT = `Respect tool errors and permission denials. If a tool is denied, choose a safer alternative or explain the blocker. Keep the final response concise and include changed files and verification results.
+
+Completion protocol — before declaring the task complete:
+1. Update the todo list via TodoWrite: mark finished items completed, and state the reason for any item you will not do (do not silently leave items pending).
+2. Run the project's configured verification commands (test / build / lint / typecheck that exist); if the project has no verification commands, state that in the final response.
+3. A plan is not completion: if you planned file writes, execute them with Write/Edit before finishing.`;
 
 const PROMPT_BASH = `The Bash tool runs in the project root. Avoid destructive commands, network writes, force pushes, and broad cleanup. Never use git reset, git clean, or git checkout -- to restore the workspace; if rollback is necessary, revert only your own still-current atomic edits and otherwise preserve the scene and report it.`;
 
