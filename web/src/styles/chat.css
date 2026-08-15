@@ -2118,6 +2118,10 @@
   color: #6fb3ff;
 }
 
+.trajectory-expand-all {
+  color: #6fb3ff !important;
+}
+
 .trajectory-table-header button {
   margin-left: auto;
   padding: 4px 10px;
@@ -2198,6 +2202,18 @@
   color: #c9d4e0;
 }
 
+.trajectory-turn-duration {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid #2c3643;
+  border-radius: 8px;
+  background: #10161e;
+  color: #8d99a9;
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 .trajectory-turn-head time {
   flex: 0 0 auto;
   color: #748091;
@@ -2227,6 +2243,25 @@
 
 .trajectory-chip-more {
   color: #748091;
+}
+
+.trajectory-turn-preview {
+  padding: 4px 12px 8px;
+  overflow: hidden;
+  color: #7c899b;
+  font-size: 11px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trajectory-turn-preview-label {
+  margin-right: 6px;
+  padding: 0 6px;
+  border: 1px solid #2f8f5b;
+  border-radius: 8px;
+  color: #4cc38a;
+  font-size: 10px;
 }
 
 .trajectory-turn-body {

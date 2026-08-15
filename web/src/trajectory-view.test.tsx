@@ -1,7 +1,10 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { buildTrajectoryTurns } from "./trajectory-view";
+import {
+  buildTrajectoryTurns,
+  formatDuration,
+} from "./trajectory-view";
 
 /** 构造一条事件（seq 自增） */
 function record(
@@ -169,6 +172,36 @@ describe("buildTrajectoryTurns（轨迹回合分组）", () => {
       "最终分析：明天看涨。",
       "只保留最后一段，中间过程说明被丢弃",
     );
+  });
+
+  it("回合耗时与工具耗时：从事件时间戳计算", () => {
+    const turns = buildTrajectoryTurns([
+      record(1, "2026-08-14T10:00:00.000Z", { type: "user", text: "查股价" }),
+      record(2, "2026-08-14T10:00:01.000Z", {
+        type: "tool_call",
+        call: { id: "c1", tool: "Bash", target: "slow", args: {} },
+      }),
+      record(3, "2026-08-14T10:00:05.500Z", {
+        type: "tool_result",
+        callId: "c1",
+        summary: "done",
+      }),
+      record(4, "2026-08-14T10:00:07.000Z", {
+        type: "text_delta",
+        text: "查完了。",
+      }),
+    ]);
+    const turn = turns[0]!;
+    assert.equal(turn.durationMs, 7000, "回合耗时 = 最后事件 - 用户输入");
+    assert.equal(
+      turn.tools[0]!.durationMs,
+      4500,
+      "工具耗时 = tool_result - tool_call",
+    );
+    assert.equal(formatDuration(4500), "4.5s");
+    assert.equal(formatDuration(7000), "7.0s");
+    assert.equal(formatDuration(125000), "2m05s");
+    assert.equal(formatDuration(undefined), "");
   });
 
   it("无用户消息的会话兜底归入一个回合", () => {

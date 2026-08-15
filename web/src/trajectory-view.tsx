@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SessionEvent } from "./session-display";
 import { RichText } from "./session-rich-text";
 
@@ -15,6 +15,8 @@ export interface TrajectoryTurn {
   index: number;
   userSeq: number;
   userTs: string;
+  /** 回合总耗时（ms）：用户输入 → 最后一条事件 */
+  durationMs?: number;
   /** 用户输入全文（提示词） */
   userText: string;
   /** 模型推理过程（thinking_delta 按回合合并） */
@@ -25,6 +27,8 @@ export interface TrajectoryTurn {
     name: string;
     title: string;
     detail: string;
+    /** 调用到返回的耗时（ms），无返回则为 undefined */
+    durationMs?: number;
     /** 结果状态：ok 成功 / error 失败 / none 无返回 */
     status: "ok" | "error" | "none";
   }>;
@@ -43,10 +47,13 @@ const CHIP_LIMIT = 6;
 
 function toolResultMap(
   events: SessionEvent[],
-): Map<string, { summary?: string; output?: unknown; diff?: string }> {
+): Map<
+  string,
+  { summary?: string; output?: unknown; diff?: string; ts?: number }
+> {
   const toolResults = new Map<
     string,
-    { summary?: string; output?: unknown; diff?: string }
+    { summary?: string; output?: unknown; diff?: string; ts?: number }
   >();
   for (const record of events) {
     const event = record.event;
@@ -56,9 +63,19 @@ function toolResultMap(
       ...(event.summary ? { summary: event.summary } : {}),
       ...(event.output === undefined ? {} : { output: event.output }),
       ...(typeof details.diff === "string" ? { diff: details.diff } : {}),
+      ...(record.ts ? { ts: Date.parse(record.ts) } : {}),
     });
   }
   return toolResults;
+}
+
+/** 耗时格式化：<1s 毫秒，<60s 秒，否则 m:ss */
+export function formatDuration(ms: number | undefined): string {
+  if (ms === undefined || Number.isNaN(ms)) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const totalSeconds = Math.round(ms / 1000);
+  return `${Math.floor(totalSeconds / 60)}m${String(totalSeconds % 60).padStart(2, "0")}s`;
 }
 
 function toolDetail(
@@ -105,6 +122,9 @@ export function buildTrajectoryTurns(
         userSeq: number;
         userTs: string;
         userText: string;
+        startMs: number;
+        lastMs: number;
+        durationMs?: number;
         thinking?: string;
         tools: TrajectoryTurn["tools"];
         reply?: string;
@@ -118,22 +138,40 @@ export function buildTrajectoryTurns(
     if (replySegment && current) current.reply = replySegment;
     replySegment = "";
   };
+  /** 记录事件时间戳，供回合耗时统计 */
+  const touch = (ts: string | undefined): void => {
+    if (!current || !ts) return;
+    const ms = Date.parse(ts);
+    if (!Number.isNaN(ms)) current.lastMs = ms;
+  };
 
   const startTurn = (seq: number, ts: string, text: string): void => {
     flushReply();
+    const ms = Date.parse(ts);
     current = {
       index: turns.length + 1,
       userSeq: seq,
       userTs: ts,
       userText: text,
+      startMs: Number.isNaN(ms) ? 0 : ms,
+      lastMs: Number.isNaN(ms) ? 0 : ms,
       tools: [],
     };
     turns.push(current);
   };
 
+  const finishTurn = (): void => {
+    if (!current) return;
+    if (current.startMs > 0 && current.lastMs >= current.startMs) {
+      current.durationMs = current.lastMs - current.startMs;
+    }
+  };
+
   for (const record of events) {
     const event = record.event;
+    touch(record.ts);
     if (event.type === "user") {
+      finishTurn();
       startTurn(record.seq, record.ts, event.text);
       continue;
     }
@@ -156,11 +194,17 @@ export function buildTrajectoryTurns(
           ? "ok"
           : "none"
         : "none";
+      const callMs = Date.parse(record.ts);
       current!.tools.push({
         name: event.call.tool,
         title: `${event.call.tool} ${event.call.target}`,
         detail: toolDetail(event.call.tool, event.call.target, args, result),
         status,
+        ...(result?.ts !== undefined &&
+        !Number.isNaN(callMs) &&
+        result.ts >= callMs
+          ? { durationMs: result.ts - callMs }
+          : {}),
       });
     } else if (event.type === "task_start") {
       flushReply();
@@ -186,6 +230,7 @@ export function buildTrajectoryTurns(
     }
   }
   flushReply();
+  finishTurn();
   return turns;
 }
 
@@ -237,6 +282,16 @@ export function TrajectoryTable(props: {
     (sum, turn) => sum + turn.tools.length,
     0,
   );
+  /** 多回合通读：一键展开/折叠全部（key 变化强制重挂载回合卡片） */
+  const [allOpen, setAllOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") props.onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [props.onClose]);
 
   return (
     <div className="trajectory-table">
@@ -245,14 +300,26 @@ export function TrajectoryTable(props: {
         <code>
           {turns.length} 轮 · {toolCount} 次工具调用
         </code>
+        {turns.length > 1 && (
+          <button
+            className="trajectory-expand-all"
+            onClick={() => setAllOpen((value) => !value)}
+          >
+            {allOpen ? "全部折叠" : "全部展开"}
+          </button>
+        )}
         <button onClick={props.onClose}>关闭</button>
       </div>
       <div className="trajectory-table-scroll">
         {turns.map((turn) => (
           <TurnCard
-            key={turn.userSeq}
+            key={
+              allOpen
+                ? `${turn.userSeq}-expanded`
+                : `${turn.userSeq}-collapsed`
+            }
             turn={turn}
-            defaultOpen={turns.length === 1}
+            defaultOpen={turns.length === 1 || allOpen}
           />
         ))}
         {turns.length === 0 && (
@@ -318,6 +385,11 @@ function TurnCard({
         {stageSummary && (
           <span className="trajectory-turn-meta">{stageSummary}</span>
         )}
+        {turn.durationMs !== undefined && (
+          <span className="trajectory-turn-duration">
+            ⏱ {formatDuration(turn.durationMs)}
+          </span>
+        )}
         <time>{formatTime(turn.userTs)}</time>
       </button>
       {!open && turn.tools.length > 0 && (
@@ -336,6 +408,13 @@ function TurnCard({
               +{turn.tools.length - CHIP_LIMIT}
             </span>
           )}
+        </div>
+      )}
+      {!open && turn.reply && (
+        <div className="trajectory-turn-preview">
+          <span className="trajectory-turn-preview-label">回复</span>
+          {turn.reply.slice(0, 56)}
+          {turn.reply.length > 56 ? "…" : ""}
         </div>
       )}
       {open && (
@@ -368,7 +447,7 @@ function TurnCard({
                     {turn.tools.map((tool, index) => (
                       <ExpandBlock
                         key={`${turn.userSeq}-${index}`}
-                        label={`${STATUS_MARK[tool.status]} ${tool.title}`}
+                        label={`${STATUS_MARK[tool.status]} ${tool.title}${tool.durationMs !== undefined ? ` · ${formatDuration(tool.durationMs)}` : ""}`}
                         labelClass={`tool-status-${tool.status}`}
                         content={tool.detail}
                       />
