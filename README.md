@@ -54,10 +54,11 @@ MyAgent 是一个面向长时间自主运行任务的本机编码 Agent：把自
 ### 插件扩展（.myagent/tools/）
 
 - **插件通道**：`.myagent/tools/*.ts`（项目）或 `~/.myagent/tools/`（全局，项目覆盖）写一个 `definePluginTool` 即接入——注册、模型可见、执行分发、权限审批、UI 渲染全走通用通道，与内置工具无差别；normal 档首次调用审批后同会话通配放行
+- **BrowserCheck**：无头浏览器页面检查（HTTP 状态 / 标题 / console 错误 / 渲染后文本）——搭完 UI 启动 dev/preview 后，模型可验证页面真实渲染（需 `npx playwright install chromium`）
 - **WebSearch**：网络搜索。searxng 自托管（本机 Docker）→ tavily（可选云 API）→ HTML 引擎链（bing/ddg/baidu）兜底，原则本地自托管优先、不依赖第三方 API Key；**深度模式**默认自动抓取前 2 个结果页正文，一次调用即得素材
 - **WebFetch**：反爬增强的页面抓取（浏览器级请求头 / 失败重试 / 可选 cookie）
 - **MCP 接入**：`plugins.json` 的 `mcpServers` 段配置后，MCP server 工具自动注册进插件通道（stdio 子进程 / 远端 HTTP 双传输），权限与 UI 与普通插件一致
-- **插件面板**：加载清单 / 加载错误 / 调用统计可视化，热重载（「重新加载」按钮，无需重启 server）、单插件启用/禁用（状态持久化到 `plugins.json` 的 `pluginDisabled` 段，重启保留）
+- **插件面板**：加载清单 / 加载错误 / 调用统计可视化，热重载（「重新加载」按钮，无需重启 server）、单插件启用/禁用（状态持久化到 `plugins.json` 的 `pluginDisabled` 段，重启保留）；**动态工具注册**——插件热加载后主会话与子代理下一轮即对模型可见
 - **超时护栏**：插件 run 默认 60s 限时，超时返回失败结果不卡死 agent 循环；插件可声明 `timeoutMs` 覆盖
 - 完整协议、架构链路、SearXNG 部署调优见 `docs/plugin-tools.md`
 
