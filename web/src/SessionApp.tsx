@@ -12,7 +12,7 @@ import type {
   SessionSummary,
 } from "@shared/types.js";
 import { useProjectPicker, type OpenedProject } from "./use-project-picker";
-import { buildDisplayItems } from "./session-display";
+import { buildDisplayItems, buildDeliverySummary } from "./session-display";
 import type { ApprovalScope } from "./session-render";
 import {
   Composer,
@@ -127,6 +127,17 @@ export function SessionApp(props: { initialSessionId?: string }) {
     () => buildDisplayItems(visibleEvents),
     [visibleEvents],
   );
+  // 交付摘要（简洁版）：会话完成且有写操作时，从事件流推导改动文件与验证结果
+  const delivery = useMemo(() => {
+    if (selected?.status !== "done" || !selected || selected.toolCallCount === 0) {
+      return undefined;
+    }
+    const summary = buildDeliverySummary(visibleEvents);
+    return summary.files.length > 0 || summary.verification
+      ? summary
+      : undefined;
+  }, [selected, visibleEvents]);
+
   // Trajectory 来源筛选：只保留目标来源的事件（消息始终保留作上下文）
   const filteredDisplayItems = useMemo(() => {
     if (sourceFilter === "all") return displayItems;
@@ -705,6 +716,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
                     setReplayPlaying(false);
                   }}
                   onReplayCursor={setReplayCursor}
+                  delivery={delivery}
                 />
                 {!replay && (
                   <>

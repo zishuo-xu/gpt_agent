@@ -330,3 +330,31 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
   }
   return items;
 }
+
+/** 交付摘要（简洁版，纯事件流推导、零成本）：
+ *  - files：Write/Edit/MultiEdit 的目标文件（去重）
+ *  - verification：最后一条 Bash 工具结果摘要
+ * 仅用于会话完成（done）且有写操作时展示。 */
+export function buildDeliverySummary(events: SessionEvent[]): {
+  files: string[];
+  verification?: string;
+} {
+  const files = new Set<string>();
+  let lastBashResult: string | undefined;
+  for (const { event } of events) {
+    if (event.type === "tool_call" && event.call) {
+      const tool = event.call.tool as string;
+      if (tool === "Write" || tool === "Edit" || tool === "MultiEdit") {
+        const target = event.call.target as string;
+        if (target) files.add(target);
+      }
+    }
+    if (event.type === "tool_result" && typeof event.summary === "string") {
+      lastBashResult = event.summary;
+    }
+  }
+  return {
+    files: [...files],
+    ...(lastBashResult ? { verification: lastBashResult } : {}),
+  };
+}

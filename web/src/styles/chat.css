@@ -2541,3 +2541,46 @@
   color: #e08a8a;
   background: #261616;
 }
+
+/* 交付摘要（简洁版：改动文件 + 验证结果） */
+.delivery-summary {
+  margin: 16px 4px 8px;
+  padding: 10px 14px;
+  border: 1px solid #2f6e4a;
+  border-radius: 9px;
+  background: #14241a;
+  font-size: 12px;
+}
+
+.delivery-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  color: #7fd4a0;
+}
+
+.delivery-head strong {
+  font-size: 13px;
+}
+
+.delivery-verification {
+  color: #9ad0b2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+.delivery-files {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: #93a4b8;
+  line-height: 1.7;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.delivery-more {
+  color: #6b788a;
+}

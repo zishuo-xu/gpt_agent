@@ -8,6 +8,8 @@ import type { DisplayItem } from "./session-display";
  */
 export function SessionStream(props: {
   displayItems: DisplayItem[];
+  /** 交付摘要（简洁版）：改动文件 + 验证结果；会话完成且有写操作时由父组件传入 */
+  delivery?: { files: string[]; verification?: string } | undefined;
   totalEvents: number;
   replay: boolean;
   replayCursor: number;
@@ -151,6 +153,32 @@ export function SessionStream(props: {
             />
           </div>
         ))}
+        {props.delivery && !props.replay && (
+          <div className="delivery-summary">
+            <div className="delivery-head">
+              <strong>✓ 完成</strong>
+              <span>改动 {props.delivery.files.length} 个文件</span>
+              {props.delivery.verification && (
+                <span className="delivery-verification">
+                  验证：{props.delivery.verification.slice(0, 48)}
+                  {props.delivery.verification.length > 48 ? "…" : ""}
+                </span>
+              )}
+            </div>
+            {props.delivery.files.length > 0 && (
+              <ul className="delivery-files">
+                {props.delivery.files.slice(0, 6).map((file) => (
+                  <li key={file}>{file}</li>
+                ))}
+                {props.delivery.files.length > 6 && (
+                  <li className="delivery-more">
+                    +{props.delivery.files.length - 6} 个文件
+                  </li>
+                )}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </>
   );
