@@ -139,7 +139,7 @@ export function DiffOrOutput(props: { text: string; forceDiff?: boolean }) {
   const hasRemove = lines.some((line) => line.startsWith("-"));
   const isDiff =
     props.forceDiff === true || hasMarker || (hasAdd && hasRemove);
-  // 长输出按需展开：默认只展示前 60 行，避免大段输出拖慢回放渲染
+  // 长输出按需展开：默认只展示前 60 行，避免大段输出拖慢消息流渲染
   const collapseThreshold = 60;
   const collapsed = !expanded && lines.length > collapseThreshold;
   const visibleLines = collapsed

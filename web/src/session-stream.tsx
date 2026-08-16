@@ -3,8 +3,8 @@ import { ItemCard, type ApprovalScope } from "./session-render";
 import type { DisplayItem } from "./session-display";
 
 /**
- * 消息流：回放条（Trajectory 式：播放/速度/来源筛选）+ 事件卡片序列。
- * 纯展示组件——事件/回放/审批状态由父组件持有。
+ * 消息流：来源筛选 chips + 事件卡片序列。
+ * 纯展示组件——事件/审批状态由父组件持有。
  */
 export function SessionStream(props: {
   displayItems: DisplayItem[];
