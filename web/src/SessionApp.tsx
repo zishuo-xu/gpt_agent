@@ -92,11 +92,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [permissionFeedback, setPermissionFeedback] =
     useState<Record<string, string>>({});
   const [error, setError] = useState("");
-  const [replay, setReplay] = useState(false);
-  const [replayCursor, setReplayCursor] = useState(0);
-  /** Trajectory 式回放：自动播放（⏸ 暂停）与速度倍率（1/2/4/8x） */
-  const [replayPlaying, setReplayPlaying] = useState(false);
-  const [replaySpeed, setReplaySpeed] = useState(1);
   /** 来源筛选（Trajectory 按来源分组）：全部/推理/工具/子代理/系统；消息始终显示 */
   const [sourceFilter, setSourceFilter] = useState("all");
   /** 缓存 miss 提示开关（behavior.showCacheMissNotices；默认关，参照 Pi） */
@@ -119,10 +114,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const busy =
     selected?.status === "running" ||
     selected?.status === "waiting_permission";
-  const visibleEvents = useMemo(
-    () => (replay ? events.slice(0, replayCursor) : events),
-    [replay, events, replayCursor],
-  );
+  const visibleEvents = events;
   const displayItems = useMemo(
     () => buildDisplayItems(visibleEvents),
     [visibleEvents],
@@ -155,23 +147,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
       );
     });
   }, [displayItems, sourceFilter]);
-  /** 自动播放推进：按速度倍率逐事件前进，播完自动停止 */
-  useEffect(() => {
-    if (!replay || !replayPlaying) return;
-    if (replayCursor >= events.length) {
-      setReplayPlaying(false);
-      return;
-    }
-    const timer = setTimeout(() => {
-      setReplayCursor((cursor) => Math.min(cursor + 1, events.length));
-    }, 200 / replaySpeed);
-    return () => clearTimeout(timer);
-  }, [replay, replayPlaying, replayCursor, events.length, replaySpeed]);
-  /** 播放/暂停：播到末尾时重新从头播放 */
-  function togglePlayback() {
-    if (replayCursor >= events.length) setReplayCursor(0);
-    setReplayPlaying((playing) => !playing);
-  }
   // 对话链路：每轮用户提问的目录，点击可定位到对应消息
   const userTurns = useMemo<UserTurn[]>(() => {
     let turn = 0;
@@ -188,7 +163,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
         : [],
     );
   }, [displayItems]);
-  // 回放模式下清单跟随回放游标，而非会话最新状态
   const latestTodos = useMemo(() => {
     const update = [...visibleEvents]
       .reverse()
@@ -399,13 +373,9 @@ export function SessionApp(props: { initialSessionId?: string }) {
   useEffect(() => {
     if (!selectedId) {
       setEvents([]);
-      setReplay(false);
       return;
     }
     setEvents([]);
-    setReplay(false);
-    setReplayPlaying(false);
-    setReplayCursor(0);
     setResolvedPermissions(new Set());
     seenSeqs.current = new Set();
     void refreshBranches();
@@ -434,10 +404,9 @@ export function SessionApp(props: { initialSessionId?: string }) {
   }, [selectedId]);
 
   useEffect(() => {
-    if (replay) return;
     const stream = chatStreamRef.current;
     if (stream) stream.scrollTop = stream.scrollHeight;
-  }, [selectedId, events.length, replay]);
+  }, [selectedId, events.length]);
 
   /** 对话链路跳转：平滑滚动到对应 seq 的消息 */
   function scrollToSeq(seq: number) {
@@ -671,12 +640,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
                 }
               }}
               onToggleDetail={() => setShowDetail((v) => !v)}
-              onReplay={() => {
-                // 进入回放从第一个事件开始（Trajectory 式回放整个过程）
-                setReplay(true);
-                setReplayCursor(events.length > 0 ? 1 : 0);
-                setReplayPlaying(false);
-              }}
             />
 
             {error && (
@@ -688,8 +651,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
                 <SessionStream
                   displayItems={filteredDisplayItems}
                   totalEvents={events.length}
-                  replay={replay}
-                  replayCursor={replayCursor}
                   streamRef={chatStreamRef}
                   showCacheMissNotices={showCacheMissNotices}
                   resolvedPermissions={resolvedPermissions}
@@ -705,30 +666,20 @@ export function SessionApp(props: { initialSessionId?: string }) {
                     void toggleBookmark(seq, name)
                   }
                   onPermission={answerPermission}
-                  replayPlaying={replayPlaying}
-                  replaySpeed={replaySpeed}
                   sourceFilter={sourceFilter}
-                  onTogglePlayback={togglePlayback}
-                  onReplaySpeed={setReplaySpeed}
                   onSourceFilter={setSourceFilter}
-                  onExitReplay={() => {
-                    setReplay(false);
-                    setReplayPlaying(false);
-                  }}
-                  onReplayCursor={setReplayCursor}
                   delivery={delivery}
                 />
-                {!replay && (
-                  <>
-                    {runBoundsPreview && (
-                      <RunBoundsConfirmation
-                        preview={runBoundsPreview}
-                        submitting={submitting}
-                        onConfirm={() => void submitMessage(true)}
-                        onCancel={() => setRunBoundsPreview(null)}
-                      />
-                    )}
-                    <Composer
+                <>
+                  {runBoundsPreview && (
+                    <RunBoundsConfirmation
+                      preview={runBoundsPreview}
+                      submitting={submitting}
+                      onConfirm={() => void submitMessage(true)}
+                      onCancel={() => setRunBoundsPreview(null)}
+                    />
+                  )}
+                  <Composer
                       message={message}
                       setMessage={updateMessage}
                       busy={busy}
@@ -738,8 +689,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
                       onRunModeChange={setRunMode}
                       onSubmit={submitMessage}
                     />
-                  </>
-                )}
+                </>
               </section>
 
               <SessionRail

@@ -622,10 +622,6 @@ describe("交付摘要渲染", () => {
           displayItems={[]}
           delivery={{ files: ["src/App.tsx", "src/lib/todos.ts"], verification: "命令退出：0" }}
           totalEvents={0}
-          replay={false}
-          replayCursor={0}
-          replayPlaying={false}
-          replaySpeed={1}
           sourceFilter="all"
           streamRef={{ current: null }}
           showCacheMissNotices={false}
@@ -635,10 +631,6 @@ describe("交付摘要渲染", () => {
           onFeedback={() => {}}
           onBookmark={() => {}}
           onPermission={async () => {}}
-          onExitReplay={() => {}}
-          onReplayCursor={() => {}}
-          onTogglePlayback={() => {}}
-          onReplaySpeed={() => {}}
           onSourceFilter={() => {}}
         />,
       );
@@ -652,49 +644,7 @@ describe("交付摘要渲染", () => {
     await act(async () => root.unmount());
   });
 
-  it("replay 模式不显示交付摘要", async () => {
-    const [{ act }, { createRoot }, { SessionStream }] = await Promise.all([
-      import("react"),
-      import("react-dom/client"),
-      import("./session-stream"),
-    ]);
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    mountedRoots.push(root);
-    await act(async () => {
-      root.render(
-        <SessionStream
-          displayItems={[]}
-          delivery={{ files: ["a.ts"] }}
-          totalEvents={0}
-          replay
-          replayCursor={0}
-          replayPlaying={false}
-          replaySpeed={1}
-          sourceFilter="all"
-          streamRef={{ current: null }}
-          showCacheMissNotices={false}
-          resolvedPermissions={new Set()}
-          pendingPermissionCallId={null}
-          permissionFeedback={{}}
-          onFeedback={() => {}}
-          onBookmark={() => {}}
-          onPermission={async () => {}}
-          onExitReplay={() => {}}
-          onReplayCursor={() => {}}
-          onTogglePlayback={() => {}}
-          onReplaySpeed={() => {}}
-          onSourceFilter={() => {}}
-        />,
-      );
-    });
-    assert.equal(container.querySelector(".delivery-summary"), null);
-    await act(async () => root.unmount());
-  });
-});
 
-describe("审批批量放行条", () => {
   it("挂起审批 ≥2 时显示按钮，点击对全部挂起审批放行（本次会话）", async () => {
     const [{ act }, { createRoot }, { SessionStream }] = await Promise.all([
       import("react"),
@@ -716,10 +666,6 @@ describe("审批批量放行条", () => {
         <SessionStream
           displayItems={displayItems}
           totalEvents={2}
-          replay={false}
-          replayCursor={0}
-          replayPlaying={false}
-          replaySpeed={1}
           sourceFilter="all"
           streamRef={{ current: null }}
           showCacheMissNotices={false}
@@ -731,10 +677,6 @@ describe("审批批量放行条", () => {
           onPermission={async (callId, granted, scope) => {
             calls.push([callId, granted, scope ?? "once"]);
           }}
-          onExitReplay={() => {}}
-          onReplayCursor={() => {}}
-          onTogglePlayback={() => {}}
-          onReplaySpeed={() => {}}
           onSourceFilter={() => {}}
         />,
       );
@@ -774,10 +716,6 @@ describe("审批批量放行条", () => {
         <SessionStream
           displayItems={displayItems}
           totalEvents={2}
-          replay={false}
-          replayCursor={0}
-          replayPlaying={false}
-          replaySpeed={1}
           sourceFilter="all"
           streamRef={{ current: null }}
           showCacheMissNotices={false}
@@ -787,10 +725,6 @@ describe("审批批量放行条", () => {
           onFeedback={() => {}}
           onBookmark={() => {}}
           onPermission={async () => {}}
-          onExitReplay={() => {}}
-          onReplayCursor={() => {}}
-          onTogglePlayback={() => {}}
-          onReplaySpeed={() => {}}
           onSourceFilter={() => {}}
         />,
       );

@@ -11,10 +11,6 @@ export function SessionStream(props: {
   /** 交付摘要（简洁版）：改动文件 + 验证结果；会话完成且有写操作时由父组件传入 */
   delivery?: { files: string[]; verification?: string } | undefined;
   totalEvents: number;
-  replay: boolean;
-  replayCursor: number;
-  replayPlaying: boolean;
-  replaySpeed: number;
   sourceFilter: string;
   streamRef: RefObject<HTMLDivElement | null>;
   showCacheMissNotices: boolean;
@@ -29,55 +25,11 @@ export function SessionStream(props: {
     scope?: ApprovalScope,
     feedback?: string,
   ) => Promise<void>;
-  onExitReplay: () => void;
-  onReplayCursor: (value: number) => void;
-  onTogglePlayback: () => void;
-  onReplaySpeed: (value: number) => void;
   onSourceFilter: (value: string) => void;
 }) {
   return (
     <>
-      {props.replay && (
-        <>
-          <div className="replay-bar">
-            <button
-              className="replay-play"
-              onClick={props.onTogglePlayback}
-              title={props.replayPlaying ? "暂停回放" : "自动回放整个过程"}
-            >
-              {props.replayPlaying ? "⏸ 暂停" : "▶ 播放"}
-            </button>
-            <button
-              className="replay-speed"
-              onClick={() =>
-                props.onReplaySpeed(
-                  props.replaySpeed === 8 ? 1 : props.replaySpeed * 2,
-                )
-              }
-              title="播放速度（1x/2x/4x/8x）"
-            >
-              {props.replaySpeed}x
-            </button>
-            <input
-              type="range"
-              min={1}
-              max={Math.max(1, props.totalEvents)}
-              value={Math.max(1, props.replayCursor)}
-              onChange={(event) =>
-                props.onReplayCursor(
-                  Number(event.target.value),
-                )
-              }
-            />
-            <code>
-              {Math.min(props.replayCursor, props.totalEvents)} /{" "}
-              {props.totalEvents}
-            </code>
-            <button onClick={props.onExitReplay}>
-              退出
-            </button>
-          </div>
-          <div className="replay-filters">
+      <div className="replay-filters">
             {(
               [
                 ["all", "全部"],
@@ -100,8 +52,6 @@ export function SessionStream(props: {
               </button>
             ))}
           </div>
-        </>
-      )}
       <div
         className="chat-stream"
         ref={props.streamRef}
@@ -161,7 +111,7 @@ export function SessionStream(props: {
               !item.resolvedByEvent &&
               !props.resolvedPermissions.has(String(item.event.call.id)),
           );
-          if (pendingApprovals.length < 2 || props.replay) return null;
+          if (pendingApprovals.length < 2) return null;
           return (
             <div className="approval-batch-bar">
               <span>{pendingApprovals.length} 个审批等待处理</span>
@@ -182,7 +132,7 @@ export function SessionStream(props: {
             </div>
           );
         })()}
-        {props.delivery && !props.replay && (
+        {props.delivery && (
           <div className="delivery-summary">
             <div className="delivery-head">
               <strong>✓ 完成</strong>

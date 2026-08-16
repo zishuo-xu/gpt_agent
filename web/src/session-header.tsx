@@ -19,7 +19,6 @@ export function SessionHeader(props: {
   onInterrupt: () => void;
   onResume: () => void;
   onNew: () => void;
-  onReplay: () => void;
   onExport: () => void;
   onDelete: () => void;
   onToggleDetail: () => void;
@@ -72,13 +71,6 @@ export function SessionHeader(props: {
             ↻ 续跑中断任务
           </button>
         )}
-        <button
-          className="replay-button"
-          onClick={props.onReplay}
-          title="回放整个会话过程（自动播放/来源筛选）"
-        >
-          ▶ 回放
-        </button>
         <button
           className="secondary-button"
           onClick={props.onNew}
