@@ -126,6 +126,8 @@ test(
     // 本用例仅在无 chromium 环境运行，直接断言失败结果带安装指引（任意失败路径）。
     const result = await runBrowserCheck("http://127.0.0.1:1/", 2_000);
     assert.equal(result.isError, true);
-    assert.match(String(result.output ?? ""), /playwright install chromium/);
+    // 安装指引在 summary（output 为原始错误信息）
+    assert.match(result.summary, /playwright install chromium/);
+    assert.match(String(result.output ?? ""), /Executable doesn't exist/);
   },
 );
