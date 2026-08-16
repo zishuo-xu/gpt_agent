@@ -49,7 +49,7 @@ const PROMPT_BASH = `The Bash tool runs in the project root. Avoid destructive c
     只写当前可用工具的指南，工具指南不再背负不存在的工具。
     未指定（全量）时输出与历史版本逐字一致，保持缓存前缀兼容。 */
 export function buildSystemPrompt(
-  toolNames: readonly ToolName[] | undefined,
+  toolNames: readonly (ToolName | string)[] | undefined,
 ): string {
   const tools = toolNames;
   // 从单一目录取工具名（as const 保证字面量类型，改目录时编译器同步约束）
