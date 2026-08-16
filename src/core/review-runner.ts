@@ -29,7 +29,8 @@ export function parseReviewResult(raw: string): {
     // 宽松识别：模型未遵循三段式时，按中文/英文通过词判定
     const trimmed = raw.trim();
     const hasFailWord = /未通过|失败|不通过|有问题|fail/i.test(trimmed);
-    const hasPassWord = /通过|正确|没问题|pass/i.test(trimmed);
+    const hasPassWord =
+      /通过|正确|没问题|符合|无误|达标|pass|confirmed|okay/i.test(trimmed);
     if (!hasFailWord && hasPassWord) {
       return { passed: true, issues: [], summary: trimmed };
     }

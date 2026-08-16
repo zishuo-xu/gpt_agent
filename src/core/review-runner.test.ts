@@ -44,3 +44,10 @@ test("parseReviewResult：无结构时按中文通过词宽松判定", () => {
   assert.equal(parseReviewResult("未通过，还有问题").passed, false);
   assert.equal(parseReviewResult("审查").passed, false);
 });
+
+test("parseReviewResult：宽松词表覆盖英文与中文变体", () => {
+  assert.equal(parseReviewResult("confirmed").passed, true);
+  assert.equal(parseReviewResult("符合预期").passed, true);
+  assert.equal(parseReviewResult("无误").passed, true);
+  assert.equal(parseReviewResult("未通过审查").passed, false);
+});
