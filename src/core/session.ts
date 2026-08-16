@@ -26,6 +26,7 @@ import {
   type RunTaskOptions,
 } from "./run-task.js";
 import { TaskRunner } from "./task-runner.js";
+import { buildReviewPrompt, parseReviewResult } from "./review-runner.js";
 import { BranchCoordinator } from "./session-branch.js";
 import { PermissionWaiter } from "./session-approval.js";
 import {
@@ -122,6 +123,12 @@ export class AgentSession {
   /** /run 任务期间模型重试+fallback 全部耗尽（sendInput 捕获后置位；
       修复 run_finished 误报 completed——need_user 会把 status 盖成 done） */
   #taskModelFailed = false;
+  /** 完成审查（任务验收链）：开关（behavior.completionReview；缺省开） */
+  readonly #completionReview: boolean;
+  /** 本轮完成的审查循环计数（sendInput 开头重置；打回循环累计，上限 2） */
+  #reviewAttempts = 0;
+  /** 手动 /review 请求标记（reviewNow 置位；#shouldReview 消费） */
+  #reviewRequested = false;
   /** 恢复时检测到的中断任务（run_started 无配对 run_finished；进程崩溃残留） */
   readonly #interruptedTask:
     | {
@@ -159,6 +166,8 @@ export class AgentSession {
     >;
     /** 文件工具实现（可注入记忆留档钩子等）；缺省新建 */
     files?: AtomicFileTools;
+    /** 完成审查开关（behavior.completionReview；缺省开） */
+    completionReview?: boolean;
   }) {
     this.id = options.id;
     this.#cwd = options.cwd;
@@ -177,6 +186,7 @@ export class AgentSession {
     this.#approvalTimeoutMs = options.approvalTimeoutMs ?? 300_000;
     this.#rememberPermission = options.rememberPermission;
     this.#parallelTools = options.parallelTools ?? false;
+    this.#completionReview = options.completionReview ?? true;
     this.#approvalWaiter = new PermissionWaiter({
       bus: this.#bus,
       permissions: this.#permissions,
@@ -411,6 +421,15 @@ export class AgentSession {
         description: this.#interruptedTask.description,
       };
     }
+    const lastReview = [...this.#events]
+      .reverse()
+      .find((record) => record.event.type === "review_result");
+    if (lastReview?.event.type === "review_result") {
+      summary.review = {
+        passed: lastReview.event.passed,
+        attempts: lastReview.event.attempts,
+      };
+    }
     return summary;
   }
 
@@ -566,6 +585,8 @@ export class AgentSession {
     }
 
     this.#processing = true;
+    // 每轮完成独立计审查次数（打回循环内累计，上限 2）
+    this.#reviewAttempts = 0;
     let current: QueuedInput | undefined = {
       id: "",
       text,
@@ -614,6 +635,22 @@ export class AgentSession {
         this.#activeLoop = loop;
         try {
           await loop.run();
+          // 任务验收链：完成审查（有写操作 / 任务模式 / 手动触发；问答跳过）
+          if (await this.#shouldReview(options)) {
+            const review = await this.#runReview(current.text);
+            this.#bus.emit({
+              type: "review_result",
+              ...review,
+              attempts: this.#reviewAttempts,
+            });
+            if (!review.passed && this.#reviewAttempts < 2) {
+              // 打回：审查结论注入主循环继续修，本轮完成后再审
+              this.#model.addUserMessage(
+                `完成审查未通过（第 ${this.#reviewAttempts} 次）：\n${review.issues.join("\n")}\n请修复这些问题并重新验证后再次宣布完成。`,
+              );
+              continue;
+            }
+          }
         } catch (error) {
           if (error instanceof ModelRetriesExhaustedError) {
             // 重试与 fallback 全部耗尽：可操作化指引（分类 + 原文 + 建议），
@@ -901,6 +938,110 @@ export class AgentSession {
       taskOptionsFromSerialized(serialized),
       this.#interruptedTask.taskId,
     );
+  }
+
+  /** 完成审查触发条件：开关开 + 未超上限 + （有写操作 或 任务模式 或 手动标记） */
+  async #shouldReview(options?: { taskMode?: boolean }): Promise<boolean> {
+    if (this.#completionReview === false) return false;
+    if (this.#reviewAttempts >= 2) return false;
+    if (options?.taskMode === true) return true;
+    if (this.#reviewRequested) {
+      this.#reviewRequested = false;
+      return true;
+    }
+    return this.#tools.files.journal.entries().length > 0;
+  }
+
+  /** 执行完成审查：独立 TaskRunner（main client + 只读 + 审查 prompt） */
+  async #runReview(taskReq: string): Promise<{
+    passed: boolean;
+    issues: string[];
+    summary: string;
+  }> {
+    this.#reviewAttempts += 1;
+    const journal = this.#tools.files.journal.entries();
+    const modifiedFiles = [
+      ...new Set(journal.map((entry) => entry.path)),
+    ];
+    // 最近验证结果：最后一个 tool_result 的 summary
+    const lastResult = [...this.#events]
+      .reverse()
+      .find((record) => record.event.type === "tool_result");
+    const prompt = buildReviewPrompt({
+      taskReq,
+      modifiedFiles,
+      ...(lastResult?.event.type === "tool_result"
+        ? { lastVerification: lastResult.event.summary }
+        : {}),
+      todos: this.#state.todos(),
+    });
+    const runner = new TaskRunner({
+      cwd: this.#cwd,
+      bus: this.#bus,
+      client: this.#model.client,
+      mode: () => this.#permissions.mode,
+      rules: () => this.#permissions.rules(),
+      approve: async (call, signal) =>
+        await this.#approvalWaiter.wait(
+          call,
+          signal,
+          this.#taskApprovalTimeoutMs,
+        ),
+      reportUsage: (usage) => {
+        const costCny = usageCostCny(usage, this.#pricing?.main);
+        const actualCostCny = usage.costCny ?? costCny;
+        this.#bus.emit({
+          type: "cost_update",
+          ...usage,
+          totalTokens:
+            this.#state.tokens() + usage.input + usage.output,
+          ...(actualCostCny === undefined
+            ? {}
+            : {
+                costCny: actualCostCny,
+                totalCostCny:
+                  this.#state.costCny() + actualCostCny,
+              }),
+        });
+      },
+      recordTrace: (trace) => this.#traceStore.record(trace),
+      // 审查是短任务：3 分钟 + 12 轮上限（成本兜底）
+      timeoutMs: 3 * 60_000,
+      maxTurns: 12,
+    });
+    const result = await runner.run(
+      {
+        description: `[完成审查] ${taskReq.slice(0, 24)}`,
+        prompt,
+        writable: false,
+      },
+      new AbortController().signal,
+    );
+    return parseReviewResult(
+      typeof result.output === "string" ? result.output : "",
+    );
+  }
+
+  /** 手动触发完成审查（/review 命令；运行中则忽略） */
+  async reviewNow(): Promise<void> {
+    if (this.#processing) return;
+    const lastUser = [...this.#events]
+      .reverse()
+      .find((record) => record.event.type === "user");
+    if (!lastUser || lastUser.event.type !== "user") return;
+    this.#reviewAttempts = 0;
+    const review = await this.#runReview(lastUser.event.text);
+    this.#bus.emit({
+      type: "review_result",
+      ...review,
+      attempts: this.#reviewAttempts,
+    });
+    if (!review.passed && this.#reviewAttempts < 2) {
+      this.#model.addUserMessage(
+        `完成审查未通过（第 ${this.#reviewAttempts} 次）：\n${review.issues.join("\n")}\n请修复这些问题并重新验证后再次宣布完成。`,
+      );
+      void this.sendInput("", undefined);
+    }
   }
 
   async initializeProject(): Promise<void> {

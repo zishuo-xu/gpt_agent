@@ -110,6 +110,13 @@ export type AgentEvent =
       reason?: "timeout";
     }
   | {
+      type: "review_result";
+      passed: boolean;
+      issues: string[];
+      summary: string;
+      attempts: number;
+    }
+  | {
       type: "run_started";
       taskId: string;
       description: string;

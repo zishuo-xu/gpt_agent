@@ -441,3 +441,87 @@ test("compact：会话空闲时强制压缩", async () => {
   const compacted = await session.compact();
   assert.equal(compacted, false);
 });
+
+test("完成审查：有写操作的任务在 done 后触发审查，通过则正常结束", async () => {
+  const { session, collector } = await setup([
+    response("写文件。", {
+      toolCalls: [
+        toolCall("write-1", "Write", "a.txt", { file_path: "a.txt", content: "hello" }),
+      ],
+    }),
+    response("完成。"),
+    // 审查轮（TaskRunner 消费）
+    response("Verdict: PASS\nIssues: （无）\nUnconfirmed: 无", {
+      usage: { input: 10, output: 5, cached: 0 },
+    }),
+  ], { mode: "trust" });
+  await session.sendInput("创建 a.txt");
+  const summary = session.summary();
+  assert.equal(summary.status, "done");
+  assert.deepEqual(summary.review, { passed: true, attempts: 1 });
+  const reviewEvents = collector.eventsOf("review_result");
+  assert.equal(reviewEvents.length, 1);
+  const review = reviewEvents[0]!.event as { passed: boolean };
+  assert.equal(review.passed, true);
+});
+
+test("完成审查：FAIL 打回主循环，修复后再次审查通过", async () => {
+  const { session } = await setup([
+    response("写文件。", {
+      toolCalls: [
+        toolCall("write-1", "Write", "a.txt", { file_path: "a.txt", content: "hello" }),
+      ],
+    }),
+    response("完成。"),
+    // 第一次审查 FAIL
+    response("Verdict: FAIL\nIssues:\n- a.txt 内容不符合要求\nUnconfirmed: 无", {
+      usage: { input: 10, output: 5, cached: 0 },
+    }),
+    // 主循环打回后模型修复（再次 Write）+ 宣布完成
+    response("修复。", {
+      toolCalls: [
+        toolCall("write-2", "Write", "a.txt", { file_path: "a.txt", content: "world" }),
+      ],
+    }),
+    response("修复完成。"),
+    // 第二次审查 PASS
+    response("Verdict: PASS\nIssues: （无）\nUnconfirmed: 无", {
+      usage: { input: 10, output: 5, cached: 0 },
+    }),
+  ], { mode: "trust" });
+  await session.sendInput("创建 a.txt");
+  const summary = session.summary();
+  assert.equal(summary.status, "done");
+  assert.deepEqual(summary.review, { passed: true, attempts: 2 });
+});
+
+test("完成审查：连续 FAIL 超过 2 次放行并标记未通过", async () => {
+  const { session } = await setup([
+    response("写文件。", {
+      toolCalls: [
+        toolCall("write-1", "Write", "a.txt", { file_path: "a.txt", content: "hello" }),
+      ],
+    }),
+    response("完成。"),
+    response("Verdict: FAIL\nIssues:\n- 问题一\nUnconfirmed: 无"),
+    response("再修。"),
+    response("完成。"),
+    response("Verdict: FAIL\nIssues:\n- 问题二\nUnconfirmed: 无"),
+    response("还修。"),
+    response("完成。"),
+    response("Verdict: FAIL\nIssues:\n- 问题三\nUnconfirmed: 无"),
+  ], { mode: "trust" });
+  await session.sendInput("创建 a.txt");
+  const summary = session.summary();
+  assert.equal(summary.status, "done");
+  assert.deepEqual(summary.review, { passed: false, attempts: 2 });
+});
+
+test("完成审查：纯问答（无写操作）不触发", async () => {
+  const { session, collector } = await setup([
+    response("1+1 等于 2。"),
+  ]);
+  await session.sendInput("1+1 等于几？");
+  assert.equal(collector.eventsOf("review_result").length, 0);
+  assert.equal(session.summary().review, undefined);
+});

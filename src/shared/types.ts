@@ -54,6 +54,8 @@ export interface SessionSummary {
     taskId: string;
     description: string;
   };
+  /** 完成审查结论（最后一个 review_result 推导；无审查则缺省） */
+  review?: { passed: boolean; attempts: number };
 }
 
 export type MemoryDocumentId =
