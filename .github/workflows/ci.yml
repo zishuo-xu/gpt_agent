@@ -14,7 +14,7 @@ jobs:
       # 版本取自 package.json 的 packageManager（pnpm@10.x），避免与 action 显式 version 冲突
       - uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -42,7 +42,7 @@ jobs:
       # 版本取自 package.json 的 packageManager（pnpm@10.x），避免与 action 显式 version 冲突
       - uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
