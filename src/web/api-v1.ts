@@ -301,7 +301,16 @@ export type V1Event =
       };
     }
   | { seq: number; ts: string; type: "system.info"; message: string }
-  | { seq: number; ts: string; type: "system.error"; message: string };
+  | { seq: number; ts: string; type: "system.error"; message: string }
+  | {
+      seq: number;
+      ts: string;
+      type: "review.result";
+      passed: boolean;
+      issues: string[];
+      summary: string;
+      attempts: number;
+    };
 
 /**
  * 内部事件 → v1 白名单契约（多对一折叠；未知类型永不破坏契约，折叠为 system.info）。
