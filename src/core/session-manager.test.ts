@@ -1007,3 +1007,71 @@ test("deleteSession 在会话运行中删除：中断后等待收尾，文件不
   await new Promise((resolve) => setTimeout(resolve, 500));
   await assert.rejects(() => readFile(jsonlPath, "utf8"), "jsonl 不应复活");
 });
+
+test("恢复容错：会话文件含坏行（崩溃残留）时跳过坏行并恢复其余事件", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-manager-cwd-"));
+  const stateDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-manager-state-"),
+  );
+  const homeDir = await mkdtemp(
+    path.join(os.tmpdir(), "myagent-manager-home-"),
+  );
+  const configService = new ConfigService({ cwd, homeDir });
+  // 直接构造含坏行的会话文件（模拟进程崩溃残留 / 手动编辑损坏）
+  const projectKey = Buffer.from(cwd).toString("base64url");
+  const sessionDir = path.join(
+    stateDir,
+    "projects",
+    projectKey,
+    "sessions",
+  );
+  await mkdir(sessionDir, { recursive: true });
+  const sessionId = "badrow01"; // 8 字符 id（与 randomUUID().slice(0,8) 同构）
+  const good = (seq: number, text: string): string =>
+    JSON.stringify({
+      seq,
+      ts: `2026-08-16T00:00:0${seq}.000Z`,
+      sessionId,
+      branchId: "main",
+      event: { type: "user", text },
+    });
+  await writeFile(
+    path.join(sessionDir, `${sessionId}.jsonl`),
+    [
+      good(1, "第一条"),
+      '{"seq": 2, "ts": "半行残', // 崩溃残留半行
+      "not-json-at-all", // 完全损坏
+      good(3, "第三条"),
+      "", // 空行
+    ].join("\n") + "\n",
+  );
+
+  let restoredHistory: ConversationMessage[] = [];
+  const manager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    modelFactory: (messages) => {
+      restoredHistory = structuredClone(messages);
+      return new ConversationAgentModel(
+        new ScriptedClient([response("恢复成功")]),
+        messages,
+      );
+    },
+  });
+  await manager.restore();
+  await manager.releaseLock();
+
+  const restored = manager.get(sessionId);
+  assert.ok(restored, "坏行不阻止会话恢复");
+  // 恢复后历史含两条 user 消息（坏行被跳过），且能正常继续对话
+  assert.deepEqual(
+    restoredHistory
+      .filter((message) => message.role === "user")
+      .map((message) => (message.content as string).replace(/\s+/g, " ").trim()),
+    ["第一条", "第三条"],
+  );
+  await restored.sendInput("继续");
+  assert.ok(restored.summary().totalInputTokens > 0, "恢复后继续对话正常计费");
+});
