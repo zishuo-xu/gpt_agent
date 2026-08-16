@@ -35,8 +35,13 @@ export function getAllToolDefinitions(): ToolDefinition[] {
 
 /** 按名称解析工具定义；未指定时返回全量（main 角色，含插件工具）。
     调用方必须保证同一模型会话内工具集固定，否则会破坏 prompt cache 前缀。 */
+/** 子代理（explore 角色）工具集：只读内置 + 当前已注册的插件工具（热加载后立即可见） */
+export function exploreToolNames(): string[] {
+  return [...EXPLORE_TOOL_NAMES, ...pluginToolRegistry.names()];
+}
+
 export function toolDefinitionsFor(
-  names: readonly ToolName[] | undefined,
+  names: readonly (ToolName | string)[] | undefined,
 ): ToolDefinition[] {
   if (!names) return getAllToolDefinitions();
   const byName = new Map(

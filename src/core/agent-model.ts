@@ -107,7 +107,7 @@ export class ConversationAgentModel implements AgentModel {
     initialConversation: string | ConversationMessage[],
     context = new ContextManager(),
     options: {
-      toolNames?: readonly ToolName[] | undefined;
+      toolNames?: readonly (ToolName | string)[] | undefined;
       /** 单次请求最大输出 tokens（behavior.maxOutputTokens；缺省用客户端兜底 8192） */
       maxTokens?: number | undefined;
     } = {},
@@ -122,7 +122,7 @@ export class ConversationAgentModel implements AgentModel {
     this.#maxTokens = options.maxTokens;
   }
 
-  readonly #toolNames: readonly ToolName[] | undefined;
+  readonly #toolNames: readonly (ToolName | string)[] | undefined;
   readonly #maxTokens: number | undefined;
 
   /** 底层 API 客户端（审查/独立上下文复用；同一 client 可建多个 ConversationAgentModel） */

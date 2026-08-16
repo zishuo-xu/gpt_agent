@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { pluginToolRegistry } from "../shared/plugin-tool.js";
 import {
-  EXPLORE_TOOL_NAMES,
+  exploreToolNames,
   getAllToolDefinitions,
   toolDefinitionsFor,
 } from "./tool-definitions.js";
@@ -32,14 +32,14 @@ test("getAllToolDefinitions 含插件定义，main 全量注入", () => {
   }
 });
 
-test("toolDefinitionsFor 按名过滤且不注入插件到只读 explore 集", () => {
+test("toolDefinitionsFor 按名过滤；explore 集含只读插件工具（动态注册）", () => {
   pluginToolRegistry.register(pluginTool("WebFetch"));
   try {
-    const explore = toolDefinitionsFor(EXPLORE_TOOL_NAMES);
+    const explore = toolDefinitionsFor(exploreToolNames());
     assert.deepEqual(
       explore.map((tool) => tool.name),
-      ["Read", "Grep", "Glob", "TodoWrite"],
-      "explore 只读集不含插件工具",
+      ["Read", "Grep", "Glob", "TodoWrite", "WebFetch"],
+      "explore 只读集 = 内置只读 + 已注册插件（热加载后立即可见）",
     );
     const selected = toolDefinitionsFor(["Read", "WebFetch"] as never);
     assert.deepEqual(
