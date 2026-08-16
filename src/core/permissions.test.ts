@@ -362,3 +362,21 @@ test("文件工具 target 规范化：普通文件相对路径语义不变", () 
     "allow",
   );
 });
+
+test("Bash 环境探查（搭建场景）：版本/工具定位命令自动放行", () => {
+  const engine = new PermissionEngine("normal", DEFAULT_PERMISSION_RULES);
+  const bash = (target: string): ToolCall => ({
+    id: target,
+    tool: "Bash",
+    target,
+    args: { command: target },
+  });
+  assert.equal(engine.judge(bash("node -v && pnpm -v && npm -v")), "allow");
+  assert.equal(engine.judge(bash("node --version")), "allow");
+  assert.equal(engine.judge(bash("npm view vite version")), "allow");
+  assert.equal(engine.judge(bash("which node && command -v pnpm")), "allow");
+  assert.equal(engine.judge(bash("uname -a && env | head -5")), "allow");
+  // 写操作仍拦截（探查前缀不豁免写段）
+  assert.equal(engine.judge(bash("node -v && pnpm install")), "ask");
+  assert.equal(engine.judge(bash("npm view x > /tmp/out.txt")), "ask", "写重定向仍询问");
+});

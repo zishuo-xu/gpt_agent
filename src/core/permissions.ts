@@ -222,6 +222,18 @@ const READONLY_BASH_VERBS = [
   "git diff",
   "npm test",
   "pnpm test",
+  // 环境探查（搭建场景高频）：版本/工具定位/环境变量，无写副作用
+  "node -v",
+  "node --version",
+  "pnpm -v",
+  "npm -v",
+  "yarn -v",
+  "npm view",
+  "pnpm view",
+  "uname",
+  "which",
+  "command -v",
+  "env",
 ];
 
 function isReadonlyPrimitiveAllow(rule: PermissionRule): boolean {
@@ -373,6 +385,18 @@ export const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
   { effect: "allow", pattern: "Edit(*.myagent/MEMORY.md)" },
   { effect: "allow", pattern: "Bash(ls*)" },
   { effect: "allow", pattern: "Bash(pwd*)" },
+  // 环境探查（搭建场景高频）：版本/工具定位/环境变量，无写副作用
+  { effect: "allow", pattern: "Bash(node -v*)" },
+  { effect: "allow", pattern: "Bash(node --version*)" },
+  { effect: "allow", pattern: "Bash(pnpm -v*)" },
+  { effect: "allow", pattern: "Bash(npm -v*)" },
+  { effect: "allow", pattern: "Bash(yarn -v*)" },
+  { effect: "allow", pattern: "Bash(npm view*)" },
+  { effect: "allow", pattern: "Bash(pnpm view*)" },
+  { effect: "allow", pattern: "Bash(uname*)" },
+  { effect: "allow", pattern: "Bash(which*)" },
+  { effect: "allow", pattern: "Bash(command -v*)" },
+  { effect: "allow", pattern: "Bash(env*)" },
   // 只读原语：cat/find/head/tail/wc/sort/grep 本身无写副作用，模型只读任务常用
   { effect: "allow", pattern: "Bash(cat*)" },
   { effect: "allow", pattern: "Bash(find*)" },
