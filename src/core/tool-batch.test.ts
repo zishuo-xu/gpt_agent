@@ -165,7 +165,8 @@ test("executeTool：成功路径执行并回灌", async () => {
     ms: 0,
   });
 
-  assert.equal(result.summary, "命令退出：0");
+  // 退出码 0 是核心断言；高负载下排空宽限可能附加「输出可能不完整」后缀
+  assert.match(result.summary, /^命令退出：0/);
   const bashOutput = result.output as { stdout?: string };
   assert.match(bashOutput.stdout ?? "", /batch-ok/);
   assert.ok(!result.isError, "成功执行不应标记 isError");

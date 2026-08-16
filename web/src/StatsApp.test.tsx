@@ -238,6 +238,95 @@ describe("StatsApp（任务统计面板）", () => {
     fetch.restore();
   });
 
+  it("收尾总结空态：API 无 run 数据时显示提示文案（不渲染总结内容）", async () => {
+    const fetch = stubFetch({
+      ...baseRoutes(),
+      "/api/sessions/s-run/summary?project=proj-a": () => ({
+        // 无 run 字段（run 事件不完整或中断于进程崩溃）
+        totals: {
+          totalCostCny: 0.42,
+          totalInputTokens: 1000,
+          totalOutputTokens: 500,
+          status: "done",
+        },
+      }),
+    });
+    const { container, act } = await setup();
+
+    const runRow = Array.from(
+      container.querySelectorAll(".stats-table tbody tr"),
+    ).find((row) => row.textContent?.includes("巡检任务"));
+    const viewButton = runRow?.querySelector(
+      "button.stats-summary-button",
+    ) as HTMLButtonElement | null;
+    assert.ok(viewButton);
+    await act(async () => {
+      viewButton.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+
+    const modal = container.querySelector(".stats-modal");
+    assert.ok(modal, "应弹出收尾总结模态");
+    const modalText = modal.textContent ?? "";
+    assert.match(modalText, /该会话没有可展示的收尾总结/);
+    assert.doesNotMatch(modalText, /巡检任务：/);
+    fetch.restore();
+  });
+
+  it("点「轨迹」→ 打开轨迹模态（aria-label 区分）并渲染事件", async () => {
+    const fetch = stubFetch({
+      ...baseRoutes(),
+      "/api/sessions/s-run/events?project=proj-a": () => ({
+        events: [
+          {
+            seq: 1,
+            ts: "2026-08-14T10:00:00.000Z",
+            event: { type: "user", text: "巡检一下" },
+          },
+          {
+            seq: 2,
+            ts: "2026-08-14T10:00:01.000Z",
+            event: {
+              type: "tool_call",
+              call: { id: "c1", tool: "Glob", target: "**/*.ts", args: {} },
+            },
+          },
+        ],
+      }),
+    });
+    const { container, act } = await setup();
+
+    const runRow = Array.from(
+      container.querySelectorAll(".stats-table tbody tr"),
+    ).find((row) => row.textContent?.includes("巡检任务"));
+    const trajectoryButton = runRow?.querySelectorAll(
+      "button.stats-summary-button",
+    )[1] as HTMLButtonElement | null;
+    assert.ok(trajectoryButton, "轨迹按钮存在");
+    await act(async () => {
+      trajectoryButton.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+
+    const trajectoryModal = container.querySelector(
+      '.stats-modal[aria-label^="轨迹"]',
+    );
+    assert.ok(trajectoryModal, "应打开轨迹模态");
+    const modalText = trajectoryModal.textContent ?? "";
+    assert.match(modalText, /巡检一下/);
+    assert.match(modalText, /Glob/);
+    // 轨迹模态与收尾总结模态互斥（不同 aria-label）
+    assert.ok(
+      !container.querySelector('.stats-modal[aria-label="收尾总结"]'),
+      "不应同时打开收尾总结模态",
+    );
+    fetch.restore();
+  });
+
   it("默认项目取 defaultKey（服务器默认项目）而非大厅", async () => {
     window.localStorage.removeItem("stats.project");
     const requested: string[] = [];
