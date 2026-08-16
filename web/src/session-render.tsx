@@ -6,6 +6,7 @@ import { RichText } from "./session-rich-text";
 import {
   ApprovalCard,
   LedgerCard,
+  ReviewCard,
   SubtaskCard,
   ToolCard,
   type ApprovalScope,
@@ -78,6 +79,10 @@ export function ItemCard(props: {
 
   if (item.kind === "subtask") {
     return <SubtaskCard item={item} />;
+  }
+
+  if (item.kind === "review") {
+    return <ReviewCard item={item} />;
   }
 
   if (item.kind === "ledger") {

@@ -116,6 +116,13 @@ test("v1 事件映射：白名单类型多对一折叠", () => {
     }),
     record(10, { type: "error", message: "模型超时" }),
     record(11, { type: "done" }),
+    record(12, {
+      type: "review_result",
+      passed: true,
+      issues: [],
+      summary: "Verdict: PASS",
+      attempts: 1,
+    }),
   ]);
   assert.deepEqual(events, [
     { seq: 1, ts: "2026-08-09T10:00:00.000Z", type: "user.text", text: "你好" },
@@ -141,6 +148,7 @@ test("v1 事件映射：白名单类型多对一折叠", () => {
     },
     { seq: 10, ts: "2026-08-09T10:00:00.000Z", type: "system.error", message: "模型超时" },
     { seq: 11, ts: "2026-08-09T10:00:00.000Z", type: "system.info", message: "任务完成" },
+    { seq: 12, ts: "2026-08-09T10:00:00.000Z", type: "review.result", passed: true, issues: [], summary: "Verdict: PASS", attempts: 1 },
   ]);
 });
 

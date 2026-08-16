@@ -2485,3 +2485,59 @@
   color: #748091;
   font-size: 11px;
 }
+
+/* 完成审查卡（任务验收链） */
+.web-review-card {
+  display: block;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid #8a6a2f;
+  border-radius: 9px;
+  background: #2a2313;
+}
+
+.web-review-card.passed {
+  border-color: #2f6e4a;
+  background: #14241a;
+}
+
+.web-review-card.failed {
+  border-color: #8a3a3a;
+  background: #261616;
+}
+
+.review-issues {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #d8a0a0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.web-review-card.passed .review-issues {
+  color: #9ad0b2;
+}
+
+/* 会话头部审查徽标 */
+.review-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: #232936;
+  color: #9aa4b5;
+  border: 1px solid #3d4147;
+}
+
+.review-badge.passed {
+  border-color: #2f6e4a;
+  color: #7fd4a0;
+  background: #14241a;
+}
+
+.review-badge.failed {
+  border-color: #8a3a3a;
+  color: #e08a8a;
+  background: #261616;
+}

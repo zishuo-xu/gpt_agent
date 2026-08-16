@@ -31,6 +31,15 @@ export function SessionHeader(props: {
         <div className="title-with-status">
           <h1>{props.selected.title}</h1>
           <StatusTag status={props.selected.status} />
+          {props.selected.review && (
+            <span
+              className={`review-badge ${
+                props.selected.review.passed ? "passed" : "failed"
+              }`}
+            >
+              {props.selected.review.passed ? "已审查" : "审查未通过"}
+            </span>
+          )}
         </div>
         <p>
           会话 #{props.selected.id} ·{" "}

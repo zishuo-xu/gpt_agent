@@ -373,6 +373,15 @@ function mapV1Event(
         status: event.status,
         ...(event.reason ? { reason: event.reason } : {}),
       };
+    case "review_result":
+      return {
+        ...base,
+        type: "review.result",
+        passed: event.passed,
+        issues: event.issues,
+        summary: event.summary,
+        attempts: event.attempts,
+      };
     case "ledger_update":
       return {
         ...base,
