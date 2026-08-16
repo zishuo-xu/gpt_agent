@@ -787,13 +787,43 @@ async function runCli(): Promise<void> {
       // 0 工具调用完成提示：模型未调用任何工具就宣布完成（问答场景无碍，
       // 编码/搭建任务时提醒用户检查产出——Web 端任务清单有同义警告条）
       if (record.event.type === "done") {
-        const toolCalls = target
-          .events()
-          .filter((item) => item.event.type === "tool_call").length;
+        const events = target.events();
+        const toolCalls = events.filter(
+          (item) => item.event.type === "tool_call",
+        ).length;
         if (toolCalls === 0) {
           output.write(
             "\n⚠ Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，结果可能不完整，请检查产出或让 Agent 重新执行。\n",
           );
+        } else {
+          // 交付摘要（一行）：改动文件数 + 最后验证结果（与 Web 端同源，零成本）
+          const files = new Set<string>();
+          let verification: string | undefined;
+          for (const item of events) {
+            const event = item.event;
+            if (
+              event.type === "tool_call" &&
+              (event.call.tool === "Write" ||
+                event.call.tool === "Edit" ||
+                event.call.tool === "MultiEdit")
+            ) {
+              if (event.call.target) files.add(event.call.target);
+            }
+            if (
+              event.type === "tool_result" &&
+              typeof event.summary === "string"
+            ) {
+              verification = event.summary;
+            }
+          }
+          if (files.size > 0 || verification) {
+            const verificationText = verification
+              ? ` · 验证：${verification.slice(0, 48)}${verification.length > 48 ? "…" : ""}`
+              : "";
+            output.write(
+              `\n✓ 完成 · 改动 ${files.size} 个文件${verificationText}\n`,
+            );
+          }
         }
       }
       if (!closed) safePrompt(true);
