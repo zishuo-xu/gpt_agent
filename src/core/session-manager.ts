@@ -300,6 +300,8 @@ export class AgentSessionManager {
           runtimeConfig.context.compactAtEstimatedTokens,
         keepRecentTokens: runtimeConfig.context.keepRecentTokens,
         parallelTools: runtimeConfig.behavior?.parallelTools === true,
+        completionReview:
+          runtimeConfig.behavior?.completionReview ?? true,
         ...(runtimeConfig.behavior?.subagentTimeoutMs === undefined
           ? {}
           : { subagentTimeoutMs: runtimeConfig.behavior.subagentTimeoutMs }),

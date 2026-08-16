@@ -78,6 +78,8 @@ export interface BehaviorConfig {
   sessionRetentionDays?: number;
   /** 每日花费上限（元，0 = 不限制）；超出后定时任务暂停触发并顺延 */
   dailyBudgetCny?: number;
+  /** 完成审查（任务验收链）：有写操作/任务完成后用独立审查核对要求，不通过打回（最多 2 次） */
+  completionReview: boolean;
 }
 
 export interface MyAgentConfig {
@@ -222,6 +224,15 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     hot: true,
   },
   {
+    key: "behavior.completionReview",
+    type: "boolean",
+    title: "完成审查",
+    description:
+      "任务验收链：有写操作或无人值守任务完成后，由独立审查核对任务要求（读文件/跑验证命令），不通过自动打回修复（最多 2 次）。纯问答不触发。",
+    default: true,
+    hot: true,
+  },
+  {
     key: "behavior.maxOutputTokens",
     type: "number",
     title: "单次最大输出 tokens",
@@ -291,6 +302,7 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
     parallelTools: false,
     crossProjectMemory: true,
     enablePlugins: true,
+    completionReview: true,
   },
 };
 export function toPublicConfig(config: MyAgentConfig): PublicMyAgentConfig {
