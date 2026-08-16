@@ -295,6 +295,7 @@ async function runCli(): Promise<void> {
           "/timeline                          列出最近事件（查看分支点 seq）",
           "/label <seq> <名称>                给事件打书签；/labels 查看；/unlabel <seq> 移除",
           "/init                              只读扫描并生成 AGENTS.md 草稿",
+          "/review                            对最近一次完成运行独立审查（任务验收链）",
           "/config [global|project]           查看生效配置摘要或指定作用域配置",
           "/config set <key> <value> [global|project] 修改配置项",
           "/model                             查看角色模型；/model main <provider>/<model> 切换（热生效）",
@@ -619,6 +620,16 @@ async function runCli(): Promise<void> {
           `\n/init 启动失败：${error instanceof Error ? error.message : "未知错误"}\n`,
         );
         safePrompt(true);
+      });
+      safePrompt();
+      return;
+    }
+    if (line === "/review") {
+      // 任务验收链手动触发：对最近一次完成运行独立审查
+      await session.reviewNow().catch((error) => {
+        output.write(
+          `\n/review 失败：${error instanceof Error ? error.message : "未知错误"}\n`,
+        );
       });
       safePrompt();
       return;

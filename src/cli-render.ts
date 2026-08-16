@@ -115,6 +115,16 @@ export function createEventRenderer(options: {
         `\n◆ 无人值守任务 #${event.taskId} 已启动 · ${event.permissionMode} 档\n`,
       );
     }
+    if (event.type === "review_result") {
+      const icon = event.passed ? "✓" : "✗";
+      const issuesText =
+        event.issues.length > 0
+          ? `\n` + event.issues.map((issue) => `    - ${issue}`).join("\n")
+          : "";
+      output(
+        `\n${icon} 完成审查${event.passed ? "通过" : `未通过（第 ${event.attempts} 次）`}${issuesText}\n`,
+      );
+    }
     if (event.type === "ledger_update") {
       // 任务执行账本：每个文件/子任务一行实时增量（状态徽标 + 相对路径）
       const marker =
