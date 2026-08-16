@@ -75,5 +75,12 @@ ${todos}
 Return exactly three sections:
 Verdict: PASS 或 FAIL（全部要求满足且验证通过才 PASS）
 Issues: 不通过时逐条列出问题（含 文件:行号 证据）；通过时写（无）
-Unconfirmed: 未能确认的部分`;
+Unconfirmed: 未能确认的部分
+
+Example output:
+Verdict: FAIL
+Issues:
+- src/App.tsx:12 待办状态未持久化（localStorage 读写缺失）
+- 缺少测试文件 src/lib/todos.test.ts
+Unconfirmed: 无`;
 }

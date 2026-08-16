@@ -274,8 +274,12 @@ export class TaskRunner {
     try {
       signal.addEventListener("abort", onAbort, { once: true });
       await loop.run();
+      // 结论取最后一段"有效"文本：跳过单字符噪音（如模型短收尾输出的"。"）
       const summary = formatSubagentConclusion(
-        texts.at(-1)?.trim() || "",
+        [...texts]
+          .reverse()
+          .find((text) => text.trim().length > 1)
+          ?.trim() ?? "",
       ) || "子代理未返回文本结论。";
       const status = interrupted
         ? "interrupted"
