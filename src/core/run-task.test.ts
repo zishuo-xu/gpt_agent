@@ -192,6 +192,7 @@ test("无人值守预算耗尽后禁止新工具并恢复原权限档", async ()
     title: "预算任务",
     cwd,
     mode: "normal",
+    completionReview: false,
     model: new ConversationAgentModel(client, []),
     stateDir,
     pricing: {
@@ -266,6 +267,7 @@ test("审批超时自动拒绝并让 Agent 继续收尾", async () => {
     title: "审批超时",
     cwd,
     mode: "normal",
+    completionReview: false,
     model: new ConversationAgentModel(client, []),
     stateDir,
     approvalTimeoutMs: 5,
@@ -519,6 +521,7 @@ test("/run 模型重试+fallback 耗尽时 run_finished 报 failed 而非 comple
     title: "模型失败",
     cwd,
     mode: "normal",
+    completionReview: false,
     model: new ConversationAgentModel(client, []),
     stateDir,
   });
@@ -593,6 +596,7 @@ test("任务级 --approve-timeout 覆盖会话级超时，任务结束后恢复"
     title: "任务级超时",
     cwd,
     mode: "normal",
+    completionReview: false,
     model: new ConversationAgentModel(client, []),
     stateDir,
     // 会话级 60s：若任务级覆盖失效，测试会在审批上等 60s 超时
@@ -652,6 +656,7 @@ test("--auto-allow 任务期放行指定工具，任务结束后回落", async (
     title: "任务期白名单",
     cwd,
     mode: "normal",
+    completionReview: false,
     model: new ConversationAgentModel(client, []),
     stateDir,
     approvalTimeoutMs: 100,
@@ -720,6 +725,7 @@ test("硬停止回滚只撤销任务期编辑——任务前交互编辑保留",
     title: "回滚测试",
     cwd,
     mode: "trust",
+    completionReview: false,
     model: new ConversationAgentModel(client, []),
     stateDir,
   });
@@ -780,6 +786,7 @@ test("任务执行账本：/run 中 Write 触发 ledger_update（系统自动记
     title: "账本任务",
     cwd,
     mode: "normal",
+    completionReview: false,
     model: new ConversationAgentModel(client, []),
     stateDir,
   });
@@ -831,6 +838,7 @@ test("账本恢复：进程重启后 restore 重放 ledger_update 事件重建�
     title: "第一段",
     cwd,
     mode: "normal",
+    completionReview: false,
     model: new ConversationAgentModel(client, []),
     stateDir,
   });
@@ -856,6 +864,7 @@ test("账本恢复：进程重启后 restore 重放 ledger_update 事件重建�
     title: "第二段",
     cwd,
     mode: "normal",
+    completionReview: false,
     model: new ConversationAgentModel(new ScriptedClient([]), []),
     stateDir,
     restoredEvents: records as unknown as RecordedEvent[],
@@ -921,6 +930,7 @@ test("任务期间排队的用户消息在任务结束后按复位后的会话�
     title: "排队消息",
     cwd,
     mode: "normal",
+    completionReview: false,
     model: new ConversationAgentModel(client, []),
     stateDir,
   });
