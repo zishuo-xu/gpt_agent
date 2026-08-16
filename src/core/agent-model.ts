@@ -125,6 +125,11 @@ export class ConversationAgentModel implements AgentModel {
   readonly #toolNames: readonly ToolName[] | undefined;
   readonly #maxTokens: number | undefined;
 
+  /** 底层 API 客户端（审查/独立上下文复用；同一 client 可建多个 ConversationAgentModel） */
+  get client(): ModelClient {
+    return this.#client;
+  }
+
   addUserMessage(content: string): void {
     this.#messages.push({ role: "user", content });
   }

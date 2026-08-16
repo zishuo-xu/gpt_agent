@@ -49,6 +49,8 @@ export interface TaskRunnerOptions {
   steerLoops?: Set<AgentLoop>;
   /** 单次运行超时（ms）；超时软打断子代理并返回已收集结果。缺省 15 分钟 */
   timeoutMs?: number;
+  /** 子代理最大轮数（成本兜底）；缺省 40，审查等场景可收紧 */
+  maxTurns?: number;
   /** 文件工具实现（可注入记忆留档钩子等）；缺省新建 */
   files?: AtomicFileTools;
   /** afterToolCall 钩子（P0-4）：透传到子代理循环（子代理收尾协议面） */
@@ -57,6 +59,9 @@ export interface TaskRunnerOptions {
 
 /** 子代理默认超时：15 分钟（无界探索会拖住主任务，参照生产测试 P5 观察） */
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = 15 * 60_000;
+
+/** 子代理默认最大轮数（成本兜底） */
+const DEFAULT_MAX_TURNS = 40;
 
 /** 同时运行的子代理数量上限（设计约定：并发 ≤ 4） */
 const MAX_CONCURRENT_RUNNERS = 4;
@@ -78,6 +83,7 @@ export class TaskRunner {
   readonly #approve: ApprovalHandler | undefined;
   readonly #steerLoops: Set<AgentLoop>;
   readonly #timeoutMs: number;
+  readonly #maxTurns: number;
   readonly #files: AtomicFileTools | undefined;
   readonly #afterToolCall: TaskRunnerOptions["afterToolCall"];
 
@@ -94,6 +100,7 @@ export class TaskRunner {
     this.#recordTrace = options.recordTrace;
     this.#steerLoops = options.steerLoops ?? new Set();
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS;
+    this.#maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
     this.#files = options.files;
     this.#afterToolCall = options.afterToolCall;
   }
@@ -247,7 +254,7 @@ export class TaskRunner {
         : async () => ({ granted: false }),
       modelRole: "explore",
       // 子代理成本兜底：最多 40 轮，防止过度探索耗尽预算
-      maxTurns: 40,
+      maxTurns: this.#maxTurns,
       ...(this.#recordTrace
         ? { recordTrace: this.#recordTrace }
         : {}),
