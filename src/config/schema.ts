@@ -228,8 +228,8 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     type: "boolean",
     title: "完成审查",
     description:
-      "任务验收链：有写操作或无人值守任务完成后，由独立审查核对任务要求（读文件/跑验证命令），不通过自动打回修复（最多 2 次）。纯问答不触发。",
-    default: true,
+      "完成审查（开发验证用）：有写操作或无人值守任务完成后，由独立审查核对任务要求（读文件/跑验证命令），不通过自动打回修复（最多 2 次）。运行时默认关闭（每次审查 = 一次子代理运行的成本与延迟）；开发/验证时开启或使用 /review 手动触发。纯问答不触发。",
+    default: false,
     hot: true,
   },
   {
@@ -302,7 +302,8 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
     parallelTools: false,
     crossProjectMemory: true,
     enablePlugins: true,
-    completionReview: true,
+    // 开发验证用：运行时默认关闭（一次审查 = 一次子代理运行的成本与延迟）
+    completionReview: false,
   },
 };
 export function toPublicConfig(config: MyAgentConfig): PublicMyAgentConfig {

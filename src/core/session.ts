@@ -123,7 +123,7 @@ export class AgentSession {
   /** /run 任务期间模型重试+fallback 全部耗尽（sendInput 捕获后置位；
       修复 run_finished 误报 completed——need_user 会把 status 盖成 done） */
   #taskModelFailed = false;
-  /** 完成审查（任务验收链）：开关（behavior.completionReview；缺省开） */
+  /** 完成审查（开发验证用）：开关（behavior.completionReview；运行时缺省关） */
   readonly #completionReview: boolean;
   /** 本轮完成的审查循环计数（sendInput 开头重置；打回循环累计，上限 2） */
   #reviewAttempts = 0;
@@ -166,7 +166,7 @@ export class AgentSession {
     >;
     /** 文件工具实现（可注入记忆留档钩子等）；缺省新建 */
     files?: AtomicFileTools;
-    /** 完成审查开关（behavior.completionReview；缺省开） */
+    /** 完成审查开关（behavior.completionReview；运行时缺省关，开发验证用） */
     completionReview?: boolean;
   }) {
     this.id = options.id;
@@ -186,7 +186,7 @@ export class AgentSession {
     this.#approvalTimeoutMs = options.approvalTimeoutMs ?? 300_000;
     this.#rememberPermission = options.rememberPermission;
     this.#parallelTools = options.parallelTools ?? false;
-    this.#completionReview = options.completionReview ?? true;
+    this.#completionReview = options.completionReview ?? false;
     this.#approvalWaiter = new PermissionWaiter({
       bus: this.#bus,
       permissions: this.#permissions,

@@ -122,6 +122,7 @@ async function setup(
     mode?: "normal" | "strict" | "trust";
     permissionRules?: PermissionRule[];
     restoredEvents?: AgentSessionEvent[];
+    completionReview?: boolean;
   } = {},
 ): Promise<{
   session: AgentSession;
@@ -142,6 +143,9 @@ async function setup(
     mode: options.mode ?? "normal",
     model,
     stateDir,
+    ...(options.completionReview === undefined
+      ? {}
+      : { completionReview: options.completionReview }),
     ...(options.permissionRules
       ? { permissionRules: options.permissionRules }
       : {}),
@@ -454,7 +458,7 @@ test("完成审查：有写操作的任务在 done 后触发审查，通过则�
     response("Verdict: PASS\nIssues: （无）\nUnconfirmed: 无", {
       usage: { input: 10, output: 5, cached: 0 },
     }),
-  ], { mode: "trust" });
+  ], { mode: "trust", completionReview: true });
   await session.sendInput("创建 a.txt");
   const summary = session.summary();
   assert.equal(summary.status, "done");
@@ -488,7 +492,7 @@ test("完成审查：FAIL 打回主循环，修复后再次审查通过", async 
     response("Verdict: PASS\nIssues: （无）\nUnconfirmed: 无", {
       usage: { input: 10, output: 5, cached: 0 },
     }),
-  ], { mode: "trust" });
+  ], { mode: "trust", completionReview: true });
   await session.sendInput("创建 a.txt");
   const summary = session.summary();
   assert.equal(summary.status, "done");
@@ -510,7 +514,7 @@ test("完成审查：连续 FAIL 超过 2 次放行并标记未通过", async ()
     response("还修。"),
     response("完成。"),
     response("Verdict: FAIL\nIssues:\n- 问题三\nUnconfirmed: 无"),
-  ], { mode: "trust" });
+  ], { mode: "trust", completionReview: true });
   await session.sendInput("创建 a.txt");
   const summary = session.summary();
   assert.equal(summary.status, "done");
@@ -520,8 +524,22 @@ test("完成审查：连续 FAIL 超过 2 次放行并标记未通过", async ()
 test("完成审查：纯问答（无写操作）不触发", async () => {
   const { session, collector } = await setup([
     response("1+1 等于 2。"),
-  ]);
+  ], { completionReview: true });
   await session.sendInput("1+1 等于几？");
   assert.equal(collector.eventsOf("review_result").length, 0);
+  assert.equal(session.summary().review, undefined);
+});
+
+test("完成审查：默认关闭（运行时无审查环节）", async () => {
+  const { session, collector } = await setup([
+    response("写文件。", {
+      toolCalls: [
+        toolCall("write-1", "Write", "a.txt", { file_path: "a.txt", content: "hello" }),
+      ],
+    }),
+    response("完成。"),
+  ], { mode: "trust" });
+  await session.sendInput("创建 a.txt");
+  assert.equal(collector.eventsOf("review_result").length, 0, "默认不触发审查");
   assert.equal(session.summary().review, undefined);
 });
