@@ -377,13 +377,13 @@ test.describe("新功能：定时任务 / 统计面板", () => {
     await expect(page.getByText("会话总数", { exact: false })).toBeVisible();
     // 明细表（表头 + 至少一行）
     await expect(page.locator(".stats-table tbody tr").first()).toBeVisible();
-    // 若存在无人值守会话：点「查看」打开收尾总结模态并关闭（不依赖历史数据）
-    const viewButtons = page.locator("button.stats-summary-button");
+    // 若存在无人值守会话：点「查看」打开收尾总结模态并关闭（不依赖历史数据）。
+    // 注意：表格「轨迹」列按钮也是 .stats-summary-button，必须按文本精确选「查看」
+    const viewButtons = page.getByRole("button", { name: "查看" });
     if ((await viewButtons.count()) > 0) {
       await viewButtons.first().click();
-      const modal = page.locator(".stats-modal");
+      const modal = page.locator('.stats-modal[aria-label="收尾总结"]');
       await expect(modal).toBeVisible();
-      await expect(modal.getByText("收尾总结", { exact: false })).toBeVisible();
       await modal.getByRole("button", { name: "关闭" }).click();
       await expect(modal).toHaveCount(0);
     }
