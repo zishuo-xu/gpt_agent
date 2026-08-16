@@ -26,8 +26,15 @@ export function parseReviewResult(raw: string): {
     }
   }
   if (!/verdict/i.test(raw)) {
+    // 宽松识别：模型未遵循三段式时，按中文/英文通过词判定
+    const trimmed = raw.trim();
+    const hasFailWord = /未通过|失败|不通过|有问题|fail/i.test(trimmed);
+    const hasPassWord = /通过|正确|没问题|ok|pass|完成/i.test(trimmed);
+    if (!hasFailWord && hasPassWord) {
+      return { passed: true, issues: [], summary: trimmed };
+    }
     const clipped =
-      raw.trim().length > 200 ? `${raw.trim().slice(0, 200)}…` : raw.trim();
+      trimmed.length > 200 ? `${trimmed.slice(0, 200)}…` : trimmed;
     return {
       passed: false,
       issues: [`审查未返回结构化结论：${clipped}`],

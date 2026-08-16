@@ -37,3 +37,10 @@ test("buildReviewPrompt：包含任务要求、改动文件与 todo 状态", () 
   assert.match(prompt, /pnpm build 通过/);
   assert.match(prompt, /写核心逻辑/);
 });
+
+test("parseReviewResult：无结构时按中文通过词宽松判定", () => {
+  assert.equal(parseReviewResult("正确").passed, true);
+  assert.equal(parseReviewResult("审查通过").passed, true);
+  assert.equal(parseReviewResult("未通过，还有问题").passed, false);
+  assert.equal(parseReviewResult("审查").passed, false);
+});
