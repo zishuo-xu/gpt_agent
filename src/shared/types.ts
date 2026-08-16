@@ -104,7 +104,8 @@ export interface ConfigFieldSchema {
     | "string"
     | "number"
     | "boolean"
-    | "select";
+    | "select"
+    | "string[]";
   title: string;
   description: string;
   default?: string | number | boolean;

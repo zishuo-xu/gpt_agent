@@ -669,3 +669,22 @@
   background: #24365c;
   color: #e7ebf1;
 }
+
+/* 行列表输入（string[]，如信任项目；schema 驱动生成） */
+.schema-field-textarea {
+  width: 100%;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid #2a3450;
+  border-radius: 6px;
+  background: #141a28;
+  color: #dce3ee;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.schema-field-textarea:focus {
+  outline: none;
+  border-color: #759cff;
+}

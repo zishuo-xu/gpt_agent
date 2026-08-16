@@ -506,6 +506,10 @@ function normalizeConfig(config?: Partial<MyAgentConfig>): MyAgentConfig {
           ? config.behavior.dailyBudgetCny
           : 0,
     },
+    // 信任项目列表：字符串数组归一（旧配置/外部写入容错）
+    trustedProjects: Array.isArray(config.trustedProjects)
+      ? config.trustedProjects.map(String).filter(Boolean)
+      : [],
   };
   for (const field of CONFIG_SCHEMA) {
     if (!isScalarSchemaField(field.type)) continue;
@@ -585,6 +589,11 @@ function mergeSecrets(
           crossProjectMemory: true,
         },
     ),
+    trustedProjects: Array.isArray(incoming.trustedProjects)
+      ? incoming.trustedProjects.map(String).filter(Boolean)
+      : Array.isArray(existing.trustedProjects)
+        ? existing.trustedProjects.map(String).filter(Boolean)
+        : [],
   };
   for (const field of CONFIG_SCHEMA) {
     if (!isScalarSchemaField(field.type)) continue;

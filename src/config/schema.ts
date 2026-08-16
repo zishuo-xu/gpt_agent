@@ -90,6 +90,9 @@ export interface MyAgentConfig {
   server: ServerConfig;
   notify: NotifyConfig;
   behavior: BehaviorConfig;
+  /** 已确认信任的项目目录（/trust 标记，全局作用域管理）。
+      仅作为显式信任声明与启动提示依据，不改变权限档位语义。 */
+  trustedProjects: string[];
   [key: string]: unknown;
 }
 
@@ -107,6 +110,7 @@ export interface PublicMyAgentConfig {
   server: ServerConfig;
   notify: NotifyConfig;
   behavior: BehaviorConfig;
+  trustedProjects: string[];
   [key: string]: unknown;
 }
 
@@ -259,6 +263,14 @@ export const CONFIG_SCHEMA: ConfigFieldSchema[] = [
     default: 0,
     hot: true,
   },
+  {
+    key: "trustedProjects",
+    type: "string[]",
+    title: "信任项目",
+    description:
+      "已确认信任的项目目录列表（CLI 中执行 /trust 标记，每行一个路径）。仅作为显式信任声明：标记后该目录使用 trust 权限档时不再提示；不改变权限档位语义。",
+    hot: true,
+  },
 ];
 
 export const DEFAULT_CONFIG: MyAgentConfig = {
@@ -305,6 +317,7 @@ export const DEFAULT_CONFIG: MyAgentConfig = {
     // 开发验证用：运行时默认关闭（一次审查 = 一次子代理运行的成本与延迟）
     completionReview: false,
   },
+  trustedProjects: [],
 };
 export function toPublicConfig(config: MyAgentConfig): PublicMyAgentConfig {
   const { providers, ...rest } = config;

@@ -99,6 +99,7 @@ test("formatEffectiveConfig：摘要包含权限/规则计数/角色模型/上�
     server: { host: "0.0.0.0", password: "secret", apiToken: "" },
     notify: { webhook: "", desktop: false },
     behavior: { showCacheMissNotices: false, parallelTools: false, crossProjectMemory: true, enablePlugins: true, completionReview: true },
+    trustedProjects: ["/tmp/trusted-proj"],
   };
   const text = formatEffectiveConfig(config);
   assert.match(text, /权限档：normal · 审批超时 60000ms/);

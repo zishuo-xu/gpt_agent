@@ -168,6 +168,18 @@ async function runCli(): Promise<void> {
   configService.onChange((config) => {
     showCacheMissNotices = config.behavior?.showCacheMissNotices === true;
   });
+  // 信任项目引导（两段式）：trust 档 + 未标记目录时提示一次——
+  // 显式信任声明，不改变权限档位语义；/trust 标记或设置页可消除提示
+  const trustedProjects = initialConfig.trustedProjects ?? [];
+  if (
+    initialConfig.permissions?.mode === "trust" &&
+    !trustedProjects.includes(path.resolve(cwd))
+  ) {
+    process.stderr.write(
+      "注意：当前目录未标记为信任项目，而权限档为 trust（写操作与命令将自动执行）。\n" +
+        "确认该目录可信可执行 /trust 标记（写入全局配置，Web 设置页可管理）。\n",
+    );
+  }
   const manager = new AgentSessionManager({
     cwd,
     configService,
@@ -299,6 +311,7 @@ async function runCli(): Promise<void> {
           "/config [global|project]           查看生效配置摘要或指定作用域配置",
           "/config set <key> <value> [global|project] 修改配置项",
           "/model                             查看角色模型；/model main <provider>/<model> 切换（热生效）",
+          "/trust                             将当前目录标记为信任项目（显式声明，trust 档启动不再提示）",
           "/allow [once|session|project|global] 回答并选择记忆范围",
           "/deny [留言]                       拒绝，可附纠正意见",
           "/exit                              退出",
@@ -683,6 +696,32 @@ async function runCli(): Promise<void> {
             );
           }
         }
+      }
+      safePrompt();
+      return;
+    }
+    if (line === "/trust") {
+      try {
+        const config = await configService.read("global");
+        const list = Array.isArray(config.trustedProjects)
+          ? config.trustedProjects
+          : [];
+        const resolved = path.resolve(cwd);
+        if (list.includes(resolved)) {
+          output.write(`当前目录已在信任项目列表：${resolved}\n`);
+        } else {
+          list.push(resolved);
+          await configService.write("global", {
+            ...config,
+            trustedProjects: list,
+          });
+          output.write(`已将当前目录标记为信任项目：${resolved}\n`);
+          output.write("可在 Web 设置页「信任项目」中移除。\n");
+        }
+      } catch (error) {
+        output.write(
+          `${error instanceof Error ? error.message : "标记信任项目失败"}\n`,
+        );
       }
       safePrompt();
       return;

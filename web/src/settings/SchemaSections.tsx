@@ -3,6 +3,8 @@ import { getConfigValue, setConfigValue } from "@shared/config-path.js";
 import type { Config } from "./types";
 
 const SCALAR_TYPES = ["string", "number", "boolean", "select"];
+/** 行编辑器类型：文本域按行输入，保存为数组 */
+const LINE_LIST_TYPES = ["string[]"];
 
 /** 随机 API token：32 字节 Web Crypto → base64url（浏览器安全，无 Node 依赖）。 */
 function randomToken(): string {
@@ -18,6 +20,31 @@ function randomToken(): string {
 
 export function isScalarType(type: string): boolean {
   return SCALAR_TYPES.includes(type);
+}
+
+/** 行列表（string[]）输入：数组按行渲染，编辑后按行拆分保存 */
+function LineListEditor(props: {
+  value: unknown;
+  onChange: (value: string[]) => void;
+}) {
+  const lines = Array.isArray(props.value)
+    ? (props.value as string[])
+    : [];
+  return (
+    <textarea
+      className="schema-field-textarea"
+      rows={Math.max(3, lines.length + 1)}
+      value={lines.join("\n")}
+      placeholder={"每行一个项目路径，例如：\n/Users/me/work/myapp"}
+      onChange={(event) => {
+        const next = event.target.value
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
+        props.onChange(next);
+      }}
+    />
+  );
 }
 
 /**
@@ -100,8 +127,8 @@ export function SchemaDrivenSections(props: {
   onChange: (recipe: (current: Config) => Config) => void;
 }) {
   const { schema, config } = props;
-  const generatedFields = schema.filter((field) =>
-    isScalarType(field.type),
+  const generatedFields = schema.filter(
+    (field) => isScalarType(field.type) || LINE_LIST_TYPES.includes(field.type),
   );
   const compoundFields = schema.filter(
     (field) => !isScalarType(field.type) && !field.renderer,
@@ -187,6 +214,15 @@ export function SchemaDrivenSections(props: {
                         </option>
                       ))}
                     </select>
+                  ) : field.type === "string[]" ? (
+                    <LineListEditor
+                      value={value}
+                      onChange={(next) =>
+                        props.onChange((current) =>
+                          setConfigValue(current, field.key, next),
+                        )
+                      }
+                    />
                   ) : (
                     <div className="schema-field-input-row">
                       <input
