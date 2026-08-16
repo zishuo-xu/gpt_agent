@@ -1,9 +1,23 @@
+import path from "node:path";
 import type { ConfigScope } from "./config/service.js";
 import type { ModelRole, MyAgentConfig } from "./config/schema.js";
 import type {
   ApprovalAnswer,
   PermissionRule,
 } from "./core/types.js";
+
+/** 启动信任提示判定：权限档为 trust 且当前目录未标记为信任项目时提示一次。
+    显式信任声明（/trust 写入 trustedProjects），不改变权限档位语义。 */
+export function shouldWarnUntrustedProject(
+  config: {
+    permissions?: { mode?: string };
+    trustedProjects?: string[];
+  },
+  cwd: string,
+): boolean {
+  if (config.permissions?.mode !== "trust") return false;
+  return !(config.trustedProjects ?? []).includes(path.resolve(cwd));
+}
 
 /** 按当前值的类型把 CLI 原始字符串强转为配置值（数字/布尔/字符串） */
 export function coerceConfigValue(

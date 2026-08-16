@@ -27,6 +27,7 @@ import {
   isApprovalAnswer,
   parseApprovalAnswer,
   parseConfigSetLine,
+  shouldWarnUntrustedProject,
 } from "./cli-utils.js";
 import {
   parseRunCommand,
@@ -170,11 +171,7 @@ async function runCli(): Promise<void> {
   });
   // 信任项目引导（两段式）：trust 档 + 未标记目录时提示一次——
   // 显式信任声明，不改变权限档位语义；/trust 标记或设置页可消除提示
-  const trustedProjects = initialConfig.trustedProjects ?? [];
-  if (
-    initialConfig.permissions?.mode === "trust" &&
-    !trustedProjects.includes(path.resolve(cwd))
-  ) {
+  if (shouldWarnUntrustedProject(initialConfig, cwd)) {
     process.stderr.write(
       "注意：当前目录未标记为信任项目，而权限档为 trust（写操作与命令将自动执行）。\n" +
         "确认该目录可信可执行 /trust 标记（写入全局配置，Web 设置页可管理）。\n",

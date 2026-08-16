@@ -7,6 +7,7 @@ import {
   isApprovalAnswer,
   parseApprovalAnswer,
   parseConfigSetLine,
+  shouldWarnUntrustedProject,
 } from "./cli-utils.js";
 
 test("isApprovalAnswer：y/n/yes/no 与 /allow、/deny 前缀", () => {
@@ -72,6 +73,34 @@ test("coerceConfigValue：数字/布尔强转，字符串原样，类型不符�
   assert.equal(coerceConfigValue("127.0.0.1", "0.0.0.0"), "0.0.0.0");
   assert.throws(() => coerceConfigValue(0, "abc"), /需要数字/);
   assert.throws(() => coerceConfigValue(true, "maybe"), /需要 true\/false/);
+});
+
+test("shouldWarnUntrustedProject：trust 档 + 未标记目录才提示", () => {
+  const trustConfig = (trustedProjects?: string[]) => ({
+    permissions: { mode: "trust" as const },
+    ...(trustedProjects ? { trustedProjects } : {}),
+  });
+  // trust 档 + 未标记 → 提示
+  assert.equal(
+    shouldWarnUntrustedProject(trustConfig(), "/tmp/proj-a"),
+    true,
+  );
+  assert.equal(
+    shouldWarnUntrustedProject(trustConfig([]), "/tmp/proj-a"),
+    true,
+  );
+  // trust 档 + 已标记（含相对路径归一）→ 不提示
+  assert.equal(
+    shouldWarnUntrustedProject(trustConfig(["/tmp/proj-a"]), "/tmp/proj-a"),
+    false,
+  );
+  // 非 trust 档一律不提示（即使未标记）
+  for (const mode of ["normal", "strict"] as const) {
+    assert.equal(
+      shouldWarnUntrustedProject({ permissions: { mode } }, "/tmp/proj-a"),
+      false,
+    );
+  }
 });
 
 test("formatEffectiveConfig：摘要包含权限/规则计数/角色模型/上下文/Web", () => {
