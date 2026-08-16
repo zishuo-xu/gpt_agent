@@ -37,13 +37,6 @@ export type DisplayItem =
       end?: Record<string, any>;
     }
   | {
-      /** 完成审查卡：通过/未通过 + 问题清单 */
-      kind: "review";
-      seq: number;
-      ts: string;
-      event: Record<string, any>;
-    }
-  | {
       /** 任务执行账本卡：同 taskId 的 ledger_update 合并为一张，随事件流实时刷新 */
       kind: "ledger";
       seq: number;
@@ -237,9 +230,6 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
           start: event,
           end: taskEnds.get(String(event.taskId)),
         });
-        break;
-      case "review_result":
-        items.push({ kind: "review", seq, ts, event });
         break;
       case "cost_update":
         items.push({ kind: "cost", seq, event });

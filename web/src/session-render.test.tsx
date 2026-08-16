@@ -570,47 +570,6 @@ describe("SessionRail 0 工具调用完成警告", () => {
   });
 });
 
-describe("审查卡片渲染", () => {
-  it("ItemCard 对 review 项渲染 ReviewCard（未通过 + 问题清单）", async () => {
-    const [{ act }, { createRoot }, { ItemCard }] = await Promise.all([
-      import("react"),
-      import("react-dom/client"),
-      import("./session-render"),
-    ]);
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    mountedRoots.push(root);
-    const item = {
-      kind: "review",
-      seq: 3,
-      ts: "2026-08-09T10:00:00.000Z",
-      event: {
-        passed: false,
-        issues: ["src/App.tsx:12 未持久化"],
-        summary: "Verdict: FAIL",
-        attempts: 1,
-      },
-    };
-    await act(async () => {
-      root.render(
-        <ItemCard
-          item={item as never}
-          showCacheMissNotices={false}
-          locallyResolved={new Set()}
-          feedback=""
-          onFeedback={() => {}}
-          onPermission={async () => {}}
-        />,
-      );
-    });
-    const card = container.querySelector(".web-review-card");
-    assert.ok(card, "应渲染审查卡片");
-    assert.match(card?.textContent ?? "", /完成审查未通过/);
-    assert.match(card?.textContent ?? "", /App\.tsx:12/);
-    await act(async () => root.unmount());
-  });
-});
 
 describe("buildDeliverySummary（交付摘要推导）", () => {
   it("提取 Write/Edit 文件与最后 Bash 验证结果", async () => {

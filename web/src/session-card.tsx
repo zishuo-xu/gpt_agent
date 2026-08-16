@@ -280,32 +280,6 @@ const ledgerStatusMeta: Record<string, { label: string; className: string }> =
 
 /** 任务执行账本卡：同任务的文件/子任务进度清单（随 ledger_update 实时刷新） */
 
-/** 完成审查卡：通过/未通过 + 问题清单 */
-export function ReviewCard(props: {
-  item: Extract<DisplayItem, { kind: "review" }>;
-}) {
-  const { event } = props.item;
-  return (
-    <section
-      className={`web-review-card ${event.passed ? "passed" : "failed"}`}
-    >
-      <div className="approval-heading">
-        <strong>
-          {event.passed
-            ? "✓ 完成审查通过"
-            : `✗ 完成审查未通过（第 ${event.attempts} 次）`}
-        </strong>
-      </div>
-      {event.issues.length > 0 && (
-        <ul className="review-issues">
-          {event.issues.map((issue: string, index: number) => (
-            <li key={index}>{issue}</li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
 
 export function LedgerCard(props: {
   item: Extract<DisplayItem, { kind: "ledger" }>;
