@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -542,4 +542,89 @@ test("完成审查：默认关闭（运行时无审查环节）", async () => {
   await session.sendInput("创建 a.txt");
   assert.equal(collector.eventsOf("review_result").length, 0, "默认不触发审查");
   assert.equal(session.summary().review, undefined);
+});
+
+test("undoLastEdit：模型编辑后撤销恢复原内容；无记录时拒绝", async () => {
+  const { session, cwd } = await setup([
+    response("先读后改。", {
+      toolCalls: [
+        toolCall("read-1", "Read", "sample.txt", {
+          file_path: "sample.txt",
+        }),
+        toolCall("edit-1", "Edit", "sample.txt", {
+          file_path: "sample.txt",
+          old_string: "hello",
+          new_string: "world",
+        }),
+      ],
+    }),
+    response("完成。"),
+  ]);
+  await writeFile(path.join(cwd, "sample.txt"), "hello\n", "utf8");
+  await session.sendInput("把 hello 改成 world");
+  assert.equal(await readFile(path.join(cwd, "sample.txt"), "utf8"), "world\n");
+
+  const undo = await session.undoLastEdit();
+  assert.equal(undo.ok, true);
+  if (undo.ok) assert.equal(undo.path, path.join(cwd, "sample.txt"));
+  assert.equal(await readFile(path.join(cwd, "sample.txt"), "utf8"), "hello\n");
+
+  // 全部撤销后无记录
+  assert.deepEqual(await session.undoLastEdit(), {
+    ok: false,
+    reason: "empty",
+  });
+});
+
+test("undoLastEdit：新文件撤销即删除（trust 档 Write 自动放行）", async () => {
+  const { session, cwd } = await setup(
+    [
+      response("新建文件。", {
+        toolCalls: [
+          toolCall("write-1", "Write", "new.txt", {
+            file_path: "new.txt",
+            content: "新内容",
+          }),
+        ],
+      }),
+      response("完成。"),
+    ],
+    { mode: "trust" },
+  );
+  await session.sendInput("创建 new.txt");
+  const newPath = path.join(cwd, "new.txt");
+  assert.equal(await readFile(newPath, "utf8"), "新内容");
+
+  const undo = await session.undoLastEdit();
+  assert.equal(undo.ok, true);
+  if (undo.ok) assert.equal(undo.path, newPath);
+  await assert.rejects(readFile(newPath, "utf8"), /ENOENT/);
+});
+
+test("undoLastEdit：文件被后续修改时拒绝（不撤销用户手动改动）", async () => {
+  const { session, cwd } = await setup([
+    response("先读后改。", {
+      toolCalls: [
+        toolCall("read-1", "Read", "sample.txt", {
+          file_path: "sample.txt",
+        }),
+        toolCall("edit-1", "Edit", "sample.txt", {
+          file_path: "sample.txt",
+          old_string: "hello",
+          new_string: "world",
+        }),
+      ],
+    }),
+    response("完成。"),
+  ]);
+  await writeFile(path.join(cwd, "sample.txt"), "hello\n", "utf8");
+  await session.sendInput("把 hello 改成 world");
+  // 用户事后手动修改（模拟用户编辑）
+  await writeFile(path.join(cwd, "sample.txt"), "user-edit\n", "utf8");
+
+  assert.deepEqual(await session.undoLastEdit(), {
+    ok: false,
+    reason: "modified",
+  });
+  assert.equal(await readFile(path.join(cwd, "sample.txt"), "utf8"), "user-edit\n");
 });

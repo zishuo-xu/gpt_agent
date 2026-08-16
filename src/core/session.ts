@@ -550,6 +550,19 @@ export class AgentSession {
     this.#bus.emit({ type: "session_info", name: trimmed });
   }
 
+  /** 交互撤销：回滚最近一次 Agent 编辑（EditJournal 记录 Edit/MultiEdit/Write）。
+      安全语义：文件已被后续修改（hash 不匹配，可能含用户手动改动）时拒绝。 */
+  async undoLastEdit(): Promise<
+    | { ok: true; path: string }
+    | { ok: false; reason: "empty" | "modified" }
+  > {
+    const journal = this.#tools.files.journal;
+    const entry = journal.entries().at(-1);
+    if (!entry) return { ok: false, reason: "empty" };
+    const ok = await journal.rollbackLast();
+    return ok ? { ok: true, path: entry.path } : { ok: false, reason: "modified" };
+  }
+
   async sendInput(
     message: string,
     displayText?: string,

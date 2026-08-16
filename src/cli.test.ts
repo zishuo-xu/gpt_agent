@@ -108,3 +108,9 @@ test("CLI 未知命令提示 /help", async () => {
   assert.match(output, /未知命令：\/不存在的命令/);
   assert.match(output, /输入 \/help 查看可用命令/);
 });
+
+test("CLI /undo：无可撤销编辑时给出明确提示", async () => {
+  const { cwd, home } = await makeEnv();
+  const output = await runCli(["/undo", "/exit"], cwd, home);
+  assert.match(output, /没有可撤销的编辑记录/);
+});

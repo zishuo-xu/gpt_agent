@@ -309,6 +309,7 @@ async function runCli(): Promise<void> {
           "/config set <key> <value> [global|project] 修改配置项",
           "/model                             查看角色模型；/model main <provider>/<model> 切换（热生效）",
           "/trust                             将当前目录标记为信任项目（显式声明，trust 档启动不再提示）",
+          "/undo                              撤销最近一次编辑（文件已被后续修改时拒绝）",
           "/allow [once|session|project|global] 回答并选择记忆范围",
           "/deny [留言]                       拒绝，可附纠正意见",
           "/exit                              退出",
@@ -718,6 +719,20 @@ async function runCli(): Promise<void> {
       } catch (error) {
         output.write(
           `${error instanceof Error ? error.message : "标记信任项目失败"}\n`,
+        );
+      }
+      safePrompt();
+      return;
+    }
+    if (line === "/undo") {
+      const result = await session.undoLastEdit();
+      if (result.ok) {
+        output.write(`已撤销最近一次编辑：${result.path}\n`);
+      } else if (result.reason === "empty") {
+        output.write("没有可撤销的编辑记录。\n");
+      } else {
+        output.write(
+          "最近一次编辑的文件已被后续修改（可能包含你的手动改动），已拒绝撤销。\n",
         );
       }
       safePrompt();
