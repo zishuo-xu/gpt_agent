@@ -10,6 +10,7 @@ export const TOOL_NAMES = [
   "MultiEdit",
   "Write",
   "Bash",
+  "BrowserCheck",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];

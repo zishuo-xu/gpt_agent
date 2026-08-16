@@ -93,6 +93,7 @@ test("OpenAI-compatible 响应转换为统一工具调用", async () => {
       "MultiEdit",
       "Write",
       "Bash",
+      "BrowserCheck",
     ],
   );
   assert.equal(requestBody.messages[0].role, "system");

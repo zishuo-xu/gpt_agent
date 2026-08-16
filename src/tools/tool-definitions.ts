@@ -258,4 +258,21 @@ export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "BrowserCheck",
+    description:
+      "Open a URL in a headless browser and return page status: HTTP code, title, console errors, and rendered body text. Use it to verify that a web app actually renders (SPA included) after starting the dev/preview server. Requires the Playwright chromium binary (npx playwright install chromium).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", minLength: 1 },
+        timeout_ms: {
+          type: "number",
+          description: "Optional navigation timeout in milliseconds",
+        },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+  },
 ];

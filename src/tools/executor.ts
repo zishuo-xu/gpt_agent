@@ -12,6 +12,7 @@ import { AtomicFileTools } from "./atomic-file.js";
 import { validateToolArgs } from "./args-validate.js";
 import { collectFiles } from "./collect-files.js";
 import { runBash } from "./bash.js";
+import { runBrowserCheck } from "./browser-check.js";
 import {
   pluginToolRegistry,
   type PluginToolRegistry,
@@ -378,6 +379,16 @@ export class ToolExecutor {
             filePath: args.file_path,
           },
         };
+      }
+      case "BrowserCheck": {
+        const args = effectiveArgs as { url?: string; timeout_ms?: number };
+        if (!args.url) {
+          return {
+            summary: "BrowserCheck 缺少 url 参数",
+            isError: true,
+          };
+        }
+        return await runBrowserCheck(args.url, args.timeout_ms);
       }
       case "Bash": {
         const args = effectiveArgs as BashArgs;
