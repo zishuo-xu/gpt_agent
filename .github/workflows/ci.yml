@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # 版本取自 package.json 的 packageManager（pnpm@10.x），避免与 action 显式 version 冲突
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v4
         with:
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # 版本取自 package.json 的 packageManager（pnpm@10.x），避免与 action 显式 version 冲突
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v4
         with:
