@@ -153,6 +153,35 @@ export function SessionStream(props: {
             />
           </div>
         ))}
+        {(() => {
+          // 审批风暴：挂起审批 ≥2 时提供"全部允许（本次会话）"批量放行
+          const pendingApprovals = props.displayItems.filter(
+            (item): item is Extract<DisplayItem, { kind: "approval" }> =>
+              item.kind === "approval" &&
+              !item.resolvedByEvent &&
+              !props.resolvedPermissions.has(String(item.event.call.id)),
+          );
+          if (pendingApprovals.length < 2 || props.replay) return null;
+          return (
+            <div className="approval-batch-bar">
+              <span>{pendingApprovals.length} 个审批等待处理</span>
+              <button
+                className="approve-button"
+                onClick={() => {
+                  for (const item of pendingApprovals) {
+                    void props.onPermission(
+                      String(item.event.call.id),
+                      true,
+                      "session",
+                    );
+                  }
+                }}
+              >
+                全部允许（本次会话）
+              </button>
+            </div>
+          );
+        })()}
         {props.delivery && !props.replay && (
           <div className="delivery-summary">
             <div className="delivery-head">

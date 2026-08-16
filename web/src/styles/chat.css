@@ -2528,3 +2528,25 @@
 .delivery-more {
   color: #6b788a;
 }
+
+/* 审批风暴：挂起审批批量放行条 */
+.approval-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 4px 4px;
+  padding: 8px 12px;
+  border: 1px solid #8a6a2f;
+  border-radius: 8px;
+  background: #2a2313;
+  font-size: 12px;
+  color: #e8b45a;
+}
+
+.approval-batch-bar .approve-button {
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
