@@ -380,3 +380,20 @@ test("Bash 环境探查（搭建场景）：版本/工具定位命令自动放�
   assert.equal(engine.judge(bash("node -v && pnpm install")), "ask");
   assert.equal(engine.judge(bash("npm view x > /tmp/out.txt")), "ask", "写重定向仍询问");
 });
+
+test("Bash 环境探查：--version 长形态与探查链自动放行", () => {
+  const engine = new PermissionEngine("normal", DEFAULT_PERMISSION_RULES);
+  const bash = (target: string): ToolCall => ({
+    id: target,
+    tool: "Bash",
+    target,
+    args: { command: target },
+  });
+  assert.equal(
+    engine.judge(bash("pwd && ls -la && node --version && pnpm --version")),
+    "allow",
+    "搭建场景完整探查链整条放行",
+  );
+  assert.equal(engine.judge(bash("pnpm --version")), "allow");
+  assert.equal(engine.judge(bash("npm --version")), "allow");
+});
