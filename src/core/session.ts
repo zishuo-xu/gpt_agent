@@ -27,6 +27,7 @@ import {
 } from "./run-task.js";
 import { TaskRunner } from "./task-runner.js";
 import { buildReviewPrompt, parseReviewResult } from "./review-runner.js";
+import { runAcceptanceChecks, type AcceptanceCheckResult } from "./acceptance-runner.js";
 import { BranchCoordinator } from "./session-branch.js";
 import { PermissionWaiter } from "./session-approval.js";
 import {
@@ -129,6 +130,11 @@ export class AgentSession {
   #reviewAttempts = 0;
   /** 手动 /review 请求标记（reviewNow 置位；#shouldReview 消费） */
   #reviewRequested = false;
+  #taskAcceptance?: {
+    status: "passed" | "failed";
+    checks: AcceptanceCheckResult[];
+    review?: { passed: boolean; issues: string[]; summary: string };
+  };
   /** 恢复时检测到的中断任务（run_started 无配对 run_finished；进程崩溃残留） */
   readonly #interruptedTask:
     | {
@@ -566,7 +572,7 @@ export class AgentSession {
   async sendInput(
     message: string,
     displayText?: string,
-    options?: { steer?: boolean; taskMode?: boolean },
+    options?: { steer?: boolean; taskMode?: boolean; checksMode?: boolean },
   ): Promise<void> {
     const text = message.trim();
     if (!text) throw new Error("消息不能为空");
@@ -792,21 +798,64 @@ export class AgentSession {
     }
     let status: "completed" | "interrupted" | "failed" = "completed";
     let reason:
-      | "done"
-      | "deadline"
-      | "budget"
-      | "error"
-      | "interrupted" = "done";
+      | "done" | "deadline" | "budget" | "error" | "interrupted" | "acceptance" | "review" = "done";
+    this.#taskAcceptance = { status: "passed", checks: [] };
     try {
-      await this.sendInput(
-        resumeTaskId
-          ? resumePrompt(taskBox, this.#state.costCny())
-          : taskBox.prompt(),
-        resumeTaskId
-          ? `/resume ${options.description}`
-          : `/run ${options.description}`,
-        { taskMode: true },
-      );
+      const checks = options.checks ?? [];
+      const maxAcceptanceRounds = checks.length > 0 ? 2 : 0;
+      let accepted = false;
+      for (let round = 0; round <= maxAcceptanceRounds && !accepted; round += 1) {
+        await this.sendInput(
+          round === 0
+            ? (resumeTaskId ? resumePrompt(taskBox, this.#state.costCny()) : taskBox.prompt())
+            : "请根据上一轮验收失败证据修复问题，然后重新完成任务。",
+          round === 0
+            ? (resumeTaskId ? `/resume ${options.description}` : `/run ${options.description}`)
+            : `/acceptance-retry ${options.description}`,
+          { taskMode: true, checksMode: checks.length > 0 },
+        );
+        if (this.#taskStopReason || this.#taskModelFailed || this.#state.status === "error") break;
+        if (checks.length === 0) { accepted = true; break; }
+        const remainingMs = options.deadline ? Math.max(1, Date.parse(options.deadline) - Date.now()) : undefined;
+        this.#bus.emit({ type: "acceptance_started", taskId: taskBox.id, attempt: round + 1, checks: [...checks] });
+        const results = await runAcceptanceChecks({
+          cwd: this.#cwd,
+          checks,
+          timeoutMs: options.checkTimeoutMs ?? 300_000,
+          ...(remainingMs === undefined ? {} : { remainingMs }),
+        });
+        results.forEach((result, index) => {
+          this.#bus.emit({
+            type: "acceptance_result",
+            taskId: taskBox.id,
+            attempt: round + 1,
+            command: result.command,
+            index,
+            status: result.status,
+            ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+            durationMs: result.durationMs,
+            ...(result.output ? { output: result.output } : {}),
+          });
+        });
+        this.#taskAcceptance = { status: results.every((result) => result.status === "passed") ? "passed" : "failed", checks: results };
+        accepted = this.#taskAcceptance.status === "passed";
+        if (!accepted && round < maxAcceptanceRounds) {
+          const failures = results.filter((result) => result.status !== "passed");
+          this.#model.addUserMessage(`机器验收未通过（第 ${round + 1} 轮）：\n${failures.map((result) => `${result.command}: ${result.status}\n${result.output}`).join("\n")}\n请修复后重新运行。`);
+        }
+      }
+      if (checks.length > 0 && !accepted) {
+        status = "failed";
+        reason = "acceptance";
+      } else if (checks.length > 0) {
+        const changed = this.#tools.files.journal.entries().length > journalBaseline;
+        if (changed && this.#completionReview) {
+          const review = await this.#runReview(options.description, journalBaseline);
+          this.#taskAcceptance = { ...(this.#taskAcceptance ?? { status: "passed", checks: [] }), review };
+          this.#bus.emit({ type: "review_result", ...review, attempts: this.#reviewAttempts });
+          if (!review.passed) { status = "failed"; reason = "review"; }
+        }
+      }
       if (this.#taskStopReason) {
         status = this.#taskHardStopped
           ? "interrupted"
@@ -954,7 +1003,8 @@ export class AgentSession {
   }
 
   /** 完成审查触发条件：开关开 + 未超上限 + （有写操作 或 任务模式 或 手动标记） */
-  async #shouldReview(options?: { taskMode?: boolean }): Promise<boolean> {
+  async #shouldReview(options?: { taskMode?: boolean; checksMode?: boolean }): Promise<boolean> {
+    if (options?.checksMode === true) return false;
     if (this.#completionReview === false) return false;
     if (this.#reviewAttempts >= 2) return false;
     if (options?.taskMode === true) return true;
@@ -966,13 +1016,13 @@ export class AgentSession {
   }
 
   /** 执行完成审查：独立 TaskRunner（main client + 只读 + 审查 prompt） */
-  async #runReview(taskReq: string): Promise<{
+  async #runReview(taskReq: string, journalBaseline = 0): Promise<{
     passed: boolean;
     issues: string[];
     summary: string;
   }> {
     this.#reviewAttempts += 1;
-    const journal = this.#tools.files.journal.entries();
+    const journal = this.#tools.files.journal.entries().slice(journalBaseline);
     const modifiedFiles = [
       ...new Set(journal.map((entry) => entry.path)),
     ];
