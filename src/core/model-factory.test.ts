@@ -5,7 +5,12 @@ import type {
   ModelRole,
   RoleModelConfig,
 } from "../config/schema.js";
-import { buildRoleClientChain, rolePricing } from "./model-factory.js";
+import {
+  buildPinnedModelClient,
+  buildRoleClientChain,
+  PinnedModelUnavailableError,
+  rolePricing,
+} from "./model-factory.js";
 
 const PRICING = {
   inputPerMillionCny: 1,
@@ -91,4 +96,28 @@ test("rolePricing：按角色提取定价，缺失角色跳过", () => {
     main: PRICING,
     explore: PRICING,
   });
+});
+
+test("buildPinnedModelClient 固定单模型且不可用时明确失败", () => {
+  const client = buildPinnedModelClient(
+    { providerId: "deepseek", model: "deepseek-chat" },
+    { providers: [provider] },
+  );
+  assert.equal(typeof client.complete, "function");
+  assert.throws(
+    () =>
+      buildPinnedModelClient(
+        { providerId: "deepseek", model: "missing" },
+        { providers: [provider] },
+      ),
+    PinnedModelUnavailableError,
+  );
+  assert.throws(
+    () =>
+      buildPinnedModelClient(
+        { providerId: "missing", model: "deepseek-chat" },
+        { providers: [provider] },
+      ),
+    PinnedModelUnavailableError,
+  );
 });

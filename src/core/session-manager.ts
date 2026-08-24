@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdir, unlink } from "node:fs/promises";
+import { readdir, unlink, readFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { atomicWriteFile, readJsonl } from "../utils/fs.js";
@@ -42,8 +42,24 @@ import type {
   RecordedEvent,
 } from "./types.js";
 import { acquireInstanceLock } from "./instance-lock.js";
-import { buildRoleClientChain, rolePricing } from "./model-factory.js";
+import {
+  buildRoleClientChain,
+  buildPinnedModelClient,
+  rolePricing,
+} from "./model-factory.js";
 import { generateSessionTitle, titleFrom } from "./session-title.js";
+import { ExperimentWorkspaceManager } from "./experiment-workspace.js";
+import {
+  experimentSessionSummary,
+  isExperimentForkState,
+  type ExperimentForkState,
+  type ExperimentSessionMeta,
+  type ExperimentSessionSummary,
+} from "./experiment.js";
+import { conversationFromAt } from "./branch.js";
+import { computeExperimentDiff } from "./experiment-diff.js";
+import { parseRunCommand } from "./run-task.js";
+import { extractRunSummary } from "./run-summary.js";
 
 export { buildRoleClientChain } from "./model-factory.js";
 
@@ -56,9 +72,11 @@ export interface AgentSessionManagerOptions {
   skipLock?: boolean;
   modelFactory?: (
     messages: ConversationMessage[],
+    options?: { cwd?: string; pinnedModel?: { providerId: string; model: string }; systemPromptOverlay?: string },
   ) => Promise<ConversationAgentModel> | ConversationAgentModel;
   /** 文件工具实现（可注入记忆留档钩子等）；缺省每个会话新建 */
   files?: AtomicFileTools;
+  experimentWorkspaceManager?: ExperimentWorkspaceManager;
 }
 
 export class AgentSessionManager {
@@ -82,6 +100,7 @@ export class AgentSessionManager {
   #pluginReport: PluginLoadReport = { loaded: [], errors: [] };
   /** 已连接的 MCP server 客户端（关闭/退出时统一清理） */
   readonly #mcpClients = new Map<string, McpClient>();
+  readonly #workspace: ExperimentWorkspaceManager;
 
   constructor(options: AgentSessionManagerOptions) {
     this.#cwd = options.cwd;
@@ -102,6 +121,10 @@ export class AgentSessionManager {
       this.#projectDir,
       "sessions",
     );
+    this.#workspace = options.experimentWorkspaceManager ??
+      new ExperimentWorkspaceManager({
+        experimentsRoot: path.join(this.#projectDir, "experiments"),
+      });
     this.#configService.onChange((config) => {
       for (const session of this.#sessions.values()) {
         session.applyConfigChange(config);
@@ -206,7 +229,176 @@ export class AgentSessionManager {
         () => undefined,
       );
     }
+    await this.#deleteExperimentSidecar(id);
     return true;
+  }
+
+  async listExperimentForks(parentSessionId: string): Promise<ExperimentSessionSummary[]> {
+    const entries = await readdir(this.#sessionsDir).catch(() => [] as string[]);
+    const result: ExperimentSessionSummary[] = [];
+    for (const entry of entries.filter((name) => name.endsWith(".experiment.json"))) {
+      const id = entry.slice(0, -".experiment.json".length);
+      const state = await this.#readExperimentState(id);
+      if (state?.meta.parentSessionId === parentSessionId) result.push(experimentSessionSummary(id, state.meta));
+    }
+    return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async experimentForkInfo(id: string): Promise<{
+    experiment: ExperimentSessionSummary;
+    workspace: { path: string; head: string; warnings: string[] };
+  } | undefined> {
+    const state = await this.#readExperimentState(id);
+    if (!state) return undefined;
+    return {
+      experiment: experimentSessionSummary(id, state.meta),
+      workspace: {
+        path: state.meta.workspaceSnapshot.cwd,
+        head: state.meta.workspaceSnapshot.head,
+        warnings: [...state.meta.workspaceSnapshot.warnings],
+      },
+    };
+  }
+
+  async createExperimentFork(options: {
+    parentSessionId: string;
+    turnId: string;
+    systemPromptOverlay?: string;
+    model?: { providerId: string; model: string };
+    continuation: string;
+  }): Promise<AgentSession> {
+    const continuation = options.continuation.trim();
+    if (!continuation) throw new Error("继续指令不能为空");
+    const parent = this.#sessions.get(options.parentSessionId);
+    if (!parent) throw new Error("父会话不存在");
+    if (parent.isProcessing()) throw new Error("父会话运行中，不能创建实验 Fork");
+    await this.#acquireLock();
+    await parent.flush();
+    const trace = (await parent.traces()).find((item) => item.turnId === options.turnId);
+    if (!trace || trace.version !== 2 || trace.modelRole !== "main" || trace.eventSeqEnd === undefined || trace.eventSeqStart === undefined || trace.eventSeqEnd <= trace.eventSeqStart) {
+      throw new Error("只能从已完成的 v2 main Trace 创建 Fork");
+    }
+    const config = await this.#configService.readEffective();
+    const pinned = options.model ??
+      (trace.providerId && trace.model
+        ? { providerId: trace.providerId, model: trace.model }
+        : {
+            providerId: config.models.main.providerId,
+            model: config.models.main.model,
+          });
+    if (!pinned.providerId.trim() || !pinned.model.trim()) {
+      throw new Error("实验模型配置无效");
+    }
+    const id = randomUUID().slice(0, 8);
+    const snapshot = await this.#workspace.createSnapshot(id, this.#cwd);
+    const meta: ExperimentSessionMeta = {
+      version: 1,
+      parentSessionId: parent.id,
+      parentTurnId: options.turnId,
+      parentEventSeq: trace.eventSeqEnd,
+      projectCwd: this.#cwd,
+      workspaceSnapshot: snapshot,
+      pinnedModel: pinned,
+      ...(options.systemPromptOverlay?.trim() ? { systemPromptOverlay: options.systemPromptOverlay.trim() } : {}),
+      status: "creating",
+      createdAt: new Date().toISOString(),
+    };
+    const state: ExperimentForkState = { meta, conversation: conversationFromAt(parent.events(), trace.eventSeqEnd) };
+    try {
+      await this.#writeExperimentState(id, state);
+      const model = await this.#createModel(state.conversation, config.behavior?.crossProjectMemory !== false, config.behavior?.maxOutputTokens, {
+        cwd: snapshot.cwd,
+        pinnedModel: pinned,
+        ...(meta.systemPromptOverlay ? { systemPromptOverlay: meta.systemPromptOverlay } : {}),
+      });
+      const summary = experimentSessionSummary(id, { ...meta, status: "ready" });
+      const session = await this.#createExperimentSession(id, summary, model, snapshot.cwd, config);
+      session.recordExperimentCreated({ parentSessionId: parent.id, parentTurnId: options.turnId, parentEventSeq: trace.eventSeqEnd, providerId: pinned.providerId, model: pinned.model, ...(meta.systemPromptOverlay ? { systemPromptOverlay: meta.systemPromptOverlay } : {}) });
+      state.meta.status = "ready";
+      await this.#writeExperimentState(id, state);
+      this.#register(session);
+      if (continuation.startsWith("/run")) {
+        session.startRunTask(parseRunCommand(continuation));
+      } else {
+        void session.sendInput(continuation).catch((error) => {
+          if (error instanceof Error) {
+            console.error(`[session-manager] 实验 Fork 启动失败：${error.message}`);
+          }
+        });
+      }
+      // sendInput/runTask 在第一次 await 前同步写入用户指令和来源事件；
+      // 这里确保 API 返回前 journal 已持久化，崩溃后可以恢复。
+      await session.flush();
+      return session;
+    } catch (error) {
+      this.#sessions.delete(id);
+      await this.#workspace.removeSnapshot(snapshot).catch(() => undefined);
+      await unlink(path.join(this.#sessionsDir, `${id}.experiment.json`)).catch(
+        () => undefined,
+      );
+      for (const suffix of [".jsonl", ".trace.jsonl"]) {
+        await unlink(path.join(this.#sessionsDir, `${id}${suffix}`)).catch(
+          () => undefined,
+        );
+      }
+      throw error;
+    }
+  }
+
+  async experimentDiff(childId: string): Promise<{
+    parentSessionId: string;
+    childSessionId: string;
+    parentTurnId: string;
+    diff: ReturnType<typeof computeExperimentDiff>;
+  }> {
+    const childState = await this.#readExperimentState(childId);
+    if (!childState) throw new Error("实验会话不存在");
+    const parent = this.#sessions.get(childState.meta.parentSessionId);
+    const child = this.#sessions.get(childId);
+    if (!parent || !child) throw new Error("实验会话尚未加载");
+    const selected = (await parent.traces()).find((trace) => trace.turnId === childState.meta.parentTurnId);
+    const parentTraces = (await parent.traces()).filter((trace) => selected ? trace.turn > selected.turn : true);
+    const childTraces = await child.traces();
+    const makeMeta = (model: { providerId: string; model: string }): ExperimentSessionMeta => ({ ...childState.meta, parentSessionId: "", parentTurnId: "", parentEventSeq: 0, pinnedModel: model });
+    const parentSummary = parent.summary();
+    const childSummary = child.summary();
+    const diff = computeExperimentDiff(
+      {
+        meta: makeMeta(
+          selected?.providerId && selected.model
+            ? { providerId: selected.providerId, model: selected.model }
+            : childState.meta.pinnedModel,
+        ),
+        traces: parentTraces,
+        summary: {
+          status: parentSummary.status,
+          totalCostCny: costAfter(
+            parent.events(),
+            childState.meta.parentEventSeq,
+          ),
+          totalInputTokens: parentSummary.totalInputTokens,
+          totalOutputTokens: parentSummary.totalOutputTokens,
+          ...runEvidence(parent.events()),
+        },
+      },
+      {
+        meta: childState.meta,
+        traces: childTraces,
+        summary: {
+          status: childSummary.status,
+          totalCostCny: costAfter(child.events(), 0),
+          totalInputTokens: childSummary.totalInputTokens,
+          totalOutputTokens: childSummary.totalOutputTokens,
+          ...runEvidence(child.events()),
+        },
+      },
+    );
+    return {
+      parentSessionId: childState.meta.parentSessionId,
+      childSessionId: childId,
+      parentTurnId: childState.meta.parentTurnId,
+      diff,
+    };
   }
 
   /**
@@ -249,14 +441,24 @@ export class AgentSessionManager {
     const runtimeConfig = await this.#configService.readEffective();
 
     for (const entry of entries) {
+      const id = entry.slice(0, -".jsonl".length);
       const records = await readRecordedEvents(
         path.join(this.#sessionsDir, entry),
       );
+      const experimentState = await this.#readExperimentState(id);
+      if (experimentState) {
+        await this.#restoreExperimentSession(
+          id,
+          experimentState,
+          records,
+          runtimeConfig,
+        );
+        continue;
+      }
       const firstUser = records.find(
         (record) => record.event.type === "user",
       );
       if (!firstUser || firstUser.event.type !== "user") continue;
-      const id = entry.slice(0, -".jsonl".length);
       const compactModelClient =
         await this.#createRoleClient("cheap");
       const exploreModelClient =
@@ -438,26 +640,159 @@ export class AgentSessionManager {
     messages: ConversationMessage[],
     crossProjectMemory = true,
     maxOutputTokens?: number,
+    experiment?: { cwd: string; pinnedModel: { providerId: string; model: string }; systemPromptOverlay?: string },
   ): Promise<ConversationAgentModel> {
     if (this.#modelFactory) {
-      return await this.#modelFactory(messages);
+      return await this.#modelFactory(messages, experiment);
     }
     // 插件注册表在首个模型就绪前填充一次（进程级；会话内工具集保持固定，
     // 新增插件需重启 server 生效）
     await this.#ensurePlugins();
-    const client = await this.#createRoleClient("main");
+    const client = experiment
+      ? buildPinnedModelClient(experiment.pinnedModel, await this.#configService.readEffective())
+      : await this.#createRoleClient("main");
     if (!client) throw new Error("main 角色模型不可用");
     return new ConversationAgentModel(
       client,
       messages,
       new ContextManager({
-        cwd: this.#cwd,
+        cwd: experiment?.cwd ?? this.#cwd,
         homeDir: this.#homeDir,
         stateDir: this.#stateDir,
         crossProjectMemory,
       }),
-      maxOutputTokens === undefined ? {} : { maxTokens: maxOutputTokens },
+      {
+        ...(maxOutputTokens === undefined ? {} : { maxTokens: maxOutputTokens }),
+        ...(experiment?.systemPromptOverlay ? { systemPromptOverlay: experiment.systemPromptOverlay } : {}),
+      },
     );
+  }
+
+  async #createExperimentSession(
+    id: string,
+    experiment: ExperimentSessionSummary,
+    model: ConversationAgentModel,
+    cwd: string,
+    runtimeConfig: Awaited<ReturnType<ConfigService["readEffective"]>>,
+    runtimeUnavailableReason?: string,
+    restoredEvents?: RecordedEvent[],
+  ): Promise<AgentSession> {
+    return new AgentSession({
+      id,
+      title:
+        sessionInfoTitle(restoredEvents ?? []) ??
+        `实验 Fork · ${experiment.parentTurnId}`,
+      cwd,
+      storageDir: this.#sessionsDir,
+      stateDir: this.#stateDir,
+      mode: runtimeConfig.permissions.mode,
+      model,
+      modelPinned: true,
+      experiment,
+      ...(runtimeUnavailableReason ? { runtimeUnavailableReason } : {}),
+      ...(restoredEvents ? { restoredEvents } : {}),
+      compactModelClient: model.client,
+      exploreModelClient: model.client,
+      permissionRules: [...DEFAULT_PERMISSION_RULES, ...runtimeConfig.permissions.rules],
+      approvalTimeoutMs: runtimeConfig.permissions.approvalTimeoutMs,
+      rememberPermission: async (scope, rule) => this.#configService.addPermissionRule(scope, rule),
+      compactAtEstimatedTokens: runtimeConfig.context.compactAtEstimatedTokens,
+      keepRecentTokens: runtimeConfig.context.keepRecentTokens,
+      parallelTools: runtimeConfig.behavior?.parallelTools === true,
+      completionReview: runtimeConfig.behavior?.completionReview === true,
+      pricing: experimentPricing(runtimeConfig.models, experiment.pinnedModel),
+    });
+  }
+
+  async #restoreExperimentSession(
+    id: string,
+    state: ExperimentForkState,
+    records: RecordedEvent[],
+    runtimeConfig: Awaited<ReturnType<ConfigService["readEffective"]>>,
+  ): Promise<void> {
+    const workspaceExists = await stat(state.meta.workspaceSnapshot.cwd)
+      .then((value) => value.isDirectory())
+      .catch(() => false);
+    let unavailableReason = workspaceExists
+      ? undefined
+      : "实验工作区已缺失，只能查看 Trace，不能继续执行";
+    if (!workspaceExists) state.meta.status = "workspace_missing";
+
+    const childConversation = conversationFrom(
+      records,
+      branchesFromEvents(records),
+      currentBranchIdFrom(records),
+    );
+    // 一旦子会话已经压缩，其摘要已包含继承的父历史；再次拼接会重复上下文。
+    const initialConversation = records.some(
+      (record) => record.event.type === "context_compacted",
+    )
+      ? childConversation
+      : [...state.conversation, ...childConversation];
+
+    let model: ConversationAgentModel;
+    if (workspaceExists) {
+      try {
+        model = await this.#createModel(
+          initialConversation,
+          runtimeConfig.behavior?.crossProjectMemory !== false,
+          runtimeConfig.behavior?.maxOutputTokens,
+          {
+            cwd: state.meta.workspaceSnapshot.cwd,
+            pinnedModel: state.meta.pinnedModel,
+            ...(state.meta.systemPromptOverlay
+              ? { systemPromptOverlay: state.meta.systemPromptOverlay }
+              : {}),
+          },
+        );
+        state.meta.status = "ready";
+      } catch (error) {
+        unavailableReason =
+          error instanceof Error ? error.message : "实验模型不可用";
+        state.meta.status = "model_unavailable";
+        model = unavailableExperimentModel(
+          unavailableReason,
+          initialConversation,
+        );
+      }
+    } else {
+      model = unavailableExperimentModel(
+        unavailableReason ?? "实验工作区不可用",
+        initialConversation,
+      );
+    }
+
+    await this.#writeExperimentState(id, state);
+    const session = await this.#createExperimentSession(
+      id,
+      experimentSessionSummary(id, state.meta),
+      model,
+      state.meta.workspaceSnapshot.cwd,
+      runtimeConfig,
+      unavailableReason,
+      records,
+    );
+    this.#register(session);
+  }
+
+  async #writeExperimentState(id: string, state: ExperimentForkState): Promise<void> {
+    await atomicWriteFile(path.join(this.#sessionsDir, `${id}.experiment.json`), `${JSON.stringify(state, null, 2)}\n`);
+  }
+
+  async #readExperimentState(id: string): Promise<ExperimentForkState | undefined> {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(path.join(this.#sessionsDir, `${id}.experiment.json`), "utf8"));
+      return isExperimentForkState(parsed) ? parsed : undefined;
+    } catch { return undefined; }
+  }
+
+  async #deleteExperimentSidecar(id: string): Promise<void> {
+    const state = await this.#readExperimentState(id);
+    try {
+      if (state) await this.#workspace.removeSnapshot(state.meta.workspaceSnapshot);
+    } finally {
+      await unlink(path.join(this.#sessionsDir, `${id}.experiment.json`)).catch(() => undefined);
+    }
   }
 
   async #createRoleClient(
@@ -604,4 +939,63 @@ function sessionInfoTitle(
     if (event?.type === "session_info") return event.name;
   }
   return undefined;
+}
+
+function unavailableExperimentModel(
+  reason: string,
+  conversation: ConversationMessage[],
+): ConversationAgentModel {
+  return new ConversationAgentModel(
+    {
+      async complete() {
+        throw new Error(reason);
+      },
+    },
+    conversation,
+  );
+}
+
+function runEvidence(records: RecordedEvent[]): {
+  acceptance?: NonNullable<
+    NonNullable<ReturnType<typeof extractRunSummary>>["acceptance"]
+  >;
+  review?: NonNullable<
+    NonNullable<
+      NonNullable<ReturnType<typeof extractRunSummary>>["acceptance"]
+    >["review"]
+  >;
+} {
+  const run = extractRunSummary(records);
+  const acceptance = run?.acceptance;
+  return {
+    ...(acceptance ? { acceptance } : {}),
+    ...(acceptance?.review ? { review: acceptance.review } : {}),
+  };
+}
+
+function experimentPricing(
+  models: Awaited<ReturnType<ConfigService["readEffective"]>>["models"],
+  pinned: { providerId: string; model: string },
+) {
+  const candidates = Object.values(models).flatMap((selection) => [
+    selection,
+    ...(selection.fallbacks ?? []),
+  ]);
+  const pricing = candidates.find(
+    (candidate) =>
+      candidate.providerId === pinned.providerId &&
+      candidate.model === pinned.model,
+  )?.pricing;
+  return pricing
+    ? { main: pricing, cheap: pricing, explore: pricing }
+    : {};
+}
+
+function costAfter(records: RecordedEvent[], eventSeq: number): number {
+  return records.reduce((total, record) => {
+    if (record.seq <= eventSeq || record.event.type !== "cost_update") {
+      return total;
+    }
+    return total + (record.event.costCny ?? 0);
+  }, 0);
 }

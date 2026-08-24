@@ -120,6 +120,25 @@ export function conversationFrom(
   return conversationFromRaw(filtered);
 }
 
+/**
+ * Rebuild the conversation as it existed at an event sequence cutoff.
+ *
+ * It is important that the branch tree is also reconstructed from the cutoff
+ * view: using the current tree would accidentally apply a branch switch which
+ * happened after the turn being inspected.  This is used by experiment forks
+ * and deliberately keeps the existing compaction/orphan handling in
+ * conversationFromRaw.
+ */
+export function conversationFromAt(
+  records: readonly BranchEventLike[],
+  eventSeq: number,
+): ConversationMessage[] {
+  const cutoff = records.filter((record) => record.seq <= eventSeq);
+  if (cutoff.length === 0) return [];
+  const branches = branchesFromEvents(cutoff);
+  return conversationFrom(cutoff, branches, currentBranchIdFrom(cutoff));
+}
+
 /** 事件列表 → 模型消息（供分支摘要等场景直接复用；含压缩摘要与分支摘要处理） */
 export function conversationFromRaw(
   records: readonly BranchEventLike[],

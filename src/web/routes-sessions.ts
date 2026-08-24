@@ -335,6 +335,105 @@ export function registerSessionRoutes(
     return context.json({ events: session.events() });
   });
 
+  app.get("/api/sessions/:id/forks", async (context) => {
+    const target = await resolveProject(context);
+    const manager = target.sessionManager;
+    if (!manager) return context.json({ error: "会话服务未启用" }, 503);
+    if (!manager.get(context.req.param("id"))) {
+      return context.json({ error: "父会话不存在" }, 404);
+    }
+    return context.json({
+      forks: await manager.listExperimentForks(context.req.param("id")),
+    });
+  });
+
+  app.post("/api/sessions/:id/forks", async (context) => {
+    const target = await resolveProject(context);
+    const manager = target.sessionManager;
+    if (!manager) return context.json({ error: "会话服务未启用" }, 503);
+    const parentSessionId = context.req.param("id");
+    if (!manager.get(parentSessionId)) {
+      return context.json({ error: "父会话不存在" }, 404);
+    }
+    try {
+      const body = (await context.req.json()) as {
+        turnId?: unknown;
+        providerId?: unknown;
+        model?: unknown;
+        systemPromptOverlay?: unknown;
+        continuation?: unknown;
+      };
+      if (
+        typeof body.turnId !== "string" ||
+        !body.turnId.trim() ||
+        typeof body.continuation !== "string" ||
+        !body.continuation.trim()
+      ) {
+        return context.json(
+          { error: "turnId 与 continuation 不能为空" },
+          400,
+        );
+      }
+      const hasProvider = typeof body.providerId === "string" && body.providerId.trim();
+      const hasModel = typeof body.model === "string" && body.model.trim();
+      if (Boolean(hasProvider) !== Boolean(hasModel)) {
+        return context.json(
+          { error: "providerId 与 model 必须同时提供" },
+          400,
+        );
+      }
+      const session = await manager.createExperimentFork({
+        parentSessionId,
+        turnId: body.turnId.trim(),
+        continuation: body.continuation.trim(),
+        ...(hasProvider && hasModel
+          ? {
+              model: {
+                providerId: String(body.providerId).trim(),
+                model: String(body.model).trim(),
+              },
+            }
+          : {}),
+        ...(typeof body.systemPromptOverlay === "string" &&
+        body.systemPromptOverlay.trim()
+          ? { systemPromptOverlay: body.systemPromptOverlay.trim() }
+          : {}),
+      });
+      const info = await manager.experimentForkInfo(session.id);
+      return context.json(
+        {
+          session: session.summary(),
+          ...(info ? { experiment: info.experiment, workspace: info.workspace } : {}),
+        },
+        201,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "创建实验 Fork 失败";
+      return context.json(
+        { error: message },
+        message.includes("运行中") ? 409 : 400,
+      );
+    }
+  });
+
+  app.get("/api/sessions/:childId/diff", async (context) => {
+    const target = await resolveProject(context);
+    const manager = target.sessionManager;
+    if (!manager) return context.json({ error: "会话服务未启用" }, 503);
+    try {
+      return context.json({
+        comparison: await manager.experimentDiff(
+          context.req.param("childId"),
+        ),
+      });
+    } catch (error) {
+      return context.json(
+        { error: error instanceof Error ? error.message : "对比失败" },
+        404,
+      );
+    }
+  });
+
   // Flight Recorder: list lightweight metadata by default; details are loaded
   // separately so the session view does not transfer full prompts/tool output.
   app.get("/api/sessions/:id/traces", async (context) => {

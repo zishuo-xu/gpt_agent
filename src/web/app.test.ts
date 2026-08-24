@@ -506,6 +506,111 @@ test("Flight Recorder Trace API 默认脱敏并限制旧/非主 Turn Fork", asyn
   assert.equal(missing.status, 404);
 });
 
+test("Flight Recorder Fork API 创建、列出并返回父子 Run 对比", async () => {
+  const { service } = await fixture();
+  const childSummary = {
+    id: "child-01",
+    title: "实验 Fork",
+    status: "running",
+    createdAt: "2026-08-25T00:00:00.000Z",
+    updatedAt: "2026-08-25T00:00:00.000Z",
+    permissionMode: "normal",
+    totalCostCny: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCachedTokens: 0,
+  };
+  let createInput: unknown;
+  const parent = {};
+  const child = { summary: () => childSummary };
+  const fakeManager = {
+    get: (id: string) =>
+      id === "parent-01" ? parent : id === "child-01" ? child : undefined,
+    listExperimentForks: async () => [
+      {
+        id: "child-01",
+        parentSessionId: "parent-01",
+        parentTurnId: "turn-01",
+        pinnedModel: { providerId: "provider-a", model: "model-b" },
+        status: "ready",
+        createdAt: "2026-08-25T00:00:00.000Z",
+        workspacePath: "/tmp/experiment",
+      },
+    ],
+    createExperimentFork: async (input: unknown) => {
+      createInput = input;
+      return child;
+    },
+    experimentForkInfo: async () => ({
+      experiment: {
+        id: "child-01",
+        parentSessionId: "parent-01",
+        parentTurnId: "turn-01",
+        pinnedModel: { providerId: "provider-a", model: "model-b" },
+        status: "ready",
+        createdAt: "2026-08-25T00:00:00.000Z",
+        workspacePath: "/tmp/experiment",
+      },
+      workspace: {
+        path: "/tmp/experiment",
+        head: "abc123",
+        warnings: ["依赖目录未复制"],
+      },
+    }),
+    experimentDiff: async () => ({
+      parentSessionId: "parent-01",
+      childSessionId: "child-01",
+      parentTurnId: "turn-01",
+      diff: {
+        tools: { firstDivergence: { index: 0 } },
+      },
+    }),
+  } as unknown as WebSessionManager;
+  const app = createWebApp(service, fakeManager);
+
+  const listResponse = await app.request("/api/sessions/parent-01/forks");
+  assert.equal(listResponse.status, 200);
+  assert.equal((await listResponse.json()).forks[0].id, "child-01");
+
+  const createResponse = await app.request(
+    "/api/sessions/parent-01/forks",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        turnId: "turn-01",
+        providerId: "provider-a",
+        model: "model-b",
+        systemPromptOverlay: "换一种策略",
+        continuation: "/run 验证替代方案 --check \"pnpm test\"",
+      }),
+    },
+  );
+  assert.equal(createResponse.status, 201);
+  const created = await createResponse.json();
+  assert.equal(created.session.id, "child-01");
+  assert.equal(created.workspace.warnings[0], "依赖目录未复制");
+  assert.deepEqual(createInput, {
+    parentSessionId: "parent-01",
+    turnId: "turn-01",
+    continuation: "/run 验证替代方案 --check \"pnpm test\"",
+    model: { providerId: "provider-a", model: "model-b" },
+    systemPromptOverlay: "换一种策略",
+  });
+
+  const diffResponse = await app.request("/api/sessions/child-01/diff");
+  assert.equal(diffResponse.status, 200);
+  const diff = await diffResponse.json();
+  assert.equal(diff.comparison.diff.tools.firstDivergence.index, 0);
+
+  const invalid = await app.request("/api/sessions/parent-01/forks", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ turnId: "turn-01", providerId: "only-one" }),
+  });
+  assert.equal(invalid.status, 400);
+});
+
 test("认证中间件经 mountBeforeRoutes 在业务路由前生效", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "myagent-api-"));
   const service = new ConfigService({

@@ -40,6 +40,7 @@ import {
   resumePrompt,
 } from "./session-restore.js";
 import { TaskLedger, normalizeLedgerPath } from "./task-ledger.js";
+import type { ExperimentSessionSummary } from "./experiment.js";
 import type {
   AgentEvent,
   ApprovalAnswer,
@@ -84,6 +85,9 @@ export class AgentSession {
   readonly #taskRunner: TaskRunner | undefined;
   readonly #store: SessionStore;
   readonly #traceStore: TraceStore;
+  readonly #modelPinned: boolean;
+  readonly #experiment: ExperimentSessionSummary | undefined;
+  readonly #runtimeUnavailableReason: string | undefined;
   readonly #events: AgentSessionEvent[] = [];
   readonly #queuedInputs: QueuedInput[] = [];
   /** 事件 seq 独立计数器：从恢复时的最后合法记录续，与磁盘对齐
@@ -153,6 +157,8 @@ export class AgentSession {
     mode: PermissionMode;
     model: ConversationAgentModel;
     stateDir?: string;
+    /** 运行 cwd 与会话持久化目录解耦；实验子会话仍归父项目管理。 */
+    storageDir?: string;
     restoredEvents?: RecordedEvent[];
     permissionRules?: PermissionRule[];
     approvalTimeoutMs?: number;
@@ -174,6 +180,9 @@ export class AgentSession {
     files?: AtomicFileTools;
     /** 完成审查开关（behavior.completionReview；运行时缺省关，开发验证用） */
     completionReview?: boolean;
+    modelPinned?: boolean;
+    experiment?: ExperimentSessionSummary;
+    runtimeUnavailableReason?: string;
   }) {
     this.id = options.id;
     this.#cwd = options.cwd;
@@ -183,6 +192,9 @@ export class AgentSession {
     this.#updatedAt =
       options.restoredEvents?.at(-1)?.ts ?? this.createdAt;
     this.#model = options.model;
+    this.#modelPinned = options.modelPinned === true;
+    this.#experiment = options.experiment;
+    this.#runtimeUnavailableReason = options.runtimeUnavailableReason;
     this.#pricing = options.pricing;
     this.#permissions = new PermissionEngine(
       options.mode,
@@ -219,9 +231,8 @@ export class AgentSession {
         : {}),
     });
     const projectKey = Buffer.from(options.cwd).toString("base64url");
-    const stateRoot =
-      options.stateDir ?? path.join(os.homedir(), ".myagent");
-    const sessionsRoot = path.join(
+    const stateRoot = options.stateDir ?? path.join(os.homedir(), ".myagent");
+    const sessionsRoot = options.storageDir ?? path.join(
       stateRoot,
       "projects",
       projectKey,
@@ -440,6 +451,9 @@ export class AgentSession {
         attempts: lastReview.event.attempts,
       };
     }
+    if (this.#experiment) {
+      summary.experiment = structuredClone(this.#experiment);
+    }
     return summary;
   }
 
@@ -450,6 +464,17 @@ export class AgentSession {
   /** Agent Harness Flight Recorder trace metadata/details. */
   async traces(): Promise<import("./events.js").AgentTurnTrace[]> {
     return await this.#traceStore.readAll();
+  }
+
+  recordExperimentCreated(meta: {
+    parentSessionId: string;
+    parentTurnId: string;
+    parentEventSeq: number;
+    providerId: string;
+    model: string;
+    systemPromptOverlay?: string;
+  }): void {
+    this.#bus.emit({ type: "experiment_created", ...meta });
   }
 
   /** 分支树（根分支 main 恒存在） */
@@ -543,6 +568,7 @@ export class AgentSession {
     compact?: ModelClient | undefined;
     explore?: ModelClient | undefined;
   }): void {
+    if (this.#modelPinned) return;
     if (clients.main) this.#model.setClient(clients.main);
     if (clients.compact) {
       this.#model.setCompactionClient(clients.compact);
@@ -583,6 +609,9 @@ export class AgentSession {
     displayText?: string,
     options?: { steer?: boolean; taskMode?: boolean; checksMode?: boolean },
   ): Promise<void> {
+    if (this.#runtimeUnavailableReason) {
+      throw new Error(this.#runtimeUnavailableReason);
+    }
     const text = message.trim();
     if (!text) throw new Error("消息不能为空");
     if (this.#processing) {
@@ -735,6 +764,9 @@ export class AgentSession {
     options: RunTaskOptions,
     resumeTaskId?: string,
   ): Promise<void> {
+    if (this.#runtimeUnavailableReason) {
+      throw new Error(this.#runtimeUnavailableReason);
+    }
     if (this.#processing || this.#taskBox) {
       throw new Error("当前会话已有任务在运行");
     }

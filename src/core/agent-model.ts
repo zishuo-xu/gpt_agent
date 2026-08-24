@@ -110,6 +110,8 @@ export class ConversationAgentModel implements AgentModel {
       toolNames?: readonly (ToolName | string)[] | undefined;
       /** 单次请求最大输出 tokens（behavior.maxOutputTokens；缺省用客户端兜底 8192） */
       maxTokens?: number | undefined;
+      /** Flight Recorder 实验专用：追加在内置系统提示之后，不替换工具协议。 */
+      systemPromptOverlay?: string | undefined;
     } = {},
   ) {
     this.#client = client;
@@ -120,10 +122,12 @@ export class ConversationAgentModel implements AgentModel {
     this.#context = context;
     this.#toolNames = options.toolNames;
     this.#maxTokens = options.maxTokens;
+    this.#systemPromptOverlay = options.systemPromptOverlay?.trim();
   }
 
   readonly #toolNames: readonly (ToolName | string)[] | undefined;
   readonly #maxTokens: number | undefined;
+  readonly #systemPromptOverlay: string | undefined;
 
   /** 底层 API 客户端（审查/独立上下文复用；同一 client 可建多个 ConversationAgentModel） */
   get client(): ModelClient {
@@ -266,8 +270,12 @@ export class ConversationAgentModel implements AgentModel {
 
   async next(signal: AbortSignal): Promise<ModelTurn> {
     await this.compact(signal);
+    const baseSystemPrompt = buildSystemPrompt(this.#toolNames);
+    const systemPrompt = this.#systemPromptOverlay
+      ? `${baseSystemPrompt}\n\n[Experiment System Prompt Overlay]\n${this.#systemPromptOverlay}`
+      : baseSystemPrompt;
     const prepared = await this.#context.prepare(
-      buildSystemPrompt(this.#toolNames),
+      systemPrompt,
       this.#messages,
     );
     const request: CompletionRequest = {

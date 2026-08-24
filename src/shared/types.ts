@@ -56,6 +56,16 @@ export interface SessionSummary {
   };
   /** 完成审查结论（最后一个 review_result 推导；无审查则缺省） */
   review?: { passed: boolean; attempts: number };
+  /** Flight Recorder 隔离实验来源；普通会话缺省。 */
+  experiment?: {
+    parentSessionId: string;
+    parentTurnId: string;
+    pinnedModel: { providerId: string; model: string };
+    status: "creating" | "ready" | "workspace_missing" | "model_unavailable";
+    createdAt: string;
+    systemPromptOverlay?: string;
+    workspacePath: string;
+  };
 }
 
 export type MemoryDocumentId =

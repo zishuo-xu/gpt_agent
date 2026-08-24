@@ -255,6 +255,16 @@ export type AgentEvent =
       summary: string;
     }
   | {
+      /** Flight Recorder 子会话的可追溯来源。 */
+      type: "experiment_created";
+      parentSessionId: string;
+      parentTurnId: string;
+      parentEventSeq: number;
+      providerId: string;
+      model: string;
+      systemPromptOverlay?: string;
+    }
+  | {
       /** 会话标题（写入事件流，恢复时优先于 index.json 缓存） */
       type: "session_info";
       name: string;

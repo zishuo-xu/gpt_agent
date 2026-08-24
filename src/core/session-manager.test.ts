@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -1074,4 +1075,147 @@ test("恢复容错：会话文件含坏行（崩溃残留）时跳过坏行并�
   );
   await restored.sendInput("继续");
   assert.ok(restored.summary().totalInputTokens > 0, "恢复后继续对话正常计费");
+});
+
+test("Flight Recorder Fork：隔离 dirty Git 快照、固定模型并可恢复和清理", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-flight-cwd-"));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "myagent-flight-state-"));
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "myagent-flight-home-"));
+  execFileSync("git", ["init", "-q"], { cwd });
+  execFileSync("git", ["config", "user.email", "flight@example.com"], { cwd });
+  execFileSync("git", ["config", "user.name", "Flight Test"], { cwd });
+  await writeFile(path.join(cwd, "tracked.txt"), "base\n");
+  execFileSync("git", ["add", "tracked.txt"], { cwd });
+  execFileSync("git", ["commit", "-qm", "base"], { cwd });
+
+  const configService = new ConfigService({ cwd, homeDir });
+  const modelOptions: Array<{
+    cwd?: string;
+    pinnedModel?: { providerId: string; model: string };
+    systemPromptOverlay?: string;
+  }> = [];
+  const modelFactory = (
+    messages: ConversationMessage[],
+    options?: {
+      cwd?: string;
+      pinnedModel?: { providerId: string; model: string };
+      systemPromptOverlay?: string;
+    },
+  ) => {
+    if (options) modelOptions.push(structuredClone(options));
+    return new ConversationAgentModel(
+      new ScriptedClient([response("实验完成")]),
+      messages,
+      undefined,
+      options?.systemPromptOverlay
+        ? { systemPromptOverlay: options.systemPromptOverlay }
+        : {},
+    );
+  };
+  const manager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    modelFactory,
+  });
+  const parent = await manager.createSession({ title: "父会话" });
+  await parent.sendInput("先检查项目");
+  const parentTrace = (await parent.traces()).find(
+    (trace) => trace.version === 2 && trace.modelRole === "main",
+  );
+  assert.ok(parentTrace?.turnId);
+
+  // Fork 语义是创建时项目状态，而不是历史 Turn 时光机。
+  await writeFile(path.join(cwd, "tracked.txt"), "dirty\n");
+  await writeFile(path.join(cwd, "untracked.txt"), "untracked\n");
+  const child = await manager.createExperimentFork({
+    parentSessionId: parent.id,
+    turnId: parentTrace.turnId,
+    model: { providerId: "fixed-provider", model: "fixed-model" },
+    systemPromptOverlay: "只尝试替代策略",
+    continuation: "继续实验",
+  });
+  while (child.isProcessing()) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  await manager.flush();
+
+  const experiment = child.summary().experiment;
+  assert.ok(experiment);
+  assert.equal(experiment.status, "ready");
+  assert.notEqual(experiment.workspacePath, cwd);
+  assert.equal(
+    await readFile(path.join(experiment.workspacePath, "tracked.txt"), "utf8"),
+    "dirty\n",
+  );
+  assert.equal(
+    await readFile(path.join(experiment.workspacePath, "untracked.txt"), "utf8"),
+    "untracked\n",
+  );
+  assert.equal(await readFile(path.join(cwd, "tracked.txt"), "utf8"), "dirty\n");
+  assert.deepEqual(modelOptions.at(-1)?.pinnedModel, {
+    providerId: "fixed-provider",
+    model: "fixed-model",
+  });
+  assert.equal(modelOptions.at(-1)?.systemPromptOverlay, "只尝试替代策略");
+  assert.equal((await manager.listExperimentForks(parent.id))[0]?.id, child.id);
+  const comparison = await manager.experimentDiff(child.id);
+  assert.equal(comparison.parentSessionId, parent.id);
+  assert.equal(comparison.childSessionId, child.id);
+
+  const missingWorkspaceChild = await manager.createExperimentFork({
+    parentSessionId: parent.id,
+    turnId: parentTrace.turnId,
+    model: { providerId: "fixed-provider", model: "fixed-model" },
+    continuation: "创建后模拟工作区丢失",
+  });
+  while (missingWorkspaceChild.isProcessing()) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  const missingWorkspacePath =
+    missingWorkspaceChild.summary().experiment?.workspacePath;
+  assert.ok(missingWorkspacePath);
+
+  await manager.releaseLock();
+  await rm(missingWorkspacePath, { recursive: true, force: true });
+  const restoredOptions: typeof modelOptions = [];
+  const restored = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    modelFactory: (messages, options) => {
+      if (options) restoredOptions.push(structuredClone(options));
+      return new ConversationAgentModel(
+        new ScriptedClient([response("恢复后完成")]),
+        messages,
+      );
+    },
+  });
+  await restored.restore();
+  const restoredChild = restored.get(child.id);
+  assert.ok(restoredChild);
+  assert.equal(restoredChild.summary().experiment?.status, "ready");
+  assert.deepEqual(restoredOptions.at(-1)?.pinnedModel, {
+    providerId: "fixed-provider",
+    model: "fixed-model",
+  });
+  await restoredChild.sendInput("恢复后继续");
+  const restoredMissing = restored.get(missingWorkspaceChild.id);
+  assert.ok(restoredMissing);
+  assert.equal(
+    restoredMissing.summary().experiment?.status,
+    "workspace_missing",
+  );
+  await assert.rejects(
+    () => restoredMissing.sendInput("不能执行"),
+    /工作区已缺失/,
+  );
+
+  const workspacePath = experiment.workspacePath;
+  assert.equal(await restored.deleteSession(child.id), true);
+  await assert.rejects(() => access(workspacePath));
+  assert.equal(await restored.deleteSession(missingWorkspaceChild.id), true);
+  await restored.releaseLock();
 });

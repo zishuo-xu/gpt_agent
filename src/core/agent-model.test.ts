@@ -238,6 +238,20 @@ test("buildSystemPrompt 默认输出与历史全量指南逐字一致", () => {
   assert.ok(prompt.includes("persist one concise dated entry under .myagent/memory/"));
 });
 
+test("实验 System Prompt Overlay 追加在内置协议后并进入真实请求", async () => {
+  const client = new CapturingClient([response("done")]);
+  const model = new ConversationAgentModel(client, [], undefined, {
+    systemPromptOverlay: "Prefer a minimal patch and explain the tradeoff.",
+  });
+  model.addUserMessage("fix it");
+  await model.next(new AbortController().signal);
+
+  const system = client.requests[0]?.system ?? "";
+  assert.match(system, /local coding agent/);
+  assert.match(system, /\[Experiment System Prompt Overlay\]/);
+  assert.match(system, /Prefer a minimal patch/);
+});
+
 test("buildSystemPrompt 体积守护：全量注入时估算 < 1000 tokens（Pi 原则）", () => {
   const prompt = buildSystemPrompt(undefined);
   // 与估计 message token 同源的口径：JSON 长度 / 4（中文占比高时偏保守）

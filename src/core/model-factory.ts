@@ -31,6 +31,35 @@ function failingModelClient(message: string): ModelClient {
   };
 }
 
+export class PinnedModelUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PinnedModelUnavailableError";
+  }
+}
+
+/** 构造实验使用的单一模型客户端；故意不提供 fallback。 */
+export function buildPinnedModelClient(
+  target: { providerId: string; model: string },
+  config: { providers: ModelProviderConfig[] },
+): ModelClient {
+  const provider = config.providers.find(
+    (candidate) => candidate.id === target.providerId,
+  );
+  if (!provider) {
+    throw new PinnedModelUnavailableError(
+      `实验模型引用了不存在的供应商：${target.providerId}`,
+    );
+  }
+  try {
+    return new ConfiguredModelClient(provider, target.model);
+  } catch (error) {
+    throw new PinnedModelUnavailableError(
+      error instanceof Error ? error.message : "实验模型不可用",
+    );
+  }
+}
+
 /**
  * 构建角色模型 fallback 链（[选中模型, ...fallbacks]）。
  * 供应商缺失/不可用（禁用、缺 Key、模型不在列表）时降级为即抛客户端，
