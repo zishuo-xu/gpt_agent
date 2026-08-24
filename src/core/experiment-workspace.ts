@@ -67,11 +67,16 @@ export class ExperimentWorkspaceManager {
       const untrackedRaw = Buffer.from(await this.#runGit(["-C", gitRoot, "ls-files", "--others", "--exclude-standard", "-z"]));
       const untrackedCopied: string[] = [];
       let skippedSymlinks = 0;
+      let skippedDependencies = 0;
       for (const relative of splitNull(untrackedRaw)) {
         // The managed root may intentionally live inside the repository in
         // tests or local setups; never copy our own snapshot back into itself.
         const absolute = path.resolve(gitRoot, relative);
         if (absolute === managedRoot || absolute.startsWith(`${managedRoot}${path.sep}`)) continue;
+        if (isDependencyPath(relative)) {
+          skippedDependencies += 1;
+          continue;
+        }
         if (await copyEntry(absolute, path.join(worktreePath, relative))) {
           untrackedCopied.push(relative);
         } else {
@@ -81,6 +86,12 @@ export class ExperimentWorkspaceManager {
       const warnings = await this.#warnings(gitRoot);
       if (skippedSymlinks > 0) {
         warnings.push(`符号链接未复制（${skippedSymlinks} 个）`);
+      }
+      if (
+        skippedDependencies > 0 &&
+        !warnings.some((warning) => warning.includes("依赖目录"))
+      ) {
+        warnings.push(`依赖目录未复制（${skippedDependencies} 个文件）`);
       }
       return {
         worktreePath,
@@ -141,6 +152,10 @@ export class ExperimentWorkspaceManager {
 
 function splitNull(buffer: Buffer): string[] {
   return buffer.toString("utf8").split("\0").filter(Boolean);
+}
+
+function isDependencyPath(relative: string): boolean {
+  return relative.split(/[\\/]/).includes("node_modules");
 }
 
 async function copyEntry(source: string, target: string): Promise<boolean> {

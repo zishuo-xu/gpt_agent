@@ -7,6 +7,8 @@ import { ContextManager } from "../core/context.js";
 import type { AgentEvent, PermissionRule } from "../core/types.js";
 import { action, ScriptedModelClient } from "./scripted-model.js";
 import type { EvalMetrics, EvalOptions, EvalScenario, ScriptedStep } from "./types.js";
+import { computeExperimentDiff } from "../core/experiment-diff.js";
+import type { ExperimentSessionMeta } from "../core/experiment.js";
 
 const pricing = { inputPerMillionCny: 1, outputPerMillionCny: 2, cachedInputPerMillionCny: 0.1 };
 
@@ -37,6 +39,8 @@ function stepsFor(scenario: EvalScenario, cwd: string): ScriptedStep[] {
     case "branch":
       return [action("Read", file, { file_path: file }), { kind: "respond", text: "done" }];
     case "acceptance":
+      return [action("Read", file, { file_path: file }), { kind: "respond", text: "done" }];
+    case "flight":
       return [action("Read", file, { file_path: file }), { kind: "respond", text: "done" }];
   }
 }
@@ -71,6 +75,7 @@ export async function runScenario(scenario: EvalScenario, options: EvalOptions =
   let recovery = { attempted: false, succeeded: false, steps: 0 };
   let verification: string[] = [];
   let branchCreated = false;
+  let flightVerified = false;
   try {
     if (scenario === "budget") {
       await session.runTask({ description: "budget eval", goal: "read fixture", hardRules: [], semanticBounds: [], budgetCny: 0.00001, permission: "trust" });
@@ -96,6 +101,51 @@ export async function runScenario(scenario: EvalScenario, options: EvalOptions =
         const branch = session.forkBranch(seq, "eval branch");
         branchCreated = branch !== "main" && session.branches().length === 2;
         verification = [`branch ${branch} created`];
+      } else if (scenario === "flight") {
+        const alternate = path.join(root, "alternate.txt");
+        await writeFile(alternate, "alternate\n", "utf8");
+        const child = await makeSession(
+          root,
+          stateDir,
+          new ScriptedModelClient([
+            action("Read", alternate, { file_path: alternate }),
+            { kind: "respond", text: "done" },
+          ]),
+        );
+        await child.sendInput("flight child");
+        const meta = (model: string, overlay?: string): ExperimentSessionMeta => ({
+          version: 1,
+          parentSessionId: session.id,
+          parentTurnId: "eval-turn",
+          parentEventSeq: 1,
+          projectCwd: root,
+          workspaceSnapshot: {
+            worktreePath: root,
+            cwd: root,
+            gitRoot: root,
+            head: "eval",
+            untrackedCopied: [],
+            warnings: [],
+          },
+          pinnedModel: { providerId: "scripted", model },
+          ...(overlay ? { systemPromptOverlay: overlay } : {}),
+          status: "ready",
+          createdAt: new Date().toISOString(),
+        });
+        const diff = computeExperimentDiff(
+          { meta: meta("parent"), traces: await session.traces() },
+          { meta: meta("child", "alternate strategy"), traces: await child.traces() },
+        );
+        const divergenceIndex = diff.tools.firstDivergence?.index;
+        flightVerified =
+          diff.model.changed &&
+          diff.overlay.changed &&
+          divergenceIndex === 0;
+        verification = [
+          flightVerified
+            ? `first divergence at tool index ${divergenceIndex}`
+            : "flight diff did not identify the first divergence",
+        ];
       }
     }
     if (scenario === "edit") verification = [(await readFile(path.join(root, "fixture.txt"), "utf8")).includes("after") ? "fixture edited" : "fixture unchanged"];
@@ -126,7 +176,9 @@ export async function runScenario(scenario: EvalScenario, options: EvalOptions =
                   ? session.events().some((record) => record.event.type === "acceptance_result" && record.event.status === "passed") && session.events().some((record) => record.event.type === "run_finished" && record.event.status === "completed")
                 : scenario === "replay"
                   ? recovery.succeeded
-                  : branchCreated;
+                  : scenario === "branch"
+                    ? branchCreated
+                    : flightVerified;
     return { scenario, success: testsPassed, testsPassed, verification, durationMs: Date.now() - started, recovery, ...metrics };
   } catch (error) {
     const metrics = summarizeEvents(session.events());
@@ -135,7 +187,7 @@ export async function runScenario(scenario: EvalScenario, options: EvalOptions =
 }
 
 export async function runAllScenarios(options: EvalOptions = {}): Promise<EvalMetrics[]> {
-  const scenarios: EvalScenario[] = ["read", "edit", "recovery", "deny", "approval", "cost", "budget", "replay", "branch", "acceptance"];
+  const scenarios: EvalScenario[] = ["read", "edit", "recovery", "deny", "approval", "cost", "budget", "replay", "branch", "acceptance", "flight"];
   return Promise.all(scenarios.map((scenario) => runScenario(scenario, options)));
 }
 

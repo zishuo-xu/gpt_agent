@@ -182,6 +182,31 @@ test("v1 acceptance 事件映射保留轮次与证据", () => {
   assert.equal((events[1] as { output?: string }).output, "ok");
 });
 
+test("v1 Flight Recorder 来源事件保留父 Turn 与固定模型", () => {
+  const [event] = mapV1Events([
+    record(30, {
+      type: "experiment_created",
+      parentSessionId: "parent-1",
+      parentTurnId: "turn-2",
+      parentEventSeq: 9,
+      providerId: "openai",
+      model: "gpt-test",
+      systemPromptOverlay: "尝试替代策略",
+    }),
+  ]);
+  assert.deepEqual(event, {
+    seq: 30,
+    ts: "2026-08-09T10:00:00.000Z",
+    type: "experiment.created",
+    parentSessionId: "parent-1",
+    parentTurnId: "turn-2",
+    parentEventSeq: 9,
+    providerId: "openai",
+    model: "gpt-test",
+    systemPromptOverlay: "尝试替代策略",
+  });
+});
+
 function bearer(token = "secret-token") {
   return { headers: { authorization: `Bearer ${token}` } };
 }

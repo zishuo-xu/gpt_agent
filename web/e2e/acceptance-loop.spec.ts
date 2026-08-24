@@ -1,13 +1,14 @@
 import { createServer, type Server } from "node:http";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
 const E2E_WORKSPACE = "/tmp/myagent-gui-test-workspace";
 const MARKER = `${E2E_WORKSPACE}/acceptance-e2e-marker.txt`;
+const E2E_CONFIG = "/tmp/myagent-gui-test-home/.myagent/config.jsonc";
 
 let fakeModel: Server;
 let fakeBaseUrl = "";
-let originalConfig: Record<string, unknown> | undefined;
+let originalConfigText: string | undefined;
 
 function writeSse(
   response: import("node:http").ServerResponse,
@@ -39,7 +40,6 @@ async function configureFakeModel(request: APIRequestContext): Promise<void> {
       behavior: Record<string, unknown>;
     };
   };
-  originalConfig = structuredClone(current.config);
   const configured = structuredClone(current.config) as Record<string, unknown> & {
     behavior: Record<string, unknown>;
   };
@@ -70,6 +70,7 @@ async function configureFakeModel(request: APIRequestContext): Promise<void> {
 
 test.describe.serial("provider-free 可信完成闭环", () => {
   test.beforeAll(async ({ request }) => {
+    originalConfigText = await readFile(E2E_CONFIG, "utf8").catch(() => undefined);
     await rm(MARKER, { force: true });
     fakeModel = createServer((incoming, response) => {
       const chunks: Buffer[] = [];
@@ -122,9 +123,9 @@ test.describe.serial("provider-free 可信完成闭环", () => {
     await configureFakeModel(request);
   });
 
-  test.afterAll(async ({ request }) => {
-    if (originalConfig) {
-      await request.put("/api/config?scope=global", { data: originalConfig });
+  test.afterAll(async () => {
+    if (originalConfigText !== undefined) {
+      await writeFile(E2E_CONFIG, originalConfigText, "utf8");
     }
     await rm(MARKER, { force: true });
     await new Promise<void>((resolve) => fakeModel.close(() => resolve()));

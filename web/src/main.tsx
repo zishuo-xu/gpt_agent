@@ -12,6 +12,7 @@ import "./styles/chat.css";
 import "./styles/memory.css";
 import "./styles/plugins.css";
 import "./styles/scheduler.css";
+import "./styles/flight-recorder.css";
 
 function Router() {
   const [route, setRoute] = useState(window.location.hash.slice(1));

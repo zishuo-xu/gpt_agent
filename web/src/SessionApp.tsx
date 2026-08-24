@@ -33,6 +33,7 @@ import { SessionListSidebar } from "./session-sidebar";
 import { SessionStream } from "./session-stream";
 import { NewTaskOverlay } from "./session-new-task";
 import { ProjectPicker } from "./ProjectPicker";
+import { FlightRecorder } from "./flight-recorder";
 
 /** SSE 事件记录（后端 RecordedEvent 的会话内形态） */
 export type SessionEvent = RecordedEvent;
@@ -652,7 +653,15 @@ export function SessionApp(props: { initialSessionId?: string }) {
               <div className="notice error">{error}</div>
             )}
 
-            <div className="session-workspace with-rail">
+            <FlightRecorder
+              session={selected}
+              project={currentProject}
+              onSelectSession={(id) => {
+                setSelectedId(id);
+                void refreshSessions();
+              }}
+              conversation={
+              <div className="session-workspace with-rail">
               <section className="chat-column">
                 <SessionStream
                   displayItems={filteredDisplayItems}
@@ -716,6 +725,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
                 }
               />
             </div>
+              }
+            />
           </>
         ) : (
           <SessionEmpty

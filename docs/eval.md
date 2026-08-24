@@ -30,6 +30,8 @@ The command exits non-zero when any scenario fails. By default it writes:
 | `budget` | unattended budget box | `run_finished(reason=budget)` is emitted |
 | `replay` | event replay constructor path | replayed event count matches the source session |
 | `branch` | conversation branching | a second branch is created at the selected event |
+| `acceptance` | machine acceptance command | a passing `acceptance_result` precedes completed `run_finished` |
+| `flight` | Flight Recorder run comparison | model and overlay changes are reported and the first `tool + target` divergence is index 0 |
 
 `replay` intentionally covers the event-replay constructor path, not the full
 on-disk `AgentSessionManager.restore()` path. Disk corruption and crash recovery

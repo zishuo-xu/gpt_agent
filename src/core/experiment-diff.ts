@@ -33,6 +33,7 @@ export interface ExperimentDiff {
   model: { parent: string; child: string; changed: boolean };
   overlay: { parent: string; child: string; changed: boolean };
   turns: { parent: number; child: number; delta: number };
+  durationMs: { parent: number; child: number; delta: number };
   tools: {
     parent: number;
     child: number;
@@ -91,6 +92,10 @@ function usage(traces: readonly AgentTurnTrace[], summary?: ExperimentRunSummary
   return result;
 }
 
+function duration(traces: readonly AgentTurnTrace[]): number {
+  return traces.reduce((total, trace) => total + (trace.durationMs ?? 0), 0);
+}
+
 function firstDivergence(parent: NormalizedToolCall[], child: NormalizedToolCall[]) {
   const length = Math.max(parent.length, child.length);
   for (let index = 0; index < length; index += 1) {
@@ -123,10 +128,17 @@ export function computeExperimentDiff(
   const parentReview = parent.summary?.review ?? parentAcceptance?.review;
   const childReview = child.summary?.review ?? childAcceptance?.review;
   const divergence = firstDivergence(parentTools, childTools);
+  const parentDuration = duration(parentTraces);
+  const childDuration = duration(childTraces);
   return {
     model: { parent: modelKey(parent.meta), child: modelKey(child.meta), changed: modelKey(parent.meta) !== modelKey(child.meta) },
     overlay: { parent: parent.meta.systemPromptOverlay ?? "", child: child.meta.systemPromptOverlay ?? "", changed: (parent.meta.systemPromptOverlay ?? "") !== (child.meta.systemPromptOverlay ?? "") },
     turns: { parent: parentTraces.length, child: childTraces.length, delta: childTraces.length - parentTraces.length },
+    durationMs: {
+      parent: parentDuration,
+      child: childDuration,
+      delta: childDuration - parentDuration,
+    },
     tools: {
       parent: parentTools.length,
       child: childTools.length,

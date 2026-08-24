@@ -69,6 +69,31 @@ test("untracked symlinks are skipped so the experiment cannot escape its workspa
   assert.ok(snapshot.warnings.some((warning) => warning.includes("符号链接")));
 });
 
+test("node_modules is skipped even when the repository forgot to ignore it", async () => {
+  const cwd = await repo();
+  await mkdirSafe(path.join(cwd, "packages", "app", "node_modules", "dep"));
+  await writeFile(
+    path.join(cwd, "packages", "app", "node_modules", "dep", "index.js"),
+    "dependency",
+  );
+  const snapshot = await new ExperimentWorkspaceManager({
+    experimentsRoot: path.join(cwd, ".experiments"),
+  }).createSnapshot("dependencies", cwd);
+  await assert.rejects(() =>
+    stat(
+      path.join(
+        snapshot.cwd,
+        "packages",
+        "app",
+        "node_modules",
+        "dep",
+        "index.js",
+      ),
+    ),
+  );
+  assert.ok(snapshot.warnings.some((warning) => warning.includes("依赖目录")));
+});
+
 test("non-Git and no-HEAD directories fail clearly", async () => {
   const nonGit = await mkdtemp(path.join(os.tmpdir(), "myagent-non-git-"));
   const manager = new ExperimentWorkspaceManager({ experimentsRoot: path.join(nonGit, ".experiments") });

@@ -295,6 +295,13 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
       case "acceptance_result":
         system(seq, `机器验收 ${event.status} · ${event.command}`, event.status === "passed" ? "done" : "warning");
         break;
+      case "experiment_created":
+        system(
+          seq,
+          `Flight Recorder Fork · 父会话 ${event.parentSessionId} · Turn ${event.parentTurnId} · 固定模型 ${event.providerId}/${event.model}`,
+          "running",
+        );
+        break;
       case "need_user":
         system(seq, `需要你的决定：${event.question}`, "warning");
         break;

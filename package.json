@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A local coding agent designed for long-running autonomous tasks.",
+  "description": "MyAgent is a local-first Agent Harness with a bundled coding-agent runtime for tracing, forking, comparing, and evaluating tool-using agent runs.",
   "bin": {
     "myagent": "./dist/cli.js"
   },

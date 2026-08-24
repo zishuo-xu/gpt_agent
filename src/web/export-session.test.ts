@@ -91,3 +91,28 @@ test("导出 HTML：包含机器验收证据", () => {
   assert.match(html, /pnpm test/);
   assert.match(html, /all pass/);
 });
+
+test("导出 HTML：包含 Flight Recorder Fork 来源", () => {
+  const html = exportSessionHtml({
+    sessionId: "child-1",
+    title: "实验",
+    createdAt: "2026-08-07T09:00:00.000Z",
+    updatedAt: "2026-08-07T10:00:00.000Z",
+    permissionMode: "normal",
+    records: [
+      record(1, {
+        type: "experiment_created",
+        parentSessionId: "parent-1",
+        parentTurnId: "turn-2",
+        parentEventSeq: 10,
+        providerId: "provider",
+        model: "model",
+        systemPromptOverlay: "替代策略",
+      }),
+    ],
+  });
+  assert.match(html, /Flight Recorder Fork/);
+  assert.match(html, /parent-1/);
+  assert.match(html, /provider\/model/);
+  assert.match(html, /替代策略/);
+});

@@ -1,6 +1,8 @@
 # MyAgent — 可恢复、可控的本地 Agent Harness
 
-MyAgent 是一个面向长时间自主编码任务的本机 Agent Harness：它把模型、工具、权限、事件持久化、恢复和 CLI/Web/API 入口组合成一个可继续运行的执行系统。核心问题不是“能不能调用模型”，而是 Agent 在真实代码库里运行很久时，如何可控、可恢复、可验收。
+MyAgent is a local-first Agent Harness with a bundled coding-agent runtime for tracing, forking, comparing, and evaluating tool-using agent runs.
+
+MyAgent 把模型、工具、权限、事件持久化、恢复和 CLI/Web/API 入口组合成可调试、可实验的本地执行系统。当前内置 Coding Agent 是 Harness 的第一个 Runtime；项目重点不是再造一套聊天 UI，而是让 Agent 在真实代码库里的行为可以追踪、复现、隔离对照和机器验收。
 
 > 当前项目适合作为 Agent/AI Infra 面试项目：代码和测试是事实证据；真实模型的成功率、成本和延迟需要通过 Eval 再测量，不能从功能清单推断。
 
@@ -38,7 +40,7 @@ Core 只产生结构化事件，前端、持久化、统计和通知订阅事件
 
 ## Eval 入口
 
-`pnpm eval` 无网络、无 API Key 运行 9 个确定性 Harness 场景：读取、编辑、工具错误恢复、deny、审批超时、成本、预算终止、事件重放和会话分支。结果写入 `tmp/eval/report.json` 和 `report.md`，记录工具调用、错误、tokens、成本、耗时、审批和越界尝试。该 Eval 已加入 CI；它证明 Harness 回归，不代表真实模型任务成功率。场景通过条件和指标定义见 [docs/eval.md](docs/eval.md)。
+`pnpm eval` 无网络、无 API Key 运行 11 个确定性 Harness 场景：读取、编辑、工具错误恢复、deny、审批超时、成本、预算终止、事件重放、会话分支、机器验收和 Flight Recorder 首分歧定位。结果写入 `tmp/eval/report.json` 和 `report.md`，记录工具调用、错误、tokens、成本、耗时、审批和越界尝试。该 Eval 已加入 CI；它证明 Harness 回归，不代表真实模型任务成功率。场景通过条件和指标定义见 [docs/eval.md](docs/eval.md)。
 
 ## 当前能力
 
@@ -49,6 +51,14 @@ Core 只产生结构化事件，前端、持久化、统计和通知订阅事件
 - **原子文件编辑**：临时文件 + rename，中止不留半文件；EditJournal 记录每次编辑，收尾可精确撤销
 - **统一硬中止**：Esc 立即取消模型与当前工具；Bash 终止整个进程组
 - **任务验收链**：带 `--check` 的 `/run` 由系统执行验收命令；通过且产生文件修改时，无论 `behavior.completionReview` 开关如何都会自动独立审查。未带 `--check` 的任务仍由该开关或 `/review` 控制审查，运行时默认关闭，纯问答不触发
+
+### Flight Recorder 调试闭环
+
+- **Turn 级 Trace**：每个主模型、压缩模型和探索模型 Turn 都记录稳定 `turnId`、分支、事件范围、实际 Provider/Model、请求上下文、响应、Token、耗时和有序工具阶段；旧 Trace 保持可读
+- **默认脱敏**：Web 详情默认递归遮盖 Key、Token、Authorization、Cookie、Password、Secret 和常见环境变量值；原文仅在本次页面显式点击后请求，不持久化显示状态
+- **隔离实验 Fork**：可从已完成的 v2 主 Turn 重建当时对话，追加 System Prompt Overlay，固定一个模型并禁用 fallback，然后在 detached Git worktree 中立即继续普通输入或 `/run`
+- **快照边界明确**：文件快照代表“创建 Fork 时的当前项目状态”，包含 staged/unstaged binary diff 与未忽略 untracked 文件；它不是历史 Turn 的文件时光机。ignored、依赖目录、submodule 工作内容和可能逃逸隔离的符号链接不复制并显示警告
+- **Run Diff**：父子 Run 对比模型、Overlay、Turn、标准化 `tool + target` 序列、Token、费用、耗时、Acceptance 和 Review，并定位第一个行为分歧
 
 ### 权限安全（strict / normal / trust 三档）
 
@@ -81,7 +91,7 @@ Core 只产生结构化事件，前端、持久化、统计和通知订阅事件
 ### Web 界面（myagent --web）
 
 - **监控台**：所有会话实时状态卡（进度 / 花费 / 时长），审批请求标签页标题提示
-- **会话详情**：完整事件流（文本 / 工具 / diff / 子代理卡片）、来源筛选（全部 / 推理 / 工具 / 子代理 / 系统）、可继续追问；任务清单三态标记（✓/→/○）自动展开，完成但存在未完成项或零工具调用时显示警告条；会话完成且有写操作时显示**交付摘要**（改动文件 + 验证结果）
+- **会话详情**：`对话 / Trace / 对比` 三视图；对话包含完整事件流（文本 / 工具 / diff / 子代理卡片）和来源筛选，Trace 支持脱敏展开、显式查看原文与从 Turn 创建隔离实验，对比页展示父子 Run 的首个行为分歧；移动端为单栏 Turn 卡和横向滚动指标
 - **记忆面板**：四类记忆直接编辑 / 删除，自动写入有时间线审计
 - **定时任务面板**：按项目注册 / 取消定时 `/run`（`--at` / `--every`），到期服务端自动启动会话；启动失败自动重试（5 分钟 × 3 次后丢弃），可设**每日花费上限**（超限顺延）；每行展示上次触发结果与会话
 - **任务统计面板**：会话用量聚合（完成 / 失败 / 中断 / tokens / 费用），按天分桶纯 CSS 柱状图 + **按模型/供应商成本维度表** + 会话明细表（含 /run 收尾总结查看）

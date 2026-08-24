@@ -312,7 +312,8 @@ export type V1Event =
       attempts: number;
     }
   | { seq: number; ts: string; type: "acceptance.started"; taskId: string; attempt: number; checks: string[] }
-  | { seq: number; ts: string; type: "acceptance.result"; taskId: string; attempt: number; index: number; command: string; status: string; exitCode?: number; durationMs: number; output?: string };
+  | { seq: number; ts: string; type: "acceptance.result"; taskId: string; attempt: number; index: number; command: string; status: string; exitCode?: number; durationMs: number; output?: string }
+  | { seq: number; ts: string; type: "experiment.created"; parentSessionId: string; parentTurnId: string; parentEventSeq: number; providerId: string; model: string; systemPromptOverlay?: string };
 
 /**
  * 内部事件 → v1 白名单契约（多对一折叠；未知类型永不破坏契约，折叠为 system.info）。
@@ -407,6 +408,19 @@ function mapV1Event(
         ...(event.exitCode === undefined ? {} : { exitCode: event.exitCode }),
         durationMs: event.durationMs,
         ...(event.output ? { output: event.output } : {}),
+      };
+    case "experiment_created":
+      return {
+        ...base,
+        type: "experiment.created",
+        parentSessionId: event.parentSessionId,
+        parentTurnId: event.parentTurnId,
+        parentEventSeq: event.parentEventSeq,
+        providerId: event.providerId,
+        model: event.model,
+        ...(event.systemPromptOverlay
+          ? { systemPromptOverlay: event.systemPromptOverlay }
+          : {}),
       };
     case "ledger_update":
       return {

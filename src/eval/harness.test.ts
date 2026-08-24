@@ -6,9 +6,9 @@ import { runDemo } from "./demo.js";
 
 test("scripted eval covers deterministic harness scenarios", async () => {
   const results = await runAllScenarios();
-  assert.equal(results.length, 10);
+  assert.equal(results.length, 11);
   assert.deepEqual(results.map((result) => result.scenario), [
-    "read", "edit", "recovery", "deny", "approval", "cost", "budget", "replay", "branch", "acceptance",
+    "read", "edit", "recovery", "deny", "approval", "cost", "budget", "replay", "branch", "acceptance", "flight",
   ]);
   assert.ok(results.every((result) => result.testsPassed));
   assert.ok(results.every((result) => result.tokens.total > 0));

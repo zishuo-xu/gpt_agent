@@ -442,36 +442,39 @@ export function registerSessionRoutes(
     if (!session) return context.json({ error: "会话不存在" }, 404);
     const traces = await session.traces();
     return context.json({
-      traces: traces.map((trace) => ({
-        version: trace.version,
-        turn: trace.turn,
-        turnId: trace.turnId,
-        branchId: trace.branchId,
-        ts: trace.ts,
-        startedAt: trace.startedAt,
-        endedAt: trace.endedAt,
-        durationMs: trace.durationMs,
-        eventSeqStart: trace.eventSeqStart,
-        eventSeqEnd: trace.eventSeqEnd,
-        modelRole: trace.modelRole,
-        providerId: trace.providerId,
-        model: trace.model,
-        usage: trace.usage,
-        toolCount: trace.tools.length,
-        tools: trace.tools.map((tool) => ({
-          tool: tool.call.tool,
-          permission: tool.permission,
-          ms: tool.ms,
-        })),
-        // Legacy records have no event range and cannot safely be forked.
-        canFork:
-          trace.version === 2 &&
-          typeof trace.turnId === "string" &&
-          trace.modelRole === "main" &&
-          typeof trace.eventSeqStart === "number" &&
-          typeof trace.eventSeqEnd === "number" &&
-          trace.eventSeqEnd > trace.eventSeqStart,
-      })),
+      traces: traces.map((trace) => {
+        const tools = Array.isArray(trace.tools) ? trace.tools : [];
+        return {
+          version: trace.version,
+          turn: trace.turn,
+          turnId: trace.turnId,
+          branchId: trace.branchId,
+          ts: trace.ts,
+          startedAt: trace.startedAt,
+          endedAt: trace.endedAt,
+          durationMs: trace.durationMs,
+          eventSeqStart: trace.eventSeqStart,
+          eventSeqEnd: trace.eventSeqEnd,
+          modelRole: trace.modelRole,
+          providerId: trace.providerId,
+          model: trace.model,
+          usage: trace.usage,
+          toolCount: tools.length,
+          tools: tools.map((tool) => ({
+            tool: tool.call.tool,
+            permission: tool.permission,
+            ms: tool.ms,
+          })),
+          // Legacy records have no event range and cannot safely be forked.
+          canFork:
+            trace.version === 2 &&
+            typeof trace.turnId === "string" &&
+            trace.modelRole === "main" &&
+            typeof trace.eventSeqStart === "number" &&
+            typeof trace.eventSeqEnd === "number" &&
+            trace.eventSeqEnd > trace.eventSeqStart,
+        };
+      }),
     });
   });
 

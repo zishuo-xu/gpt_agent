@@ -225,6 +225,25 @@ describe("buildDisplayItems（会话回放事件流转换）", () => {
     }
   });
 
+  it("Flight Recorder 来源事件显示父 Turn 与固定模型", () => {
+    const [item] = buildDisplayItems([
+      ev(1, {
+        type: "experiment_created",
+        parentSessionId: "parent-1",
+        parentTurnId: "turn-2",
+        parentEventSeq: 9,
+        providerId: "provider",
+        model: "model",
+      }),
+    ]);
+    assert.equal(item?.kind, "system");
+    if (item?.kind === "system") {
+      assert.match(item.text, /parent-1/);
+      assert.match(item.text, /turn-2/);
+      assert.match(item.text, /provider\/model/);
+    }
+  });
+
   it("run_started 后同 taskId 的 ledger_update 合并为一张账本卡（随事件流刷新）", () => {
     const unitA = {
       type: "ledger_update",

@@ -61,6 +61,7 @@ test("computeExperimentDiff compares tools, usage, status and first divergence",
     turn: 1,
     ts: "2026-01-01T00:00:00.000Z",
     turnId: tool,
+    durationMs: input,
     tools: [{ call: { id: tool, tool, target, args: {} }, permission: "allow", ms: 1 }],
     usage: { input, output: 2, cached: 1 },
   });
@@ -73,5 +74,6 @@ test("computeExperimentDiff compares tools, usage, status and first divergence",
   assert.equal(diff.tools.firstDivergence?.index, 0);
   assert.deepEqual(diff.tokens.delta, { input: 10, output: 0, cached: 0 });
   assert.equal(diff.costCny.delta, 1);
+  assert.equal(diff.durationMs.delta, 10);
   assert.equal(diff.status.changed, true);
 });

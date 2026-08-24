@@ -174,6 +174,13 @@ function renderRecord(record: RecordedEvent): string {
       return item("system", seq, ts, `🧪 开始机器验收（第 ${event.attempt} 轮）：${event.checks.join("；")}`);
     case "acceptance_result":
       return item("system", seq, ts, `🧪 验收 ${event.status}：${event.command}${event.output ? `\n${escapeHtml(event.output.slice(0, 500))}` : ""}`);
+    case "experiment_created":
+      return item(
+        "system",
+        seq,
+        ts,
+        `🧭 Flight Recorder Fork：父会话 ${escapeHtml(event.parentSessionId)} · Turn ${escapeHtml(event.parentTurnId)} · 固定模型 ${escapeHtml(event.providerId)}/${escapeHtml(event.model)}${event.systemPromptOverlay ? `\nOverlay：${escapeHtml(event.systemPromptOverlay)}` : ""}`,
+      );
     case "context_compacted":
       return item(
         "system",
