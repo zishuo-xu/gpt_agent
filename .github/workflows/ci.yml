@@ -31,6 +31,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Deterministic harness eval
+        run: pnpm eval
+
   # Web E2E（非模型场景）：服务器由 playwright webServer 自动启动（隔离 HOME 与工作区）。
   # 需要真实模型调用的用例（只读任务 / 写文件审批流 / 导出会话等模型回复）无 API Key
   # 无法在 CI 运行，通过 --grep-invert 排除，由本地手工回归覆盖（prod-scenarios 同理）。

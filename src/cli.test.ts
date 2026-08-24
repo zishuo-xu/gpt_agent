@@ -21,11 +21,12 @@ async function runCli(
   commands: string[],
   cwd: string,
   home: string,
+  args: string[] = [],
 ): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      [tsxCli, path.join(repoRoot, "src/cli.ts")],
+      [tsxCli, path.join(repoRoot, "src/cli.ts"), ...args],
       {
         cwd,
         env: { ...process.env, HOME: home },
@@ -64,6 +65,15 @@ async function makeEnv(): Promise<{ cwd: string; home: string }> {
   await mkdir(home, { recursive: true });
   return { cwd, home };
 }
+
+test("CLI --help：非交互输出安装后的启动方式并退出", async () => {
+  const { cwd, home } = await makeEnv();
+  const output = await runCli([], cwd, home, ["--help"]);
+  assert.match(output, /Usage:/);
+  assert.match(output, /myagent --web/);
+  assert.match(output, /myagent --version/);
+  assert.doesNotMatch(output, /myagent ›/);
+});
 
 test("CLI 启动：/help 列出命令清单（含 /trust 与信任项目说明）", async () => {
   const { cwd, home } = await makeEnv();

@@ -1,8 +1,44 @@
-# MyAgent - 无人值守编码 Agent
+# MyAgent — 可恢复、可控的本地 Agent Harness
 
-MyAgent 是一个面向长时间自主运行任务的本机编码 Agent：把自然语言任务交给它，它会在你的代码库里自主探索、编辑文件、运行命令、自我修正，需要你决策时才停下来征求批准。无人值守模式下可设时间/预算边界，跑完自动收尾。
+MyAgent 是一个面向长时间自主编码任务的本机 Agent Harness：它把模型、工具、权限、事件持久化、恢复和 CLI/Web/API 入口组合成一个可继续运行的执行系统。核心问题不是“能不能调用模型”，而是 Agent 在真实代码库里运行很久时，如何可控、可恢复、可验收。
+
+> 当前项目适合作为 Agent/AI Infra 面试项目：代码和测试是事实证据；真实模型的成功率、成本和延迟需要通过 Eval 再测量，不能从功能清单推断。
 
 远程仓库：https://github.com/zishuo-xu/gpt_agent
+
+## 15 分钟 Demo
+
+```bash
+pnpm install
+pnpm demo
+```
+
+Demo 会把 [examples/broken-ts](examples/broken-ts) 复制到临时目录，用确定性脚本模型驱动真实 AgentSession 完成 Read → Edit → Bash 验证闭环；样例目录本身不会被修改，也不需要 API Key。详细步骤见 [docs/demo.md](docs/demo.md)。
+
+## 架构一览
+
+```text
+CLI / Web / API
+       ↓
+Session + AgentLoop ── Model client / fallback / context
+       ↓
+Permission engine ──── Tool executor / plugins / MCP
+       ↓
+事件流 + JSONL 持久化 ── restore / cost / trace / notifications
+```
+
+Core 只产生结构化事件，前端、持久化、统计和通知订阅事件；权限引擎在工具执行前建立硬边界，Session 通过 JSONL 事件恢复长任务。详见 [设计方案/架构文档.md](设计方案/架构文档.md)。
+
+## 当前证据与已知边界
+
+- 仓库包含 core/model/tools/Web/API/React 的单元与集成测试，以及 Playwright E2E；GitHub Actions 执行 typecheck、build、单测和非模型 E2E。
+- 覆盖率命令和历史报告存在，但当前 HEAD 的即时数值应通过本地 `pnpm run test:coverage` 或 CI 重新确认。
+- 默认 CI 不调用付费真实模型；真实模型任务、provider 差异、成本和长任务成功率不由绿色 CI 自动证明。
+- 当前是 private npm package（CLI bin 可由构建产物运行），没有宣称已发布到 npm registry。源码运行、构建运行和本机 `npm link` 见 [docs/demo.md](docs/demo.md)。
+
+## Eval 入口
+
+`pnpm eval` 无网络、无 API Key 运行 9 个确定性 Harness 场景：读取、编辑、工具错误恢复、deny、审批超时、成本、预算终止、事件重放和会话分支。结果写入 `tmp/eval/report.json` 和 `report.md`，记录工具调用、错误、tokens、成本、耗时、审批和越界尝试。该 Eval 已加入 CI；它证明 Harness 回归，不代表真实模型任务成功率。场景通过条件和指标定义见 [docs/eval.md](docs/eval.md)。
 
 ## 当前能力
 
@@ -103,7 +139,7 @@ pnpm run web
 
 push 到 main / PR 时 GitHub Actions 自动跑两个 job：
 
-- **test**：typecheck + build + 全量单测（core + web）
+- **test**：typecheck + build + 全量单测（core + web）+ 无网络确定性 Harness Eval
 - **e2e**：`web/e2e` 非模型场景回归（chromium，隔离 HOME 与工作区）；需真实 API Key 的用例（只读任务 / 写文件审批流 / 导出会话）由 `--grep-invert` 排除，本地手工回归覆盖（`pnpm run test:e2e` 全量、`pnpm run test:e2e:prod` 生产长场景）
 
 ## 文档索引
@@ -117,6 +153,8 @@ push 到 main / PR 时 GitHub Actions 自动跑两个 job：
 - `docs/pi-agent-analysis.md` — 对标 Pi Coding Agent 的调研（特点/爆红原因/借鉴点）
 - `docs/pi-core-analysis.md` — Pi CORE 源码级对照（会话/上下文/工具/事件流实现细节 + 改造优先级）
 - `docs/plugin-tools.md` — 插件工具通道与网络搜索（协议/架构链路/SearXNG 部署调优/运维经验）
+- `docs/eval.md` — 确定性 Harness Eval 的场景、通过条件、指标与边界
+- `docs/demo.md` — 无 API Key 的 15 分钟 Demo 与本地安装验证
 
 ## 项目约定（记忆）
 

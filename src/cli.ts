@@ -44,6 +44,22 @@ const pkg: { version: string } = JSON.parse(
 );
 const VERSION: string = pkg.version;
 
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  process.stdout.write(
+    [
+      "MyAgent - local coding agent harness",
+      "",
+      "Usage:",
+      "  myagent              Start the interactive CLI",
+      "  myagent --web        Start the local Web console",
+      "  myagent --version    Print the installed version",
+      "  myagent --help       Print this help",
+      "",
+    ].join("\n"),
+  );
+  process.exit(0);
+}
+
 // 兜底：任何遗漏的 async rejection 都会在此暴露（Node 默认行为是直接终止，
 // 保留默认退出但先输出可诊断的堆栈与上下文；正常路径的 rejection 均已在上游 catch）
 process.on("unhandledRejection", (reason) => {
