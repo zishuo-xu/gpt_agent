@@ -205,7 +205,8 @@ export function parseRunCommand(
   const task = description.join(" ").trim();
   if (!task) throw new Error("/run 后需要任务描述");
 
-  const one = (key: string): string | undefined => values.get(key)?.[0];
+  // --check 是可重复列表；其余参数沿用旧 Map.set 语义：重复时最后一个生效。
+  const one = (key: string): string | undefined => values.get(key)?.at(-1);
   const permissionValue = one("--permission");
   if (
     permissionValue &&

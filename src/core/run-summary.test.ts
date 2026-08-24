@@ -114,3 +114,19 @@ test("多轮任务：取最后一次配对的总结", () => {
   assert.equal(run.status, "interrupted");
   assert.equal(run.summary, "第二轮总结");
 });
+
+test("验收摘要只聚合最新 attempt，不把历史失败带入最终通过", () => {
+  const events: AgentEvent[] = [
+    runStarted(),
+    { type: "acceptance_started", taskId: "task-1", attempt: 1, checks: ["test"] },
+    { type: "acceptance_result", taskId: "task-1", attempt: 1, index: 0, command: "test", status: "failed", durationMs: 1, output: "bad" },
+    { type: "acceptance_started", taskId: "task-1", attempt: 2, checks: ["test"] },
+    { type: "acceptance_result", taskId: "task-1", attempt: 2, index: 0, command: "test", status: "passed", durationMs: 1, output: "ok" },
+    runFinished(),
+  ];
+  const run = extractRunSummary(events.map((event, index) => record(index === 0 ? T0 : T1, event)));
+  assert.equal(run?.acceptance?.status, "passed");
+  assert.equal(run?.acceptance?.attempts, 2);
+  assert.equal(run?.acceptance?.checks.length, 1);
+  assert.equal(run?.acceptance?.checks[0]?.status, "passed");
+});

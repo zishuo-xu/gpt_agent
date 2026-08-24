@@ -814,16 +814,26 @@ export class AgentSession {
             : `/acceptance-retry ${options.description}`,
           { taskMode: true, checksMode: checks.length > 0 },
         );
-        if (this.#taskStopReason || this.#taskModelFailed || this.#state.status === "error") break;
+        const stopReasonAfterModel = this.#taskStopReason as "deadline" | "budget" | undefined;
+        if ((stopReasonAfterModel !== undefined && stopReasonAfterModel !== "budget") || this.#taskModelFailed || this.#state.status === "error") break;
         if (checks.length === 0) { accepted = true; break; }
-        const remainingMs = options.deadline ? Math.max(1, Date.parse(options.deadline) - Date.now()) : undefined;
+        const remainingMs = options.deadline ? Date.parse(options.deadline) - Date.now() : undefined;
+        if (remainingMs !== undefined && remainingMs <= 0) {
+          this.#taskStopReason = "deadline";
+          this.#taskHardStopped = true;
+          break;
+        }
         this.#bus.emit({ type: "acceptance_started", taskId: taskBox.id, attempt: round + 1, checks: [...checks] });
         const results = await runAcceptanceChecks({
           cwd: this.#cwd,
           checks,
           timeoutMs: options.checkTimeoutMs ?? 300_000,
-          ...(remainingMs === undefined ? {} : { remainingMs }),
+          ...(remainingMs === undefined ? {} : { deadlineAt: Date.parse(options.deadline!) }),
         });
+        if (!this.#taskStopReason && options.deadline && Date.now() >= Date.parse(options.deadline)) {
+          this.#taskStopReason = "deadline";
+          this.#taskHardStopped = true;
+        }
         results.forEach((result, index) => {
           this.#bus.emit({
             type: "acceptance_result",
@@ -839,27 +849,30 @@ export class AgentSession {
         });
         this.#taskAcceptance = { status: results.every((result) => result.status === "passed") ? "passed" : "failed", checks: results };
         accepted = this.#taskAcceptance.status === "passed";
-        if (!accepted && round < maxAcceptanceRounds) {
+        if (this.#taskStopReason && !accepted) break;
+        if (!accepted && round < maxAcceptanceRounds && !this.#taskStopReason) {
           const failures = results.filter((result) => result.status !== "passed");
           this.#model.addUserMessage(`机器验收未通过（第 ${round + 1} 轮）：\n${failures.map((result) => `${result.command}: ${result.status}\n${result.output}`).join("\n")}\n请修复后重新运行。`);
+        }
+        if (accepted && !this.#taskStopReason && this.#tools.files.journal.entries().length > journalBaseline && (this.#completionReview || checks.length > 0)) {
+          const review = await this.#runReview(options.description, journalBaseline, results);
+          this.#taskAcceptance = { ...this.#taskAcceptance, review };
+          this.#bus.emit({ type: "review_result", ...review, attempts: this.#reviewAttempts });
+          if (!review.passed) {
+            accepted = false;
+            if (round < maxAcceptanceRounds && !this.#taskStopReason) {
+              this.#model.addUserMessage(`完成审查未通过（第 ${round + 1} 轮）：\n${review.issues.join("\n")}\n请修复后重新运行全部机器验收命令。`);
+            }
+          }
         }
       }
       if (checks.length > 0 && !accepted) {
         status = "failed";
-        reason = "acceptance";
-      } else if (checks.length > 0) {
-        const changed = this.#tools.files.journal.entries().length > journalBaseline;
-        if (changed && this.#completionReview) {
-          const review = await this.#runReview(options.description, journalBaseline);
-          this.#taskAcceptance = { ...(this.#taskAcceptance ?? { status: "passed", checks: [] }), review };
-          this.#bus.emit({ type: "review_result", ...review, attempts: this.#reviewAttempts });
-          if (!review.passed) { status = "failed"; reason = "review"; }
-        }
+        reason = this.#taskAcceptance?.review && !this.#taskAcceptance.review.passed ? "review" : "acceptance";
       }
       if (this.#taskStopReason) {
-        status = this.#taskHardStopped
-          ? "interrupted"
-          : "completed";
+        const changed = this.#tools.files.journal.entries().length > journalBaseline;
+        status = options.checks?.length && (!accepted || changed) ? "interrupted" : (this.#taskHardStopped ? "interrupted" : "completed");
         reason = this.#taskStopReason;
       } else if (this.#state.status === "error" || this.#taskModelFailed) {
         status = "failed";
@@ -1016,7 +1029,7 @@ export class AgentSession {
   }
 
   /** 执行完成审查：独立 TaskRunner（main client + 只读 + 审查 prompt） */
-  async #runReview(taskReq: string, journalBaseline = 0): Promise<{
+  async #runReview(taskReq: string, journalBaseline = 0, checks?: AcceptanceCheckResult[]): Promise<{
     passed: boolean;
     issues: string[];
     summary: string;
@@ -1030,12 +1043,16 @@ export class AgentSession {
     const lastResult = [...this.#events]
       .reverse()
       .find((record) => record.event.type === "tool_result");
+    const checkEvidence = checks?.map((result) => `${result.command}: ${result.status}\n${result.output}`).join("\n")
     const prompt = buildReviewPrompt({
       taskReq,
       modifiedFiles,
-      ...(lastResult?.event.type === "tool_result"
-        ? { lastVerification: lastResult.event.summary }
-        : {}),
+      ...(checkEvidence
+        ? { lastVerification: checkEvidence }
+        : lastResult?.event.type === "tool_result"
+          ? { lastVerification: lastResult.event.summary }
+          : {}
+      ),
       todos: this.#state.todos(),
     });
     const runner = new TaskRunner({

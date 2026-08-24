@@ -308,7 +308,7 @@ async function runCli(): Promise<void> {
           "",
           "/permission <strict|normal|trust>  切换权限档",
           "/steer <指令>                      插队打断：当前工具完成后立即转向新指令",
-          "/run <任务> [--goal ... --bounds ... --until ... --budget ... --permission ...]",
+          "/run <任务> [--goal ... --check ... --check-timeout 秒 --bounds ... --until ... --budget ... --permission ...]",
           "/cost                              查看当前 token 统计",
           "/sessions                          查看全部会话",
           "/switch <id>                       切换/恢复会话",

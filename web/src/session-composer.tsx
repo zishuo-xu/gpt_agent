@@ -2,6 +2,8 @@
 export interface RunBoundsPreview {
   hardRules: Array<{ effect: "deny"; pattern: string }>;
   semanticBounds: string[];
+  checks?: string[];
+  checkTimeoutMs?: number;
 }
 
 /** 范围建议模板（参照生产测试：有界任务完成率/速度显著优于无界任务） */
@@ -154,11 +156,17 @@ export function RunBoundsConfirmation(props: {
         <div>
           <strong>启动前确认任务边界</strong>
           <p>
-            下列路径规则将在本次任务期间作为不可绕过的 deny
-            规则。
+            启动前确认任务边界与机器验收配置。
           </p>
         </div>
       </div>
+      {(props.preview.checks ?? []).length > 0 && (
+        <div className="run-bound-rules">
+          <strong>机器验收命令：</strong>
+          {(props.preview.checks ?? []).map((check) => <code key={check}>check · {check}</code>)}
+          <small>单项超时：{Math.round((props.preview.checkTimeoutMs ?? 300000) / 1000)} 秒</small>
+        </div>
+      )}
       <div className="run-bound-rules">
         {props.preview.hardRules.map((rule) => (
           <code key={rule.pattern}>deny · {rule.pattern}</code>

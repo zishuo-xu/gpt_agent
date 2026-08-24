@@ -9,7 +9,8 @@ export type EvalScenario =
   | "cost"
   | "budget"
   | "replay"
-  | "branch";
+  | "branch"
+  | "acceptance";
 
 export interface EvalMetrics {
   scenario: EvalScenario;

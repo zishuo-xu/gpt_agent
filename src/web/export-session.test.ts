@@ -77,3 +77,17 @@ test("导出 HTML：diff 高亮与错误事件", () => {
   assert.match(html, /class="event error"/, "错误事件样式");
   assert.match(html, /模型超时/);
 });
+
+test("导出 HTML：包含机器验收证据", () => {
+  const html = exportSessionHtml({
+    sessionId: "sess-acceptance",
+    title: "验收",
+    createdAt: "2026-08-07T09:00:00.000Z",
+    updatedAt: "2026-08-07T10:00:00.000Z",
+    permissionMode: "trust",
+    records: [record(1, { type: "acceptance_started", taskId: "t1", attempt: 1, checks: ["pnpm test"] }), record(2, { type: "acceptance_result", taskId: "t1", attempt: 1, index: 0, command: "pnpm test", status: "passed", durationMs: 3, output: "all pass" })],
+  });
+  assert.match(html, /机器验收/);
+  assert.match(html, /pnpm test/);
+  assert.match(html, /all pass/);
+});

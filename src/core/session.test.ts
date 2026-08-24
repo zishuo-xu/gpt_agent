@@ -439,6 +439,69 @@ test("/run 任务：run_started → 完成 → run_finished + 权限档恢复", 
   assert.equal(session.summary().permissionMode, "normal");
 });
 
+test("checks 首轮失败后修复，完整 checks 重跑并可信完成", async () => {
+  const marker = "acceptance-marker.txt";
+  const { session, collector, cwd } = await setup([
+    response("先结束本轮。"),
+    response("写入修复文件。", { toolCalls: [toolCall("write-fix", "Write", marker, { file_path: marker, content: "ok" })] }),
+    response("修复完成。"),
+    response("Verdict: PASS\nIssues:（无）\nUnconfirmed: 无"),
+  ], { mode: "trust" });
+  await session.runTask({ description: "验收修复", checks: [`test -f ${path.join(cwd, marker)}`], checkTimeoutMs: 5_000, permission: "trust", hardRules: [], semanticBounds: [] });
+  assert.equal(collector.eventsOf("acceptance_started").length, 2, collector.eventsOf("acceptance_result").map((e) => (e.event as { status?: string; output?: string }).status + ":" + (e.event as { output?: string }).output).join("\n"));
+  assert.equal(collector.eventsOf("run_finished").at(-1)?.event.type, "run_finished");
+  assert.equal((collector.eventsOf("run_finished").at(-1)?.event as { status: string }).status, "completed");
+  assert.equal(await readFile(path.join(cwd, marker), "utf8"), "ok");
+});
+
+test("checks 两轮修复耗尽后 failed/acceptance，恰好三次验收", async () => {
+  const { session, collector } = await setup([response("结束。"), response("仍然结束。"), response("再次结束。")], { mode: "trust" });
+  await session.runTask({ description: "失败验收", checks: ["false"], checkTimeoutMs: 5_000, permission: "trust", hardRules: [], semanticBounds: [] });
+  assert.equal(collector.eventsOf("acceptance_started").length, 3);
+  const finished = collector.eventsOf("run_finished").at(-1)?.event as { status: string; reason?: string };
+  assert.deepEqual({ status: finished.status, reason: finished.reason }, { status: "failed", reason: "acceptance" });
+});
+
+test("checks 任务即使 completionReview=false，有任务期写入也自动 review", async () => {
+  const marker = "review-marker.txt";
+  const { session, collector } = await setup([
+    response("写文件。", { toolCalls: [toolCall("write-review", "Write", marker, { file_path: marker, content: "ok" })] }),
+    response("完成。"),
+    response("Verdict: PASS\nIssues:（无）\nUnconfirmed: 无"),
+  ], { mode: "trust", completionReview: false });
+  await session.runTask({ description: "自动审查", checks: ["test -f review-marker.txt"], permission: "trust", hardRules: [], semanticBounds: [] });
+  assert.equal(collector.eventsOf("review_result").length, 1);
+  assert.equal((collector.eventsOf("run_finished").at(-1)?.event as { status: string }).status, "completed");
+});
+
+test("review 失败后重跑完整 checks，且与 checks 共享两轮额度", async () => {
+  const marker = "review-retry-marker.txt";
+  const { session, collector } = await setup([
+    response("写文件。", { toolCalls: [toolCall("write-review-retry", "Write", marker, { file_path: marker, content: "ok" })] }),
+    response("完成。"),
+    response("Verdict: FAIL\nIssues:\n- 需要补充修复\nUnconfirmed: 无"),
+    response("修复后完成。"),
+    response("Verdict: PASS\nIssues:（无）\nUnconfirmed: 无"),
+  ], { mode: "trust", completionReview: false });
+  await session.runTask({ description: "审查重试", checks: ["test -f review-retry-marker.txt"], permission: "trust", hardRules: [], semanticBounds: [] });
+  assert.equal(collector.eventsOf("acceptance_started").length, 2);
+  assert.equal(collector.eventsOf("review_result").length, 2);
+  assert.equal((collector.eventsOf("run_finished").at(-1)?.event as { status: string }).status, "completed");
+});
+
+test("任务开始前已有 journal 改动不触发自动 review", async () => {
+  const { session, collector, cwd } = await setup([
+    response("先写入文件。", { toolCalls: [toolCall("pre-write", "Write", "pre-task.txt", { file_path: "pre-task.txt", content: "before" })] }),
+    response("完成。"),
+    response("完成任务。"),
+  ], { mode: "trust", completionReview: true });
+  await session.sendInput("先写入文件", undefined);
+  const reviewsBefore = collector.eventsOf("review_result").length;
+  await session.runTask({ description: "无任务期改动", checks: ["true"], permission: "trust", hardRules: [], semanticBounds: [] });
+  assert.equal(collector.eventsOf("review_result").length, reviewsBefore);
+  void cwd;
+});
+
 test("compact：会话空闲时强制压缩", async () => {
   const { session } = await setup([]);
   // 未配置压缩客户端：compact 返回 false（不报错）

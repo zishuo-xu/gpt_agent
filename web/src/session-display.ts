@@ -289,6 +289,12 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
           "done",
         );
         break;
+      case "acceptance_started":
+        system(seq, `机器验收第 ${event.attempt} 轮已开始 · ${event.checks.join("；")}`, "running");
+        break;
+      case "acceptance_result":
+        system(seq, `机器验收 ${event.status} · ${event.command}`, event.status === "passed" ? "done" : "warning");
+        break;
       case "need_user":
         system(seq, `需要你的决定：${event.question}`, "warning");
         break;

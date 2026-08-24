@@ -170,6 +170,10 @@ function renderRecord(record: RecordedEvent): string {
         ts,
         `🏁 任务结束（${event.status}${event.reason ? ` · ${event.reason}` : ""}）`,
       );
+    case "acceptance_started":
+      return item("system", seq, ts, `🧪 开始机器验收（第 ${event.attempt} 轮）：${event.checks.join("；")}`);
+    case "acceptance_result":
+      return item("system", seq, ts, `🧪 验收 ${event.status}：${event.command}${event.output ? `\n${escapeHtml(event.output.slice(0, 500))}` : ""}`);
     case "context_compacted":
       return item(
         "system",

@@ -445,8 +445,14 @@ export function SessionApp(props: { initialSessionId?: string }) {
         const hardRules = preview.task?.hardRules ?? [];
         const semanticBounds =
           preview.task?.semanticBounds ?? [];
-        if (hardRules.length > 0 && !boundsConfirmed) {
-          setRunBoundsPreview({ hardRules, semanticBounds });
+        const checks = preview.task?.checks ?? [];
+        if ((hardRules.length > 0 || checks.length > 0) && !boundsConfirmed) {
+          setRunBoundsPreview({
+            hardRules,
+            semanticBounds,
+            checks,
+            ...(preview.task?.checkTimeoutMs === undefined ? {} : { checkTimeoutMs: preview.task.checkTimeoutMs }),
+          });
           return;
         }
         confirmBounds = boundsConfirmed;

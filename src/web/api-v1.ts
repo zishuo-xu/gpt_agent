@@ -310,7 +310,9 @@ export type V1Event =
       issues: string[];
       summary: string;
       attempts: number;
-    };
+    }
+  | { seq: number; ts: string; type: "acceptance.started"; taskId: string; attempt: number; checks: string[] }
+  | { seq: number; ts: string; type: "acceptance.result"; taskId: string; attempt: number; index: number; command: string; status: string; exitCode?: number; durationMs: number; output?: string };
 
 /**
  * 内部事件 → v1 白名单契约（多对一折叠；未知类型永不破坏契约，折叠为 system.info）。
@@ -390,6 +392,21 @@ function mapV1Event(
         issues: event.issues,
         summary: event.summary,
         attempts: event.attempts,
+      };
+    case "acceptance_started":
+      return { ...base, type: "acceptance.started", taskId: event.taskId, attempt: event.attempt, checks: event.checks };
+    case "acceptance_result":
+      return {
+        ...base,
+        type: "acceptance.result",
+        taskId: event.taskId,
+        attempt: event.attempt,
+        index: event.index,
+        command: event.command,
+        status: event.status,
+        ...(event.exitCode === undefined ? {} : { exitCode: event.exitCode }),
+        durationMs: event.durationMs,
+        ...(event.output ? { output: event.output } : {}),
       };
     case "ledger_update":
       return {

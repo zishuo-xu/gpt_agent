@@ -3,6 +3,9 @@ import { defineConfig } from "@playwright/test";
 
 // 仓库根目录动态解析：主目录与 worktree 均可运行本配置
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+const browserChannel = process.env.MYAGENT_E2E_CHANNEL === "chrome"
+  ? "chrome" as const
+  : undefined;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -14,6 +17,7 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:3100",
     headless: true,
+    ...(browserChannel ? { channel: browserChannel } : {}),
   },
   projects: [
     {

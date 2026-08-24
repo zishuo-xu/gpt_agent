@@ -213,6 +213,18 @@ test("Web /run 预览返回待确认的路径硬边界", async () => {
   );
 });
 
+test("Web /run 预览返回机器验收命令与超时", async () => {
+  const { app } = await fixture();
+  const response = await app.request("/api/run/preview", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ command: '/run 修复 --check "pnpm test" --check "pnpm run typecheck" --check-timeout 42' }),
+  });
+  const payload = await response.json();
+  assert.deepEqual(payload.task.checks, ["pnpm test", "pnpm run typecheck"]);
+  assert.equal(payload.task.checkTimeoutMs, 42_000);
+});
+
 test("已有会话发消息兼容 message 字段（与 task 一致）", async () => {
   const { service } = await fixture();
   const fakeSession = {

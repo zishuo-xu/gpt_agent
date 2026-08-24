@@ -36,6 +36,8 @@ function stepsFor(scenario: EvalScenario, cwd: string): ScriptedStep[] {
     case "replay":
     case "branch":
       return [action("Read", file, { file_path: file }), { kind: "respond", text: "done" }];
+    case "acceptance":
+      return [action("Read", file, { file_path: file }), { kind: "respond", text: "done" }];
   }
 }
 
@@ -73,6 +75,9 @@ export async function runScenario(scenario: EvalScenario, options: EvalOptions =
     if (scenario === "budget") {
       await session.runTask({ description: "budget eval", goal: "read fixture", hardRules: [], semanticBounds: [], budgetCny: 0.00001, permission: "trust" });
       verification = ["run_finished(reason=budget) emitted"];
+    } else if (scenario === "acceptance") {
+      await session.runTask({ description: "acceptance eval", checks: ["printf acceptance-ok"], checkTimeoutMs: 1000, hardRules: [], semanticBounds: [], permission: "trust" });
+      verification = ["acceptance_result passed emitted"];
     } else {
       await session.sendInput(`eval ${scenario}`);
       if (scenario === "replay") {
@@ -117,6 +122,8 @@ export async function runScenario(scenario: EvalScenario, options: EvalOptions =
               ? metrics.cost > 0 && metrics.tokens.total > 0
               : scenario === "budget"
                 ? session.events().some((record) => record.event.type === "run_finished" && record.event.reason === "budget")
+                : scenario === "acceptance"
+                  ? session.events().some((record) => record.event.type === "acceptance_result" && record.event.status === "passed") && session.events().some((record) => record.event.type === "run_finished" && record.event.status === "completed")
                 : scenario === "replay"
                   ? recovery.succeeded
                   : branchCreated;
@@ -128,7 +135,7 @@ export async function runScenario(scenario: EvalScenario, options: EvalOptions =
 }
 
 export async function runAllScenarios(options: EvalOptions = {}): Promise<EvalMetrics[]> {
-  const scenarios: EvalScenario[] = ["read", "edit", "recovery", "deny", "approval", "cost", "budget", "replay", "branch"];
+  const scenarios: EvalScenario[] = ["read", "edit", "recovery", "deny", "approval", "cost", "budget", "replay", "branch", "acceptance"];
   return Promise.all(scenarios.map((scenario) => runScenario(scenario, options)));
 }
 

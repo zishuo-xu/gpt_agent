@@ -172,6 +172,16 @@ test("v1 事件映射：tool_result 跨事件补 tool 名；未知类型折叠 s
   assert.match((events[2] as { message: string }).message, /压缩/);
 });
 
+test("v1 acceptance 事件映射保留轮次与证据", () => {
+  const events = mapV1Events([
+    record(20, { type: "acceptance_started", taskId: "t1", attempt: 2, checks: ["pnpm test"] }),
+    record(21, { type: "acceptance_result", taskId: "t1", attempt: 2, index: 0, command: "pnpm test", status: "passed", durationMs: 12, output: "ok" }),
+  ]);
+  assert.equal(events[0]?.type, "acceptance.started");
+  assert.equal(events[1]?.type, "acceptance.result");
+  assert.equal((events[1] as { output?: string }).output, "ok");
+});
+
 function bearer(token = "secret-token") {
   return { headers: { authorization: `Bearer ${token}` } };
 }

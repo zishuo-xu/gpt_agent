@@ -20,6 +20,18 @@ export interface RunSummary {
   durationMs: number;
   summary: string;
   todos: TodoItem[];
+  acceptance?: {
+    status: "passed" | "failed";
+    attempts: number;
+    checks: Array<{
+      command: string;
+      status: "passed" | "failed" | "timed_out";
+      exitCode?: number;
+      durationMs: number;
+      output?: string;
+    }>;
+    review?: { passed: boolean; issues: string[]; summary: string };
+  };
 }
 
 export function extractRunSummary(
@@ -81,6 +93,23 @@ export function extractRunSummary(
     break;
   }
 
+  const acceptanceEvents = records
+    .slice(runStartIndex, runFinish.index + 1)
+    .map((record) => record.event)
+    .filter((event) => event.type === "acceptance_result");
+  const latestAttempt = acceptanceEvents.reduce(
+    (max, event) => event.type === "acceptance_result" ? Math.max(max, event.attempt) : max,
+    0,
+  );
+  const latestAcceptanceEvents = acceptanceEvents.filter(
+    (event) => event.type === "acceptance_result" && event.attempt === latestAttempt,
+  );
+  const reviewEvent = records
+    .slice(runStartIndex, runFinish.index + 1)
+    .map((record) => record.event)
+    .reverse()
+    .find((event) => event.type === "review_result");
+
   const startedAt = records[runStartIndex]?.ts ?? "";
   return {
     taskId: runStartTaskId,
@@ -92,5 +121,21 @@ export function extractRunSummary(
     durationMs: Math.max(0, Date.parse(runFinish.ts) - Date.parse(startedAt)),
     summary: summary.trim(),
     todos: structuredClone(todos),
+    ...(acceptanceEvents.length > 0
+      ? {
+          acceptance: {
+            status: latestAcceptanceEvents.every((event) => event.type === "acceptance_result" && event.status === "passed") ? "passed" as const : "failed" as const,
+            attempts: latestAttempt,
+            checks: latestAcceptanceEvents.map((event) => event.type === "acceptance_result" ? {
+              command: event.command,
+              status: event.status,
+              ...(event.exitCode === undefined ? {} : { exitCode: event.exitCode }),
+              durationMs: event.durationMs,
+              ...(event.output ? { output: event.output } : {}),
+            } : undefined).filter((value): value is NonNullable<typeof value> => value !== undefined),
+            ...(reviewEvent?.type === "review_result" ? { review: reviewEvent } : {}),
+          },
+        }
+      : {}),
   };
 }

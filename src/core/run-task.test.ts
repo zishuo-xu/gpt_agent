@@ -27,6 +27,7 @@ import type { AgentEvent, RecordedEvent } from "./types.js";
 
 class ScriptedClient implements ModelClient {
   readonly #responses: ModelResponse[];
+  calls = 0;
   /** 门控：设置后每次 complete 先等待 releaseGate（测试控制任务轮挂起窗口） */
   #gate: (() => void) | undefined;
   /** 当前是否挂在门控上（complete 已挂起等待放行） */
@@ -50,6 +51,7 @@ class ScriptedClient implements ModelClient {
   }
 
   async complete(_request: CompletionRequest): Promise<ModelResponse> {
+    this.calls += 1;
     if (this.#gate) {
       this.gateHeld = true;
       await new Promise<void>((resolve) => {
@@ -92,6 +94,25 @@ test("/run 解析引号参数、未来时间与路径硬边界", () => {
     ],
   );
   assert.deepEqual(task.semanticBounds, ["不动数据库 schema"]);
+});
+
+test("/run 重复 --check 保持顺序并支持 timeout，序列化可恢复", () => {
+  const parsed = parseRunCommand('/run 修复 --goal "目标" --check "pnpm test" --check "pnpm run typecheck" --check-timeout 42');
+  assert.deepEqual(parsed.checks, ["pnpm test", "pnpm run typecheck"]);
+  assert.equal(parsed.checkTimeoutMs, 42_000);
+  const restored = taskOptionsFromSerialized(serializeTaskOptions(parsed));
+  assert.deepEqual(restored.checks, parsed.checks);
+  assert.equal(restored.checkTimeoutMs, 42_000);
+});
+
+test("/run 非法 check timeout 被拒绝", () => {
+  assert.throws(() => parseRunCommand("/run x --check echo --check-timeout 0"), /check-timeout/);
+});
+
+test("/run 非列表参数重复时保持旧版最后值生效语义", () => {
+  const parsed = parseRunCommand('/run 修复 --goal "旧目标" --goal "新目标" --check "first" --check "second"');
+  assert.equal(parsed.goal, "新目标");
+  assert.deepEqual(parsed.checks, ["first", "second"]);
 });
 
 test("/run 边界为“不改任何文件”时生成全量写保护", () => {
@@ -241,6 +262,90 @@ test("无人值守预算耗尽后禁止新工具并恢复原权限档", async ()
   if (finished?.type === "run_finished") {
     assert.equal(finished.status, "completed");
     assert.equal(finished.reason, "budget");
+  }
+});
+
+test("带 checks 的预算任务：无需修复或审查时可信完成", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-check-budget-pass-"));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "myagent-check-budget-pass-state-"));
+  await writeFile(path.join(cwd, "input.txt"), "ready\n", "utf8");
+  const client = new ScriptedClient([
+    response("", [{ id: "read", tool: "Read", target: "input.txt", args: { file_path: "input.txt" } }], { input: 1_000_000, output: 0, cached: 0 }),
+    response("预算收尾。"),
+  ]);
+  const session = new AgentSession({
+    id: "check-budget-pass",
+    title: "预算验收通过",
+    cwd,
+    mode: "normal",
+    completionReview: false,
+    model: new ConversationAgentModel(client, []),
+    stateDir,
+    pricing: { main: { inputPerMillionCny: 1, outputPerMillionCny: 1, cachedInputPerMillionCny: 0.2 } },
+  });
+  const events: AgentEvent[] = [];
+  session.subscribe((record) => events.push(record.event));
+
+  await session.runTask({
+    description: "预算后执行机器验收",
+    budgetCny: 0.5,
+    checks: ["test -f input.txt"],
+    permission: "trust",
+    hardRules: [],
+    semanticBounds: [],
+  });
+
+  assert.equal(client.calls, 2, "预算耗尽后只允许原任务收尾，不增加修复模型调用");
+  assert.equal(events.filter((event) => event.type === "acceptance_started").length, 1);
+  const finished = events.find((event) => event.type === "run_finished");
+  assert.equal(finished?.type, "run_finished");
+  if (finished?.type === "run_finished") {
+    assert.deepEqual(
+      { status: finished.status, reason: finished.reason },
+      { status: "completed", reason: "budget" },
+    );
+  }
+});
+
+test("带 checks 的预算任务：验收失败时不再调用模型修复", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-check-budget-fail-"));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "myagent-check-budget-fail-state-"));
+  await writeFile(path.join(cwd, "input.txt"), "ready\n", "utf8");
+  const client = new ScriptedClient([
+    response("", [{ id: "read", tool: "Read", target: "input.txt", args: { file_path: "input.txt" } }], { input: 1_000_000, output: 0, cached: 0 }),
+    response("预算收尾。"),
+  ]);
+  const session = new AgentSession({
+    id: "check-budget-fail",
+    title: "预算验收失败",
+    cwd,
+    mode: "normal",
+    completionReview: false,
+    model: new ConversationAgentModel(client, []),
+    stateDir,
+    pricing: { main: { inputPerMillionCny: 1, outputPerMillionCny: 1, cachedInputPerMillionCny: 0.2 } },
+  });
+  const events: AgentEvent[] = [];
+  session.subscribe((record) => events.push(record.event));
+
+  await session.runTask({
+    description: "预算后验收失败",
+    budgetCny: 0.5,
+    checks: ["false"],
+    permission: "trust",
+    hardRules: [],
+    semanticBounds: [],
+  });
+
+  assert.equal(client.calls, 2, "验收失败不得突破预算启动修复轮");
+  assert.equal(events.filter((event) => event.type === "acceptance_started").length, 1);
+  const finished = events.find((event) => event.type === "run_finished");
+  assert.equal(finished?.type, "run_finished");
+  if (finished?.type === "run_finished") {
+    assert.deepEqual(
+      { status: finished.status, reason: finished.reason },
+      { status: "interrupted", reason: "budget" },
+    );
   }
 });
 
