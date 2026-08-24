@@ -5,6 +5,7 @@ import { extractRunSummary } from "../core/run-summary.js";
 import { exportSessionHtml } from "./export-session.js";
 import type { WebSessionEvent } from "./sessions.js";
 import type { WebRouteDeps } from "./routes-context.js";
+import { redactTrace } from "../core/trace-redaction.js";
 
 /** 会话路由：集合创建 / 详情操作（输入/审批/导出/中断/续跑/分支/书签）/ SSE 事件流 */
 export function registerSessionRoutes(
@@ -332,6 +333,67 @@ export function registerSessionRoutes(
     const session = target.sessionManager?.get(context.req.param("id"));
     if (!session) return context.json({ error: "会话不存在" }, 404);
     return context.json({ events: session.events() });
+  });
+
+  // Flight Recorder: list lightweight metadata by default; details are loaded
+  // separately so the session view does not transfer full prompts/tool output.
+  app.get("/api/sessions/:id/traces", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
+    if (!session) return context.json({ error: "会话不存在" }, 404);
+    const traces = await session.traces();
+    return context.json({
+      traces: traces.map((trace) => ({
+        version: trace.version,
+        turn: trace.turn,
+        turnId: trace.turnId,
+        branchId: trace.branchId,
+        ts: trace.ts,
+        startedAt: trace.startedAt,
+        endedAt: trace.endedAt,
+        durationMs: trace.durationMs,
+        eventSeqStart: trace.eventSeqStart,
+        eventSeqEnd: trace.eventSeqEnd,
+        modelRole: trace.modelRole,
+        providerId: trace.providerId,
+        model: trace.model,
+        usage: trace.usage,
+        toolCount: trace.tools.length,
+        tools: trace.tools.map((tool) => ({
+          tool: tool.call.tool,
+          permission: tool.permission,
+          ms: tool.ms,
+        })),
+        // Legacy records have no event range and cannot safely be forked.
+        canFork:
+          trace.version === 2 &&
+          typeof trace.turnId === "string" &&
+          trace.modelRole === "main" &&
+          typeof trace.eventSeqStart === "number" &&
+          typeof trace.eventSeqEnd === "number" &&
+          trace.eventSeqEnd > trace.eventSeqStart,
+      })),
+    });
+  });
+
+  app.get("/api/sessions/:id/traces/:turnId", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
+    if (!session) return context.json({ error: "会话不存在" }, 404);
+    const trace = (await session.traces()).find(
+      (item) => item.turnId === context.req.param("turnId"),
+    );
+    if (!trace) return context.json({ error: "Trace 不存在" }, 404);
+    const requestedView = context.req.query("view");
+    if (requestedView && requestedView !== "raw" && requestedView !== "redacted") {
+      return context.json({ error: "view 必须是 raw 或 redacted" }, 400);
+    }
+    const view = requestedView ?? "redacted";
+    // Raw is intentionally opt-in; no raw payload is cached by this route.
+    return context.json({
+      trace: view === "raw" ? trace : redactTrace(trace),
+      redacted: view !== "raw",
+    });
   });
 
   app.get("/api/sessions/:id/stream", async (context) => {

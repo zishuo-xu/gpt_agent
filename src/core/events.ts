@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import { mkdir, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { readJsonl } from "../utils/fs.js";
@@ -111,8 +112,20 @@ export class SessionStore {
 }
 
 export interface AgentTurnTrace {
+  /** v2 is written for new traces; absent on legacy records. */
+  version?: 2;
   turn: number;
   ts: string;
+  turnId?: string;
+  branchId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  eventSeqStart?: number;
+  eventSeqEnd?: number;
+  modelRole?: "main" | "cheap" | "explore";
+  providerId?: string;
+  model?: string;
   request?: unknown;
   response?: unknown;
   tools: Array<{
@@ -132,8 +145,19 @@ export class TraceStore {
   /** 关闭后不再落盘（会话删除场景） */
   #closed = false;
 
-  constructor(filePath: string) {
+  readonly #getBranchId: (() => string) | undefined;
+  readonly #getEventSeq: (() => number) | undefined;
+
+  constructor(
+    filePath: string,
+    options: {
+      getBranchId?: () => string;
+      getEventSeq?: () => number;
+    } = {},
+  ) {
     this.#filePath = filePath;
+    this.#getBranchId = options.getBranchId;
+    this.#getEventSeq = options.getEventSeq;
   }
 
   /** 关闭写链：后续 trace 静默丢弃 */
@@ -141,16 +165,33 @@ export class TraceStore {
     this.#closed = true;
   }
 
-  record(
-    trace: Omit<AgentTurnTrace, "turn" | "ts">,
-  ): void {
+  record(trace: TraceRecordInput): void {
     if (this.#closed) return;
+    // Capture correlation metadata at invocation time. The write queue may run
+    // much later, after the branch or event counter has moved on.
+    const endedAt = trace.endedAt ?? new Date().toISOString();
+    const startedAt = trace.startedAt ?? endedAt;
+    const branchId = trace.branchId ?? this.#getBranchId?.();
+    const eventSeqStart = trace.eventSeqStart ?? this.#getEventSeq?.();
+    const eventSeqEnd = trace.eventSeqEnd ?? this.#getEventSeq?.();
+    const captured: Pick<AgentTurnTrace, "version" | "turnId" | "branchId" | "startedAt" | "endedAt" | "durationMs" | "eventSeqStart" | "eventSeqEnd"> = {
+      version: 2 as const,
+      turnId: trace.turnId ?? randomUUID(),
+      startedAt,
+      endedAt,
+      durationMs:
+        trace.durationMs ?? Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)),
+      ...(branchId === undefined ? {} : { branchId }),
+      ...(eventSeqStart === undefined ? {} : { eventSeqStart }),
+      ...(eventSeqEnd === undefined ? {} : { eventSeqEnd }),
+    };
     this.#writeTail = this.#writeTail
       .then(async () => {
         await this.#initializeTurn();
         const record: AgentTurnTrace = {
           turn: ++this.#turn,
-          ts: new Date().toISOString(),
+          ts: endedAt,
+          ...captured,
           ...trace,
         };
         await mkdir(path.dirname(this.#filePath), {
@@ -193,3 +234,6 @@ export class TraceStore {
     }
   }
 }
+
+/** Input accepted by TraceStore; generated identity/timing fields are optional. */
+export type TraceRecordInput = Omit<AgentTurnTrace, "turn" | "ts" | "version">;

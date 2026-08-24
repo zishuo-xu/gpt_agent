@@ -401,6 +401,111 @@ test("分支 API 列出分支树并支持切换", async () => {
   assert.equal(missing.status, 404);
 });
 
+test("Flight Recorder Trace API 默认脱敏并限制旧/非主 Turn Fork", async () => {
+  const { service } = await fixture();
+  const fakeSession = {
+    traces: async () => [
+      {
+        version: 2,
+        turn: 1,
+        turnId: "turn-main",
+        ts: "2026-08-25T00:00:01.000Z",
+        startedAt: "2026-08-25T00:00:00.000Z",
+        endedAt: "2026-08-25T00:00:01.000Z",
+        durationMs: 1_000,
+        branchId: "main",
+        eventSeqStart: 2,
+        eventSeqEnd: 5,
+        modelRole: "main",
+        providerId: "test",
+        model: "model-a",
+        request: {
+          headers: { authorization: "Bearer raw-secret" },
+          messages: ["OPENAI_API_KEY=env-secret"],
+        },
+        response: { text: "done" },
+        tools: [
+          {
+            call: {
+              id: "call-1",
+              tool: "Bash",
+              target: "pnpm test",
+              args: { command: "echo secret" },
+            },
+            permission: "allow",
+            result: { output: "ok" },
+            ms: 10,
+          },
+        ],
+        usage: { input: 10, output: 2, cached: 1 },
+      },
+      {
+        version: 2,
+        turn: 2,
+        turnId: "turn-compact",
+        ts: "2026-08-25T00:00:02.000Z",
+        eventSeqStart: 5,
+        eventSeqEnd: 5,
+        modelRole: "cheap",
+        tools: [],
+      },
+      {
+        turn: 3,
+        ts: "2026-08-25T00:00:03.000Z",
+        tools: [],
+      },
+    ],
+  } as never;
+  const fakeManager = {
+    get: (id: string) => (id === "sess-trace" ? fakeSession : undefined),
+  } as unknown as WebSessionManager;
+  const app = createWebApp(service, fakeManager);
+
+  const listResponse = await app.request("/api/sessions/sess-trace/traces");
+  assert.equal(listResponse.status, 200);
+  const list = await listResponse.json();
+  assert.deepEqual(
+    list.traces.map((trace: { canFork: boolean }) => trace.canFork),
+    [true, false, false],
+  );
+  assert.equal(list.traces[0].tools[0].tool, "Bash");
+  assert.equal("args" in list.traces[0].tools[0], false);
+
+  const redactedResponse = await app.request(
+    "/api/sessions/sess-trace/traces/turn-main",
+  );
+  assert.equal(redactedResponse.status, 200);
+  const redacted = await redactedResponse.json();
+  assert.equal(redacted.redacted, true);
+  assert.equal(
+    redacted.trace.request.headers.authorization,
+    "[REDACTED]",
+  );
+  assert.equal(
+    redacted.trace.request.messages[0],
+    "OPENAI_API_KEY=[REDACTED]",
+  );
+
+  const rawResponse = await app.request(
+    "/api/sessions/sess-trace/traces/turn-main?view=raw",
+  );
+  const raw = await rawResponse.json();
+  assert.equal(raw.redacted, false);
+  assert.equal(
+    raw.trace.request.headers.authorization,
+    "Bearer raw-secret",
+  );
+
+  const invalidView = await app.request(
+    "/api/sessions/sess-trace/traces/turn-main?view=unsafe",
+  );
+  assert.equal(invalidView.status, 400);
+  const missing = await app.request(
+    "/api/sessions/sess-trace/traces/missing",
+  );
+  assert.equal(missing.status, 404);
+});
+
 test("认证中间件经 mountBeforeRoutes 在业务路由前生效", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "myagent-api-"));
   const service = new ConfigService({

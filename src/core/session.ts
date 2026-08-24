@@ -233,6 +233,10 @@ export class AgentSession {
     );
     this.#traceStore = new TraceStore(
       path.join(sessionsRoot, `${this.id}.trace.jsonl`),
+      {
+        getBranchId: () => this.#branchOps.currentBranchId(),
+        getEventSeq: () => this.#eventSeq,
+      },
     );
     const taskRunner = options.exploreModelClient
       ? new TaskRunner({
@@ -443,6 +447,11 @@ export class AgentSession {
     return this.#events.filter((event) => event.seq > after);
   }
 
+  /** Agent Harness Flight Recorder trace metadata/details. */
+  async traces(): Promise<import("./events.js").AgentTurnTrace[]> {
+    return await this.#traceStore.readAll();
+  }
+
   /** 分支树（根分支 main 恒存在） */
   branches(): SessionBranch[] {
     return this.#branchOps.branches();
@@ -650,6 +659,7 @@ export class AgentSession {
           parallelTools: this.#parallelTools,
           getTodos: () => this.#state.todos(),
           recordTrace: (trace) => this.#traceStore.record(trace),
+          getEventSeq: () => this.#eventSeq,
         });
         this.#activeLoop = loop;
         try {

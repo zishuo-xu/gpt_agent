@@ -27,6 +27,7 @@ import {
 import { isToolName, looksReadOnlyToolName, TOOL_NAMES } from "../shared/tool-names.js";
 import { usageCostCny } from "../utils/cost.js";
 import { abortableSleep } from "../utils/sleep.js";
+import type { TraceRecordInput } from "./events.js";
 
 /**
  * 重试退避 25% 向下抖动（参照 Pi provider 级公式 0.5×2^n ≤8s + 抖动）：
@@ -116,17 +117,8 @@ export interface AgentLoopOptions {
   ) => ToolExecutionResult | void | Promise<ToolExecutionResult | void>;
   /** todo 快照读取（done 校验用；不传则跳过未完成检查） */
   getTodos?: () => TodoItem[];
-  recordTrace?: (trace: {
-    request?: unknown;
-    response?: unknown;
-    tools: Array<{
-      call: ToolCall;
-      permission: string;
-      result?: unknown;
-      ms: number;
-    }>;
-    usage?: { input: number; output: number; cached: number };
-  }) => void;
+  recordTrace?: (trace: TraceRecordInput) => void;
+  getEventSeq?: () => number;
 }
 
 export class AgentLoop {
@@ -143,6 +135,7 @@ export class AgentLoop {
   readonly #getTotalCostCny: (() => number) | undefined;
   readonly #modelRole: "main" | "cheap" | "explore";
   readonly #recordTrace: AgentLoopOptions["recordTrace"];
+  readonly #getEventSeq: AgentLoopOptions["getEventSeq"];
   readonly #maxTurns: number | undefined;
   readonly #modelCompactCount: AgentLoopOptions["modelCompactCount"];
   readonly #retryMaxRetries: number;
@@ -179,6 +172,7 @@ export class AgentLoop {
     this.#getTotalCostCny = options.getTotalCostCny;
     this.#modelRole = options.modelRole ?? "main";
     this.#recordTrace = options.recordTrace;
+    this.#getEventSeq = options.getEventSeq;
     this.#maxTurns = options.maxTurns;
     this.#modelCompactCount = options.modelCompactCount;
     this.#retryMaxRetries = options.retryMaxRetries ?? 3;
@@ -464,11 +458,15 @@ export class AgentLoop {
           // 打断点二：模型轮间（上一轮无工具或已处理完毕），不再发起新轮
           return;
         }
+        const startedAt = new Date().toISOString();
+        const startedAtMs = Date.now();
+        const eventSeqStart = this.#getEventSeq?.();
         let turn: ModelTurn;
         try {
           turn = await this.#requestTurn(signal);
         } catch (error) {
           const trace = modelErrorTrace(error);
+          const eventSeqEnd = this.#getEventSeq?.();
           this.#recordTrace?.({
             ...(trace?.request === undefined
               ? {}
@@ -481,11 +479,18 @@ export class AgentLoop {
                     : "未知模型错误",
               },
             tools: [],
+            startedAt,
+            endedAt: new Date().toISOString(),
+            durationMs: Date.now() - startedAtMs,
+            ...(eventSeqStart === undefined ? {} : { eventSeqStart }),
+            ...(eventSeqEnd === undefined ? {} : { eventSeqEnd }),
+            modelRole: this.#modelRole,
           });
           throw error;
         }
         const traceTools: ToolTraceItem[] = [];
         const recordTurn = () => {
+          const eventSeqEnd = this.#getEventSeq?.();
           this.#recordTrace?.({
             ...(turn.trace?.request === undefined
               ? {}
@@ -495,6 +500,14 @@ export class AgentLoop {
               : { response: turn.trace.response }),
             tools: traceTools,
             ...(turn.usage ? { usage: turn.usage } : {}),
+            startedAt,
+            endedAt: new Date().toISOString(),
+            durationMs: Date.now() - startedAtMs,
+            ...(eventSeqStart === undefined ? {} : { eventSeqStart }),
+            ...(eventSeqEnd === undefined ? {} : { eventSeqEnd }),
+            modelRole: this.#modelRole,
+            ...(turn.providerId ? { providerId: turn.providerId } : {}),
+            ...(turn.model ? { model: turn.model } : {}),
           });
         };
         for (const fallback of turn.fallbacks ?? []) {

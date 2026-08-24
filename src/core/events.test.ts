@@ -8,6 +8,7 @@ import {
   SessionStore,
   TraceStore,
 } from "./events.js";
+import { redactTrace } from "./trace-redaction.js";
 
 test("SessionStore 按序追加并可重放 JSONL 事件", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-events-"));
@@ -74,6 +75,46 @@ test("TraceStore 独立按 turn 追加完整工程追踪", async () => {
   assert.deepEqual(traces[0]?.response, {
     raw: { id: "response-1" },
   });
+  assert.equal(traces[0]?.version, 2);
+  assert.match(traces[0]?.turnId ?? "", /^[0-9a-f-]{36}$/);
+  assert.equal(traces[0]?.durationMs, 0);
+});
+
+test("TraceStore 兼容旧记录并在写入时捕获分支/事件关联", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-trace-v2-"));
+  const filePath = path.join(directory, "trace.jsonl");
+  const store = new TraceStore(filePath, {
+    getBranchId: () => "main",
+    getEventSeq: () => 12,
+  });
+  store.record({ tools: [], eventSeqStart: 10, eventSeqEnd: 12 });
+  await store.flush();
+  const trace = (await store.readAll())[0]!;
+  assert.equal(trace.version, 2);
+  assert.equal(trace.branchId, "main");
+  assert.equal(trace.eventSeqStart, 10);
+  assert.equal(trace.eventSeqEnd, 12);
+});
+
+test("Trace 脱敏递归处理密钥且不修改原值", () => {
+  const source = {
+    headers: { Authorization: "Bearer abc", cookie: "sid=secret" },
+    nested: {
+      apiKey: "top-secret",
+      value: "OPENAI_API_KEY=env-secret safe",
+      endpoint: "https://user:pass@example.com/v1",
+    },
+  };
+  const redacted = redactTrace(source);
+  assert.equal(redacted.headers.Authorization, "[REDACTED]");
+  assert.equal(redacted.headers.cookie, "[REDACTED]");
+  assert.equal(redacted.nested.apiKey, "[REDACTED]");
+  assert.equal(redacted.nested.value, "OPENAI_API_KEY=[REDACTED] safe");
+  assert.equal(
+    redacted.nested.endpoint,
+    "https://user:[REDACTED]@example.com/v1",
+  );
+  assert.equal(source.nested.apiKey, "top-secret");
 });
 
 test("SessionStore 单次写失败不断链：后续事件照常落盘，flush 显式报告", async () => {
