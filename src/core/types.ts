@@ -117,6 +117,23 @@ export type AgentEvent =
       attempts: number;
     }
   | {
+      type: "acceptance_started";
+      taskId: string;
+      attempt: number;
+      checks: string[];
+    }
+  | {
+      type: "acceptance_result";
+      taskId: string;
+      attempt: number;
+      command: string;
+      index: number;
+      status: "passed" | "failed" | "timed_out";
+      exitCode?: number;
+      durationMs: number;
+      output?: string;
+    }
+  | {
       type: "run_started";
       taskId: string;
       description: string;
@@ -133,6 +150,10 @@ export type AgentEvent =
         deadline?: string;
         budgetCny?: number;
         permission?: PermissionMode;
+        approveTimeoutMs?: number;
+        autoAllowRules?: string[];
+        checks?: string[];
+        checkTimeoutMs?: number;
         hardRules: PermissionRule[];
         semanticBounds: string[];
       };
@@ -148,7 +169,7 @@ export type AgentEvent =
       type: "run_finished";
       taskId: string;
       status: "completed" | "interrupted" | "failed";
-      reason?: "done" | "deadline" | "budget" | "error" | "interrupted";
+      reason?: "done" | "deadline" | "budget" | "error" | "interrupted" | "acceptance" | "review";
     }
   | {
       type: "model_fallback";

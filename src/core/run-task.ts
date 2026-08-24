@@ -22,6 +22,10 @@ export interface RunTaskOptions {
   approveTimeoutMs?: number;
   /** 任务期自动放行规则（--auto-allow 逗号分隔的权限 pattern，如 "Bash(pnpm*),Read(*)"；结束回落） */
   autoAllowRules?: string[];
+  /** 系统执行的机器验收命令（按声明顺序） */
+  checks?: string[];
+  /** 单条验收命令超时（毫秒，默认 5 分钟） */
+  checkTimeoutMs?: number;
 }
 
 export interface TaskBoxDecision {
@@ -169,7 +173,7 @@ export function parseRunCommand(
   const tokens = tokenize(command.trim());
   if (tokens[0] === "/run") tokens.shift();
   const description: string[] = [];
-  const values = new Map<string, string>();
+  const values = new Map<string, string[]>();
   const known = new Set([
     "--goal",
     "--bounds",
@@ -180,6 +184,8 @@ export function parseRunCommand(
     "--every",
     "--approve-timeout",
     "--auto-allow",
+    "--check",
+    "--check-timeout",
   ]);
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index] ?? "";
@@ -191,20 +197,23 @@ export function parseRunCommand(
     if (!value || value.startsWith("--")) {
       throw new Error(`${token} 缺少参数`);
     }
-    values.set(token, value);
+    const existing = values.get(token) ?? [];
+    existing.push(value);
+    values.set(token, existing);
     index += 1;
   }
   const task = description.join(" ").trim();
   if (!task) throw new Error("/run 后需要任务描述");
 
-  const permissionValue = values.get("--permission");
+  const one = (key: string): string | undefined => values.get(key)?.[0];
+  const permissionValue = one("--permission");
   if (
     permissionValue &&
     !["strict", "normal", "trust"].includes(permissionValue)
   ) {
     throw new Error("--permission 必须是 strict、normal 或 trust");
   }
-  const budgetValue = values.get("--budget");
+  const budgetValue = one("--budget");
   const budgetCny =
     budgetValue === undefined ? undefined : Number(budgetValue);
   if (
@@ -213,13 +222,13 @@ export function parseRunCommand(
   ) {
     throw new Error("--budget 必须是大于 0 的人民币金额");
   }
-  const until = values.get("--until");
+  const until = one("--until");
   const deadline = until ? parseDeadline(until, now) : undefined;
-  const bounds = values.get("--bounds");
-  const goal = values.get("--goal");
-  const atValue = values.get("--at");
+  const bounds = one("--bounds");
+  const goal = one("--goal");
+  const atValue = one("--at");
   const at = atValue ? parseAtTime(atValue, now) : undefined;
-  const everyValue = values.get("--every");
+  const everyValue = one("--every");
   const everyMinutes =
     everyValue === undefined ? undefined : Number(everyValue);
   if (
@@ -228,7 +237,7 @@ export function parseRunCommand(
   ) {
     throw new Error("--every 必须是大于 0 的整数分钟");
   }
-  const approveTimeoutValue = values.get("--approve-timeout");
+  const approveTimeoutValue = one("--approve-timeout");
   const approveTimeoutSec =
     approveTimeoutValue === undefined ? undefined : Number(approveTimeoutValue);
   if (
@@ -237,7 +246,7 @@ export function parseRunCommand(
   ) {
     throw new Error("--approve-timeout 必须是 ≥5 的秒数");
   }
-  const autoAllowValue = values.get("--auto-allow");
+  const autoAllowValue = one("--auto-allow");
   const autoAllowRules =
     autoAllowValue === undefined
       ? undefined
@@ -252,6 +261,17 @@ export function parseRunCommand(
     throw new Error("--auto-allow 需要至少一个规则 pattern，如 Bash(pnpm*),Read(*)");
   }
   const compiled = compileBounds(bounds);
+  const checks = (values.get("--check") ?? [])
+    .map((check) => check.trim())
+    .filter(Boolean);
+  const checkTimeoutValue = one("--check-timeout");
+  const checkTimeoutSec = checkTimeoutValue === undefined
+    ? undefined
+    : Number(checkTimeoutValue);
+  if (checkTimeoutSec !== undefined &&
+      (!Number.isInteger(checkTimeoutSec) || checkTimeoutSec <= 0)) {
+    throw new Error("--check-timeout 必须是大于 0 的整数秒数");
+  }
   return {
     description: task,
     ...(goal ? { goal } : {}),
@@ -268,6 +288,8 @@ export function parseRunCommand(
       ? {}
       : { approveTimeoutMs: Math.round(approveTimeoutSec * 1000) }),
     ...(autoAllowRules === undefined ? {} : { autoAllowRules }),
+    ...(checks.length > 0 ? { checks } : {}),
+    ...(checkTimeoutSec === undefined ? {} : { checkTimeoutMs: checkTimeoutSec * 1000 }),
     ...compiled,
   };
 }
@@ -380,6 +402,8 @@ export function serializeTaskOptions(
     ...(options.autoAllowRules === undefined
       ? {}
       : { autoAllowRules: options.autoAllowRules }),
+    ...(options.checks === undefined ? {} : { checks: [...options.checks] }),
+    ...(options.checkTimeoutMs === undefined ? {} : { checkTimeoutMs: options.checkTimeoutMs }),
     hardRules: structuredClone(options.hardRules),
     semanticBounds: [...options.semanticBounds],
   };
@@ -407,6 +431,8 @@ export function taskOptionsFromSerialized(
     ...(taskOptions.autoAllowRules === undefined
       ? {}
       : { autoAllowRules: taskOptions.autoAllowRules }),
+    ...(taskOptions.checks === undefined ? {} : { checks: [...taskOptions.checks] }),
+    ...(taskOptions.checkTimeoutMs === undefined ? {} : { checkTimeoutMs: taskOptions.checkTimeoutMs }),
     hardRules: structuredClone(taskOptions.hardRules),
     semanticBounds: [...taskOptions.semanticBounds],
   };
@@ -424,6 +450,8 @@ type AgentEventRunStarted = {
     permission?: PermissionMode;
     approveTimeoutMs?: number;
     autoAllowRules?: string[];
+    checks?: string[];
+    checkTimeoutMs?: number;
     hardRules: PermissionRule[];
     semanticBounds: string[];
   };
