@@ -17,6 +17,27 @@ The command exits non-zero when any scenario fails. By default it writes:
 - `tmp/eval/report.json` for CI and trend tooling;
 - `tmp/eval/report.md` for human review.
 
+## Real-model run
+
+`pnpm eval:real` drives the same 11 scenarios and metrics with a real provider
+from the effective config (main role's first candidate; no network probes at
+startup — an unusable candidate simply throws on first completion and the
+runner records the failure). It reports pass/fail plus tokens, cost (CNY,
+estimated from configured pricing, falling back to the built-in price table),
+and duration per scenario.
+
+```bash
+pnpm eval:real
+pnpm eval:real -- --output /tmp/myagent-eval-real   # writes tmp/eval-real by default
+```
+
+Output goes to `tmp/eval-real/report.{json,md}` with a `model` section
+(`providerId` / `model`) so results are attributable to the exact model.
+Costs are real API spend for ~tens of turns; CI never runs this command.
+A passing deterministic `pnpm eval` remains the harness regression gate —
+`eval:real` adds real-model evidence, it does not replace that gate.
+
+
 ## Scenarios and pass conditions
 
 | Scenario | Harness behavior | Pass condition |

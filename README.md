@@ -42,6 +42,8 @@ Core 只产生结构化事件，前端、持久化、统计和通知订阅事件
 
 `pnpm eval` 无网络、无 API Key 运行 11 个确定性 Harness 场景：读取、编辑、工具错误恢复、deny、审批超时、成本、预算终止、事件重放、会话分支、机器验收和 Flight Recorder 首分歧定位。结果写入 `tmp/eval/report.json` 和 `report.md`，记录工具调用、错误、tokens、成本、耗时、审批和越界尝试。该 Eval 已加入 CI；它证明 Harness 回归，不代表真实模型任务成功率。场景通过条件和指标定义见 [docs/eval.md](docs/eval.md)。
 
+`pnpm eval:real` 用生效配置中的真实模型（main 角色首候选）驱动同一套 11 个场景，产出逐场景成功率、tokens、成本（按配置单价估算）与耗时基线，报告带 `model`（provider/model）标注写入 `tmp/eval-real/`。真实调用计费，CI 不执行；同一套场景双轨跑分（脚本化 vs 真实模型）使 Harness 回归与真实表现证据可对照。
+
 ## 当前能力
 
 ### 核心闭环

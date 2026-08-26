@@ -27,6 +27,8 @@ export const BUILTIN_PRICING: Record<string, ModelPricing> = {
     cachedInputPerMillionCny: 0.35,
   },
   // —— DeepSeek ——
+  // deepseek-v4 系列官方分时计价（高峰为空闲两倍，缓存命中价差极大）；
+  // 本表取高峰档作为保守上界（成本估算宁高勿低，预算盒更安全）
   "deepseek-chat": {
     inputPerMillionCny: 2,
     outputPerMillionCny: 8,
@@ -38,9 +40,9 @@ export const BUILTIN_PRICING: Record<string, ModelPricing> = {
     cachedInputPerMillionCny: 1,
   },
   "deepseek-v4-flash": {
-    inputPerMillionCny: 1,
-    outputPerMillionCny: 4,
-    cachedInputPerMillionCny: 0.25,
+    inputPerMillionCny: 3,
+    outputPerMillionCny: 9,
+    cachedInputPerMillionCny: 0.1,
   },
   // —— Moonshot Kimi ——
   "kimi-k2": {

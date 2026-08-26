@@ -1,4 +1,5 @@
-import type { AgentEvent, PermissionMode } from "../core/types.js";
+import type { AgentEvent, PermissionMode, ModelPricing } from "../core/types.js";
+import type { ModelClient } from "../model/types.js";
 
 export type EvalScenario =
   | "read"
@@ -59,6 +60,15 @@ export type EventRecord = { event: AgentEvent; seq: number };
 export interface EvalOptions {
   /** Override the permission mode for scenarios that do not need a run task. */
   permissionMode?: PermissionMode;
+  /**
+   * 真实模型注入缝：提供后场景改用 createClient(context) 返回的客户端
+   * （每次调用新建实例，一次会话一个）与 injected.pricing.main 单价，
+   * 不再使用 ScriptedModelClient 与占位价格。
+   */
+  injected?: {
+    createClient: (context: { scenario: EvalScenario; cwd: string }) => ModelClient;
+    pricing: Partial<Record<"main" | "cheap" | "explore", ModelPricing>>;
+  };
 }
 
 export interface DemoResult {
