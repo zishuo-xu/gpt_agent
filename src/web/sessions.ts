@@ -55,10 +55,20 @@ export class WebSessionManager extends AgentSessionManager {
   async create(
     message: string,
     mode: PermissionMode = "normal",
+    options: { planMode?: boolean } = {},
   ): Promise<AgentSession> {
     const extraPermissionRules = this.#lobby
       ? LOBBY_PERMISSION_RULES
       : undefined;
+    if (options.planMode === true) {
+      const session = await this.createSession({
+        title: message.trim().slice(0, 40),
+        mode,
+        ...(extraPermissionRules ? { extraPermissionRules } : {}),
+      });
+      await session.startPlan(message);
+      return session;
+    }
     if (message.trim().startsWith("/run")) {
       const task = parseRunCommand(message);
       const session = await this.createSession({

@@ -175,6 +175,48 @@ test("AgentSessionManager 通过事件流恢复会话并继续上下文", async 
   );
 });
 
+test("AgentSessionManager 可恢复尚无 user 事件的待批准计划", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-plan-restore-cwd-"));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "myagent-plan-restore-state-"));
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "myagent-plan-restore-home-"));
+  const configService = new ConfigService({ cwd, homeDir });
+  const plan = "## 目标\n恢复计划\n## 执行步骤\n1. 修改\n## 预计修改文件\n- src/a.ts\n## 验证方式\n- pnpm test\n## 风险与待确认\n- 无";
+  const manager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService,
+    modelFactory: (messages) =>
+      new ConversationAgentModel(new ScriptedClient([response(plan)]), messages),
+  });
+  const session = await manager.createSession({ title: "规划恢复" });
+  await session.startPlan("实现恢复能力");
+  const deadline = Date.now() + 5_000;
+  while (session.taskPlan()?.status !== "awaiting_approval") {
+    if (Date.now() >= deadline) throw new Error("等待计划生成超时");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  await manager.flush();
+  await manager.releaseLock();
+
+  const restoredManager = new AgentSessionManager({
+    cwd,
+    stateDir,
+    homeDir,
+    configService: new ConfigService({ cwd, homeDir }),
+    modelFactory: (messages) =>
+      new ConversationAgentModel(new ScriptedClient([]), messages),
+  });
+  await restoredManager.restore();
+  const restored = restoredManager.get(session.id);
+  assert.ok(restored);
+  assert.equal(restored.summary().status, "waiting_plan");
+  assert.equal(restored.taskPlan()?.content, plan);
+  await restored.decidePlan("analysis_only");
+  assert.equal(restored.summary().status, "done");
+  await restoredManager.releaseLock();
+});
+
 test("恢复 strict 会话：补发的初始权限模式事件不抢占首条用户消息 seq", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-mode-seq-cwd-"));
   const stateDir = await mkdtemp(

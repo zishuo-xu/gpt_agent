@@ -31,6 +31,7 @@ export function registerSessionRoutes(
         task?: string;
         permissionMode?: "strict" | "normal" | "trust";
         confirmBounds?: boolean;
+        planMode?: boolean;
       };
       const task = body.task?.trim();
       if (!task) return context.json({ error: "task is required" }, 400);
@@ -55,6 +56,7 @@ export function registerSessionRoutes(
       const session = await sessionManager.create(
         task,
         body.permissionMode ?? "normal",
+        body.planMode === true ? { planMode: true } : undefined,
       );
       return context.json({ session: session.summary() }, 201);
     } catch (error) {
@@ -101,10 +103,15 @@ export function registerSessionRoutes(
         message?: string;
         confirmBounds?: boolean;
         steer?: boolean;
+        planMode?: boolean;
       };
       // 前端对"已有会话发消息"使用 message 字段，对"新建会话"使用 task；此处统一兼容
       const task = (body.task ?? body.message)?.trim();
       if (!task) return context.json({ error: "消息不能为空" }, 400);
+      if (body.planMode === true) {
+        await session.startPlan(task);
+        return context.json({ accepted: true, queued: false });
+      }
       if (task.startsWith("/run")) {
         if (session.isProcessing()) {
           return context.json(
@@ -145,6 +152,39 @@ export function registerSessionRoutes(
     } catch (error) {
       return context.json(
         { error: error instanceof Error ? error.message : "发送失败" },
+        409,
+      );
+    }
+  });
+
+  app.get("/api/sessions/:id/plan", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
+    if (!session) return context.json({ error: "会话不存在" }, 404);
+    return context.json({ plan: session.taskPlan() ?? null });
+  });
+
+  app.post("/api/sessions/:id/plan/decision", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
+    if (!session) return context.json({ error: "会话不存在" }, 404);
+    try {
+      const body = (await context.req.json()) as {
+        decision?: "approved" | "revision_requested" | "analysis_only";
+        feedback?: string;
+      };
+      if (
+        body.decision !== "approved" &&
+        body.decision !== "revision_requested" &&
+        body.decision !== "analysis_only"
+      ) {
+        return context.json({ error: "decision 无效" }, 400);
+      }
+      await session.decidePlan(body.decision, body.feedback);
+      return context.json({ accepted: true, plan: session.taskPlan() });
+    } catch (error) {
+      return context.json(
+        { error: error instanceof Error ? error.message : "计划决策失败" },
         409,
       );
     }

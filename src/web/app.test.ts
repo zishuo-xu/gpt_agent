@@ -256,6 +256,86 @@ test("已有会话发消息兼容 message 字段（与 task 一致）", async ()
   assert.equal(empty.status, 400);
 });
 
+test("规划 API：启动只读规划、读取计划并提交三态决策", async () => {
+  const { service } = await fixture();
+  const calls: Array<{ kind: string; value?: unknown }> = [];
+  const plan = {
+    planId: "plan-1",
+    task: "实现功能",
+    revision: 1,
+    status: "awaiting_approval",
+    content: "## 目标\n实现功能",
+  } as const;
+  const fakeSession = {
+    id: "sess-plan",
+    isProcessing: () => false,
+    startPlan: async (task: string) => calls.push({ kind: "start", value: task }),
+    taskPlan: () => plan,
+    decidePlan: async (decision: string, feedback?: string) =>
+      calls.push({ kind: "decision", value: { decision, feedback } }),
+  } as never;
+  const fakeManager = {
+    get: (id: string) => (id === "sess-plan" ? fakeSession : undefined),
+  } as unknown as WebSessionManager;
+  const app = createWebApp(service, fakeManager);
+
+  const started = await app.request("/api/sessions/sess-plan/input", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "/run 实现功能", planMode: true }),
+  });
+  assert.equal(started.status, 200);
+  assert.deepEqual(calls[0], { kind: "start", value: "/run 实现功能" });
+
+  const fetched = await app.request("/api/sessions/sess-plan/plan");
+  assert.equal(fetched.status, 200);
+  assert.deepEqual((await fetched.json()).plan, plan);
+
+  const revised = await app.request("/api/sessions/sess-plan/plan/decision", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      decision: "revision_requested",
+      feedback: "不要改 API",
+    }),
+  });
+  assert.equal(revised.status, 200);
+  assert.deepEqual(calls[1], {
+    kind: "decision",
+    value: { decision: "revision_requested", feedback: "不要改 API" },
+  });
+
+  const invalid = await app.request("/api/sessions/sess-plan/plan/decision", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision: "later" }),
+  });
+  assert.equal(invalid.status, 400);
+});
+
+test("新建会话的 planMode 透传给会话管理器", async () => {
+  const { service } = await fixture();
+  const created: unknown[] = [];
+  const fakeSession = {
+    summary: () => ({ id: "new-plan", status: "running" }),
+  };
+  const fakeManager = {
+    create: async (...args: unknown[]) => {
+      created.push(args);
+      return fakeSession;
+    },
+  } as unknown as WebSessionManager;
+  const app = createWebApp(service, fakeManager);
+
+  const response = await app.request("/api/sessions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ task: "分析架构", planMode: true }),
+  });
+  assert.equal(response.status, 201);
+  assert.deepEqual(created[0], ["分析架构", "normal", { planMode: true }]);
+});
+
 test("fs 浏览列出子目录且忽略隐藏项", async () => {
   const { app } = await fixture();
   const root = await mkdtemp(path.join(os.tmpdir(), "myagent-fs-"));

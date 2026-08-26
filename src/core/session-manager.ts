@@ -458,7 +458,19 @@ export class AgentSessionManager {
       const firstUser = records.find(
         (record) => record.event.type === "user",
       );
-      if (!firstUser || firstUser.event.type !== "user") continue;
+      const firstPlan = records.find(
+        (record) => record.event.type === "plan_started",
+      );
+      if (
+        (!firstUser || firstUser.event.type !== "user") &&
+        (!firstPlan || firstPlan.event.type !== "plan_started")
+      ) continue;
+      const firstText =
+        firstUser?.event.type === "user"
+          ? firstUser.event.text
+          : firstPlan!.event.type === "plan_started"
+            ? firstPlan!.event.task
+            : "新会话";
       const compactModelClient =
         await this.#createRoleClient("cheap");
       const exploreModelClient =
@@ -469,7 +481,7 @@ export class AgentSessionManager {
         id,
         title:
           sessionInfoTitle(records) ??
-          titleFrom(firstUser.event.text),
+          titleFrom(firstText),
         cwd: this.#cwd,
         mode:
           lastPermissionMode(records) ??

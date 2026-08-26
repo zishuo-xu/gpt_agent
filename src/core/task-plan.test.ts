@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { taskPlanFromEvents, taskPlanSummary } from "./task-plan.js";
+import {
+  buildApprovedPlanPrompt,
+  buildTaskPlanningPrompt,
+  normalizePlanText,
+  taskPlanFromEvents,
+  taskPlanSummary,
+} from "./task-plan.js";
 import type { AgentEvent, RecordedEvent } from "./types.js";
 
 function record(seq: number, event: AgentEvent): RecordedEvent {
@@ -113,4 +119,19 @@ test("taskPlanFromEvents：规划失败保留错误证据", () => {
   ]);
   assert.equal(state?.status, "failed");
   assert.equal(state?.error, "模型不可用");
+});
+
+test("规划提示与批准提示明确阶段边界，流式前言可规范化", () => {
+  const planning = buildTaskPlanningPrompt({
+    task: "实现登录",
+    previousPlan: "旧计划",
+    feedback: "不要改数据库",
+  });
+  assert.match(planning, /只可使用 Read、Grep、Glob/);
+  assert.match(planning, /不要改数据库/);
+  assert.match(planning, /## 风险与待确认/);
+
+  const plan = "## 目标\n完成\n## 执行步骤\n1. 做";
+  assert.equal(normalizePlanText(`先看一下\n${plan}`), plan);
+  assert.match(buildApprovedPlanPrompt("实现登录", plan), /用户已经批准/);
 });

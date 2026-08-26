@@ -100,7 +100,9 @@ export class SessionStateMachine {
       this.#status =
         event.decision === "analysis_only" ? "done" : "running";
     }
-    if (event.type === "plan_failed") this.#status = "error";
+    if (event.type === "plan_failed") {
+      this.#status = event.interrupted ? "interrupted" : "error";
+    }
     if (event.type === "todo_update") {
       this.#todos = structuredClone(event.todos);
       deps.model.setTodos(this.#todos);

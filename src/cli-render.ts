@@ -115,6 +115,27 @@ export function createEventRenderer(options: {
         `\n◆ 无人值守任务 #${event.taskId} 已启动 · ${event.permissionMode} 档\n`,
       );
     }
+    if (event.type === "plan_started") {
+      output(`\n◇ 正在只读规划（第 ${event.revision} 版）：${event.task}\n`);
+    }
+    if (event.type === "plan_proposed") {
+      output(
+        `\n${event.content}\n\n` +
+          "计划等待决定：/plan-approve 执行 · /plan-revise <意见> 修改 · /plan-analysis 仅保留分析\n",
+      );
+    }
+    if (event.type === "plan_decision") {
+      const label =
+        event.decision === "approved"
+          ? "计划已批准，开始执行"
+          : event.decision === "revision_requested"
+            ? "已提交修改意见，重新规划"
+            : "已选择仅分析，不执行修改";
+      output(`\n◇ ${label}\n`);
+    }
+    if (event.type === "plan_failed") {
+      output(`\n规划失败：${event.message}\n`);
+    }
     if (event.type === "review_result") {
       const icon = event.passed ? "✓" : "✗";
       const issuesText =
@@ -209,6 +230,14 @@ export function summarizeEvent(event: AgentEvent): string {
       return `上下文压缩：${event.summary.slice(0, 40)}`;
     case "run_started":
       return `无人值守任务：${event.description.slice(0, 40)}`;
+    case "plan_started":
+      return `规划 v${event.revision}：${event.task.slice(0, 40)}`;
+    case "plan_proposed":
+      return `计划待批准：${event.task.slice(0, 40)}`;
+    case "plan_decision":
+      return `计划决策：${event.decision}`;
+    case "plan_failed":
+      return `规划失败：${event.message.slice(0, 40)}`;
     case "ledger_update":
       return `账本：#${event.taskId} ${event.unit.label}（${event.unit.status}）`;
     default:

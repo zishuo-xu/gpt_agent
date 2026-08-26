@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { usageCostCny } from "../utils/cost.js";
 import type { MyAgentConfig } from "../config/schema.js";
-import type { ConversationAgentModel } from "./agent-model.js";
+import { ConversationAgentModel } from "./agent-model.js";
 import { modelErrorGuidanceText } from "../model/error-policy.js";
 import { ModelRetriesExhaustedError } from "../model/fallback-client.js";
 import type { ModelClient } from "../model/types.js";
@@ -21,6 +21,7 @@ import {
 } from "./permissions.js";
 import {
   TaskBox,
+  parseRunCommand,
   serializeTaskOptions,
   taskOptionsFromSerialized,
   type RunTaskOptions,
@@ -41,10 +42,16 @@ import {
 } from "./session-restore.js";
 import { TaskLedger, normalizeLedgerPath } from "./task-ledger.js";
 import {
+  PLAN_TOOL_NAMES,
+  buildApprovedPlanPrompt,
+  buildTaskPlanningPrompt,
+  normalizePlanText,
   taskPlanFromEvents,
   taskPlanSummary,
+  type PlanDecision,
   type TaskPlanState,
 } from "./task-plan.js";
+import { ContextManager } from "./context.js";
 import type { ExperimentSessionSummary } from "./experiment.js";
 import type {
   AgentEvent,
@@ -77,6 +84,7 @@ interface QueuedInput {
 export class AgentSession {
   readonly id: string;
   readonly #cwd: string;
+  readonly #stateDir: string;
   title: string;
   readonly createdAt: string;
   readonly #bus = new AgentEventBus();
@@ -191,6 +199,7 @@ export class AgentSession {
   }) {
     this.id = options.id;
     this.#cwd = options.cwd;
+    this.#stateDir = options.stateDir ?? path.join(os.homedir(), ".myagent");
     this.title = options.title;
     this.createdAt =
       options.restoredEvents?.[0]?.ts ?? new Date().toISOString();
@@ -236,7 +245,7 @@ export class AgentSession {
         : {}),
     });
     const projectKey = Buffer.from(options.cwd).toString("base64url");
-    const stateRoot = options.stateDir ?? path.join(os.homedir(), ".myagent");
+    const stateRoot = this.#stateDir;
     const sessionsRoot = options.storageDir ?? path.join(
       stateRoot,
       "projects",
@@ -437,7 +446,14 @@ export class AgentSession {
         : "interactive",
     };
     // exactOptionalPropertyTypes 下条件展开会带出 undefined，改用条件赋值
-    const firstMessage = firstUserText(this.#events);
+    const firstPlan = this.#events.find(
+      (record) => record.event.type === "plan_started",
+    );
+    const firstMessage =
+      firstUserText(this.#events) ??
+      (firstPlan?.event.type === "plan_started"
+        ? firstPlan.event.task
+        : undefined);
     if (firstMessage) {
       summary.firstMessage = firstMessage;
     }
@@ -616,6 +632,216 @@ export class AgentSession {
     return ok ? { ok: true, path: entry.path } : { ok: false, reason: "modified" };
   }
 
+  /**
+   * 启动只读规划。先持久化 plan_started，再异步探索，确保 Web/CLI 立即获得
+   * 可恢复的计划身份；规划模型与主对话隔离，不会把草稿污染执行上下文。
+   */
+  async startPlan(task: string): Promise<void> {
+    if (this.#runtimeUnavailableReason) {
+      throw new Error(this.#runtimeUnavailableReason);
+    }
+    const trimmed = task.trim();
+    if (!trimmed) throw new Error("规划任务不能为空");
+    if (this.#processing || this.#taskBox) {
+      throw new Error("当前会话已有任务在运行");
+    }
+    if (this.taskPlan()?.status === "awaiting_approval") {
+      throw new Error("当前已有计划等待决策");
+    }
+    await this.#beginPlanning({
+      planId: randomUUID(),
+      task: trimmed,
+      revision: 1,
+    });
+  }
+
+  /** 对等待中的计划作决策；批准后在同一会话里立刻进入普通执行或 /run。 */
+  async decidePlan(
+    decision: PlanDecision,
+    feedback?: string,
+  ): Promise<void> {
+    if (this.#processing || this.#taskBox) {
+      throw new Error("当前会话已有任务在运行");
+    }
+    const plan = this.taskPlan();
+    if (!plan || plan.status !== "awaiting_approval" || !plan.content) {
+      throw new Error("当前没有等待决策的计划");
+    }
+    const trimmedFeedback = feedback?.trim();
+    if (decision === "revision_requested" && !trimmedFeedback) {
+      throw new Error("修改计划时必须填写意见");
+    }
+    this.#bus.emit({
+      type: "plan_decision",
+      planId: plan.planId,
+      decision,
+      ...(trimmedFeedback ? { feedback: trimmedFeedback } : {}),
+    });
+    await this.flush();
+
+    if (decision === "analysis_only") return;
+    if (decision === "revision_requested") {
+      await this.#beginPlanning({
+        planId: plan.planId,
+        task: plan.task,
+        revision: plan.revision + 1,
+        previousPlan: plan.content,
+        ...(trimmedFeedback ? { feedback: trimmedFeedback } : {}),
+      });
+      return;
+    }
+
+    if (plan.task.startsWith("/run")) {
+      this.startRunTask(parseRunCommand(plan.task), plan.content);
+      return;
+    }
+    void this.sendInput(
+      buildApprovedPlanPrompt(plan.task, plan.content),
+      plan.task,
+    ).catch((error) => {
+      this.#bus.emit({
+        type: "error",
+        message:
+          error instanceof Error ? error.message : "批准后的任务启动失败",
+      });
+    });
+  }
+
+  async #beginPlanning(options: {
+    planId: string;
+    task: string;
+    revision: number;
+    previousPlan?: string;
+    feedback?: string;
+  }): Promise<void> {
+    this.#processing = true;
+    this.#bus.emit({
+      type: "plan_started",
+      planId: options.planId,
+      task: options.task,
+      revision: options.revision,
+    });
+    try {
+      await this.flush();
+    } catch (error) {
+      this.#processing = false;
+      throw error;
+    }
+    void this.#generatePlan(options);
+  }
+
+  async #generatePlan(options: {
+    planId: string;
+    task: string;
+    revision: number;
+    previousPlan?: string;
+    feedback?: string;
+  }): Promise<void> {
+    const planningBus = new AgentEventBus();
+    const chunks: string[] = [];
+    const unsubscribe = planningBus.subscribe((event) => {
+      if (event.type === "text_delta") {
+        chunks.push(event.text);
+        return;
+      }
+      // done 会把会话提前标成完成；最终计划由 plan_proposed 一次性发布。
+      if (
+        event.type === "done" ||
+        event.type === "need_user" ||
+        event.type === "interrupted" ||
+        event.type === "error"
+      ) {
+        return;
+      }
+      this.#bus.emit(event);
+    });
+    const planningModel = new ConversationAgentModel(
+      this.#model.client,
+      buildTaskPlanningPrompt(options),
+      new ContextManager({ cwd: this.#cwd, stateDir: this.#stateDir }),
+      { toolNames: PLAN_TOOL_NAMES },
+    );
+    const loop = new AgentLoop({
+      bus: planningBus,
+      model: planningModel,
+      permissions: new PermissionEngine("trust", []),
+      tools: this.#tools,
+      approve: async () => ({ granted: false }),
+      initialTotalTokens: this.#state.tokens(),
+      getTotalTokens: () => this.#state.tokens(),
+      ...(this.#pricing?.main ? { pricing: this.#pricing.main } : {}),
+      getTotalCostCny: () => this.#state.costCny(),
+      modelRole: "main",
+      maxTurns: 12,
+      parallelTools: false,
+      allowedToolNames: PLAN_TOOL_NAMES,
+      recordTrace: (trace) => this.#traceStore.record(trace),
+      getEventSeq: () => this.#eventSeq,
+    });
+    this.#activeLoop = loop;
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      loop.interrupt();
+    }, 3 * 60_000);
+    try {
+      await loop.run();
+      const content = normalizePlanText(chunks.join(""));
+      const requiredSections = [
+        "## 目标",
+        "## 执行步骤",
+        "## 预计修改文件",
+        "## 验证方式",
+        "## 风险与待确认",
+      ];
+      if (
+        timedOut ||
+        this.#state.status === "interrupted" ||
+        !content ||
+        !requiredSections.every((section) => content.includes(section))
+      ) {
+        throw new Error(
+          timedOut
+            ? "规划超时"
+            : this.#state.status === "interrupted"
+              ? "规划已中断"
+              : "模型未返回完整的结构化计划",
+        );
+      }
+      this.#bus.emit({
+        type: "plan_proposed",
+        planId: options.planId,
+        task: options.task,
+        revision: options.revision,
+        content,
+      });
+    } catch (error) {
+      const interrupted =
+        !timedOut && this.#state.status === "interrupted";
+      this.#bus.emit({
+        type: "plan_failed",
+        planId: options.planId,
+        revision: options.revision,
+        message: error instanceof Error ? error.message : "生成计划失败",
+        ...(interrupted ? { interrupted: true } : {}),
+      });
+    } finally {
+      clearTimeout(timeout);
+      unsubscribe();
+      this.#activeLoop = undefined;
+      this.#processing = false;
+      await this.flush().catch((error) => {
+        this.#state.setStatus("error");
+        this.#bus.emit({
+          type: "error",
+          message: `规划事件落盘失败：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+      });
+    }
+  }
+
   async sendInput(
     message: string,
     displayText?: string,
@@ -775,6 +1001,7 @@ export class AgentSession {
   async runTask(
     options: RunTaskOptions,
     resumeTaskId?: string,
+    approvedPlan?: string,
   ): Promise<void> {
     if (this.#runtimeUnavailableReason) {
       throw new Error(this.#runtimeUnavailableReason);
@@ -859,10 +1086,14 @@ export class AgentSession {
       const maxAcceptanceRounds = checks.length > 0 ? 2 : 0;
       let accepted = false;
       for (let round = 0; round <= maxAcceptanceRounds && !accepted; round += 1) {
-        await this.sendInput(
+        const taskPrompt =
           round === 0
             ? (resumeTaskId ? resumePrompt(taskBox, this.#state.costCny()) : taskBox.prompt())
-            : "请根据上一轮验收失败证据修复问题，然后重新完成任务。",
+            : "请根据上一轮验收失败证据修复问题，然后重新完成任务。";
+        await this.sendInput(
+          round === 0 && approvedPlan
+            ? `${buildApprovedPlanPrompt(options.description, approvedPlan)}\n\n${taskPrompt}`
+            : taskPrompt,
           round === 0
             ? (resumeTaskId ? `/resume ${options.description}` : `/run ${options.description}`)
             : `/acceptance-retry ${options.description}`,
@@ -1017,8 +1248,8 @@ export class AgentSession {
     });
   }
 
-  startRunTask(options: RunTaskOptions): void {
-    void this.runTask(options).catch((error) => {
+  startRunTask(options: RunTaskOptions, approvedPlan?: string): void {
+    void this.runTask(options, undefined, approvedPlan).catch((error) => {
       this.#bus.emit({
         type: "error",
         message:

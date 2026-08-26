@@ -119,6 +119,8 @@ export interface AgentLoopOptions {
   getTodos?: () => TodoItem[];
   recordTrace?: (trace: TraceRecordInput) => void;
   getEventSeq?: () => number;
+  /** 阶段级工具硬边界：即使模型幻觉出未暴露工具，也在权限判断前拒绝。 */
+  allowedToolNames?: readonly string[];
 }
 
 export class AgentLoop {
@@ -143,6 +145,7 @@ export class AgentLoop {
   readonly #parallelTools: boolean;
   readonly #afterToolCall: AgentLoopOptions["afterToolCall"];
   readonly #getTodos: AgentLoopOptions["getTodos"];
+  readonly #allowedToolNames: ReadonlySet<string> | undefined;
   /** 缓存浪费度量状态：上一轮 input、上一轮时间、已见压缩数 */
   #prevInputTokens = 0;
   #prevTurnAtMs = 0;
@@ -180,6 +183,9 @@ export class AgentLoop {
     this.#parallelTools = options.parallelTools ?? false;
     this.#afterToolCall = options.afterToolCall;
     this.#getTodos = options.getTodos;
+    this.#allowedToolNames = options.allowedToolNames
+      ? new Set(options.allowedToolNames)
+      : undefined;
   }
 
   interrupt(): void {
@@ -634,6 +640,11 @@ export class AgentLoop {
           calls.length > 1 &&
           !signal.aborted &&
           !this.#steerRequested &&
+          calls.every(
+            (call) =>
+              !this.#allowedToolNames ||
+              this.#allowedToolNames.has(call.tool),
+          ) &&
           calls.every((call) => this.#tools.isParallelSafe(call.tool))
         ) {
           const verdicts = calls.map((call) => ({
@@ -686,6 +697,19 @@ export class AgentLoop {
             continue;
           }
           this.#bus.emit({ type: "tool_call", call });
+          if (
+            this.#allowedToolNames &&
+            !this.#allowedToolNames.has(call.tool)
+          ) {
+            emitDeniedTool(this.#bus, this.#model, traceTools, {
+              call,
+              reason: `当前阶段不允许调用 ${call.tool}`,
+              permission: "phase_deny",
+              ms: Date.now() - toolStartedAt,
+            });
+            allTerminated = false;
+            continue;
+          }
           if (turnPolicy?.finalOnly) {
             emitDeniedTool(this.#bus, this.#model, traceTools, {
               call,

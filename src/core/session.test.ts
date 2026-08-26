@@ -114,6 +114,20 @@ class EventCollector {
   eventsOf(type: string): AgentSessionEvent[] {
     return this.records.filter((record) => record.event.type === type);
   }
+
+  async waitForCount(type: string, count: number, timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.eventsOf(type).length < count) {
+      if (Date.now() >= deadline) {
+        throw new Error(`等待事件数量超时：${type} < ${count}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+
+function structuredPlan(label = "计划"): string {
+  return `## 目标\n${label}\n## 执行步骤\n1. 修改实现\n## 预计修改文件\n- src/main.ts\n## 验证方式\n- pnpm test\n## 风险与待确认\n- 无`;
 }
 
 async function setup(
@@ -129,6 +143,7 @@ async function setup(
   collector: EventCollector;
   cwd: string;
   stateDir: string;
+  client: ScriptedClient;
 }> {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-session-cwd-"));
   const stateDir = await mkdtemp(
@@ -154,8 +169,83 @@ async function setup(
       : {}),
   });
   const collector = new EventCollector(session);
-  return { session, collector, cwd, stateDir };
+  return { session, collector, cwd, stateDir, client };
 }
+
+test("任务规划只暴露只读工具，并硬拒绝模型幻觉出的写工具", async () => {
+  const { session, collector, cwd, client } = await setup([
+    response("尝试写入", {
+      toolCalls: [
+        toolCall("write-plan", "Write", "should-not-exist.txt", {
+          file_path: "should-not-exist.txt",
+          content: "bad",
+        }),
+      ],
+    }),
+    response(structuredPlan("安全计划")),
+  ]);
+
+  await session.startPlan("实现安全功能");
+  await collector.waitFor("plan_proposed");
+
+  assert.deepEqual(
+    client.requests[0]?.tools?.map((tool) => tool.name),
+    ["Read", "Grep", "Glob"],
+  );
+  const denied = collector.eventsOf("permission_denied")[0];
+  assert.match(
+    denied?.event.type === "permission_denied" ? denied.event.reason : "",
+    /当前阶段不允许调用 Write/,
+  );
+  await assert.rejects(readFile(path.join(cwd, "should-not-exist.txt"), "utf8"), /ENOENT/);
+  assert.equal(session.taskPlan()?.status, "awaiting_approval");
+  assert.equal(session.summary().status, "waiting_plan");
+});
+
+test("批准计划后在同一会话执行，执行提示携带原任务与已批准计划", async () => {
+  const plan = structuredPlan("批准版");
+  const { session, collector } = await setup([
+    response(plan),
+    response("执行完成"),
+  ]);
+
+  await session.startPlan("实现功能 A");
+  await collector.waitFor("plan_proposed");
+  await session.decidePlan("approved");
+  await collector.waitFor("done");
+
+  assert.equal(session.taskPlan()?.status, "approved");
+  const user = collector.eventsOf("user")[0];
+  assert.equal(user?.event.type, "user");
+  if (user?.event.type === "user") {
+    assert.equal(user.event.text, "实现功能 A");
+    assert.match(user.event.modelText ?? "", /用户已经批准/);
+    assert.match(user.event.modelText ?? "", /批准版/);
+  }
+});
+
+test("计划可按反馈修订，也可选择仅分析后结束", async () => {
+  const { session, collector, client } = await setup([
+    response(structuredPlan("第一版")),
+    response(structuredPlan("第二版不改 API")),
+  ]);
+
+  await session.startPlan("重构模块");
+  await collector.waitFor("plan_proposed");
+  await session.decidePlan("revision_requested", "不要修改 API");
+  await collector.waitForCount("plan_proposed", 2);
+
+  assert.equal(session.taskPlan()?.revision, 2);
+  assert.match(session.taskPlan()?.content ?? "", /第二版不改 API/);
+  assert.match(
+    JSON.stringify(client.requests[1]?.messages ?? []),
+    /不要修改 API/,
+  );
+  await session.decidePlan("analysis_only");
+  assert.equal(session.taskPlan()?.status, "analysis_only");
+  assert.equal(session.summary().status, "done");
+  assert.equal(client.requests.length, 2);
+});
 
 test("sendInput 纯文本闭环：事件序列 + 状态机 + summary", async () => {
   const { session, collector, cwd } = await setup([

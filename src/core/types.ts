@@ -140,6 +140,7 @@ export type AgentEvent =
       planId: string;
       revision: number;
       message: string;
+      interrupted?: boolean;
     }
   | {
       type: "acceptance_started";

@@ -95,3 +95,29 @@ export type PlanDecision = Extract<
   AgentEvent,
   { type: "plan_decision" }
 >["decision"];
+
+/** 规划阶段唯一允许暴露和执行的工具。Bash 即使执行只读命令也不进入首版边界。 */
+export const PLAN_TOOL_NAMES = ["Read", "Grep", "Glob"] as const;
+
+export function buildTaskPlanningPrompt(options: {
+  task: string;
+  previousPlan?: string;
+  feedback?: string;
+}): string {
+  const revision = options.previousPlan
+    ? `\n\n这是上一版计划：\n${options.previousPlan}\n\n用户的修改意见：\n${options.feedback ?? "请进一步完善计划。"}`
+    : "";
+  return `你现在处于 MyAgent 的只读规划阶段。请先探索当前项目，再为下面的任务提出可执行计划；不要修改任何文件，也不要运行 Bash 或其他可能写入状态的工具。只可使用 Read、Grep、Glob。\n\n用户任务：\n${options.task}${revision}\n\n最终回答必须是 Markdown，并严格包含以下二级标题：\n## 目标\n## 执行步骤\n## 预计修改文件\n## 验证方式\n## 风险与待确认\n\n计划应引用关键的 file:line 证据，明确不会在用户批准前执行修改。只输出最终计划，不要附加寒暄。`;
+}
+
+export function buildApprovedPlanPrompt(task: string, plan: string): string {
+  return `用户已经批准下面的执行计划。现在在同一会话中实施任务；计划是执行依据，但若现场证据与计划冲突，应先说明并采用更安全的最小调整。不要停留在复述计划，完成修改并运行相关验证。\n\n原始任务：\n${task}\n\n已批准计划：\n${plan}`;
+}
+
+/** 流式模型偶尔会在最终计划前输出短前言，保留最后一个结构化计划块。 */
+export function normalizePlanText(text: string): string {
+  const trimmed = text.trim();
+  const marker = "## 目标";
+  const index = trimmed.lastIndexOf(marker);
+  return index < 0 ? trimmed : trimmed.slice(index).trim();
+}

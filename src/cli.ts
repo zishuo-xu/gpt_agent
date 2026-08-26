@@ -308,6 +308,10 @@ async function runCli(): Promise<void> {
           "",
           "/permission <strict|normal|trust>  切换权限档",
           "/steer <指令>                      插队打断：当前工具完成后立即转向新指令",
+          "/plan <任务>                       只读探索并生成待批准计划",
+          "/plan-approve                      批准当前计划并在同一会话执行",
+          "/plan-revise <意见>                反馈意见并生成新版计划",
+          "/plan-analysis                     仅保留分析，不执行修改",
           "/run <任务> [--goal ... --check ... --check-timeout 秒 --bounds ... --until ... --budget ... --permission ...]",
           "/cost                              查看当前 token 统计",
           "/sessions                          查看全部会话",
@@ -344,6 +348,52 @@ async function runCli(): Promise<void> {
       } else {
         session.setPermissionMode(mode);
         output.write(`已切换到 ${mode} 档。\n`);
+      }
+      safePrompt();
+      return;
+    }
+    if (line === "/plan" || line.startsWith("/plan ")) {
+      const task = line.slice("/plan".length).trim();
+      if (!task) {
+        output.write("用法：/plan <任务>\n");
+      } else {
+        await session.startPlan(task).catch((error) => {
+          output.write(
+            `规划启动失败：${error instanceof Error ? error.message : "未知错误"}\n`,
+          );
+        });
+      }
+      safePrompt();
+      return;
+    }
+    if (line === "/plan-approve") {
+      await session.decidePlan("approved").catch((error) => {
+        output.write(
+          `计划批准失败：${error instanceof Error ? error.message : "未知错误"}\n`,
+        );
+      });
+      safePrompt();
+      return;
+    }
+    if (line === "/plan-analysis") {
+      await session.decidePlan("analysis_only").catch((error) => {
+        output.write(
+          `计划决策失败：${error instanceof Error ? error.message : "未知错误"}\n`,
+        );
+      });
+      safePrompt();
+      return;
+    }
+    if (line === "/plan-revise" || line.startsWith("/plan-revise ")) {
+      const feedback = line.slice("/plan-revise".length).trim();
+      if (!feedback) {
+        output.write("用法：/plan-revise <修改意见>\n");
+      } else {
+        await session.decidePlan("revision_requested", feedback).catch((error) => {
+          output.write(
+            `计划修改失败：${error instanceof Error ? error.message : "未知错误"}\n`,
+          );
+        });
       }
       safePrompt();
       return;
