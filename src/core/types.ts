@@ -117,6 +117,31 @@ export type AgentEvent =
       attempts: number;
     }
   | {
+      type: "plan_started";
+      planId: string;
+      task: string;
+      revision: number;
+    }
+  | {
+      type: "plan_proposed";
+      planId: string;
+      task: string;
+      revision: number;
+      content: string;
+    }
+  | {
+      type: "plan_decision";
+      planId: string;
+      decision: "approved" | "revision_requested" | "analysis_only";
+      feedback?: string;
+    }
+  | {
+      type: "plan_failed";
+      planId: string;
+      revision: number;
+      message: string;
+    }
+  | {
       type: "acceptance_started";
       taskId: string;
       attempt: number;

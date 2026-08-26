@@ -4,6 +4,7 @@
  * 从这里 re-export，前端不再手写后端类型副本。
  */
 import type { PermissionMode, TodoItem } from "../core/types.js";
+import type { TaskPlanSummary } from "../core/task-plan.js";
 
 export type {
   LedgerStatus,
@@ -18,6 +19,7 @@ export type SessionStatus =
   | "idle"
   | "running"
   | "waiting_permission"
+  | "waiting_plan"
   | "done"
   | "error"
   | "interrupted";
@@ -56,6 +58,8 @@ export interface SessionSummary {
   };
   /** 完成审查结论（最后一个 review_result 推导；无审查则缺省） */
   review?: { passed: boolean; attempts: number };
+  /** 最近一次任务计划的轻量状态；正文通过会话 plan API 按需读取。 */
+  plan?: TaskPlanSummary;
   /** Flight Recorder 隔离实验来源；普通会话缺省。 */
   experiment?: {
     parentSessionId: string;

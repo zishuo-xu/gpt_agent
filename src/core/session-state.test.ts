@@ -55,6 +55,52 @@ test("状态切换：user/ask/done/need_user/error/interrupted 驱动 status", (
   assert.equal(machine.status, "interrupted");
 });
 
+test("计划门状态：规划中 → 等待确认 → 修改/批准/仅分析/失败", () => {
+  const machine = new SessionStateMachine();
+  const { deps } = stubDeps();
+  machine.apply(
+    { type: "plan_started", planId: "p1", task: "修复问题", revision: 1 },
+    deps,
+  );
+  assert.equal(machine.status, "running");
+  machine.apply(
+    {
+      type: "plan_proposed",
+      planId: "p1",
+      task: "修复问题",
+      revision: 1,
+      content: "## 执行步骤",
+    },
+    deps,
+  );
+  assert.equal(machine.status, "waiting_plan");
+  machine.apply(
+    {
+      type: "plan_decision",
+      planId: "p1",
+      decision: "revision_requested",
+      feedback: "减少改动",
+    },
+    deps,
+  );
+  assert.equal(machine.status, "running");
+  machine.apply(
+    { type: "plan_decision", planId: "p1", decision: "approved" },
+    deps,
+  );
+  assert.equal(machine.status, "running");
+  machine.apply(
+    { type: "plan_decision", planId: "p1", decision: "analysis_only" },
+    deps,
+  );
+  assert.equal(machine.status, "done");
+  machine.apply(
+    { type: "plan_failed", planId: "p1", revision: 2, message: "失败" },
+    deps,
+  );
+  assert.equal(machine.status, "error");
+});
+
 test("成本累计：token/费用/缓存浪费 + 维度桶（按 providerId/model 拆分，费用降序）", () => {
   const machine = new SessionStateMachine();
   const { deps } = stubDeps();

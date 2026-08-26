@@ -162,6 +162,7 @@ export const statusMeta: Record<
   idle: { label: "待开始", tone: "neutral" },
   running: { label: "运行中", tone: "running" },
   waiting_permission: { label: "等待审批", tone: "waiting" },
+  waiting_plan: { label: "等待计划确认", tone: "waiting" },
   done: { label: "已完成", tone: "done" },
   error: { label: "出错", tone: "error" },
   interrupted: { label: "已中止", tone: "neutral" },

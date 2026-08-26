@@ -94,6 +94,13 @@ export class SessionStateMachine {
       deps.permissions.setMode(event.mode);
     }
     if (event.type === "ask_permission") this.#status = "waiting_permission";
+    if (event.type === "plan_started") this.#status = "running";
+    if (event.type === "plan_proposed") this.#status = "waiting_plan";
+    if (event.type === "plan_decision") {
+      this.#status =
+        event.decision === "analysis_only" ? "done" : "running";
+    }
+    if (event.type === "plan_failed") this.#status = "error";
     if (event.type === "todo_update") {
       this.#todos = structuredClone(event.todos);
       deps.model.setTodos(this.#todos);

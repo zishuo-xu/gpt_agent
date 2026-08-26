@@ -40,6 +40,11 @@ import {
   resumePrompt,
 } from "./session-restore.js";
 import { TaskLedger, normalizeLedgerPath } from "./task-ledger.js";
+import {
+  taskPlanFromEvents,
+  taskPlanSummary,
+  type TaskPlanState,
+} from "./task-plan.js";
 import type { ExperimentSessionSummary } from "./experiment.js";
 import type {
   AgentEvent,
@@ -451,6 +456,8 @@ export class AgentSession {
         attempts: lastReview.event.attempts,
       };
     }
+    const plan = taskPlanSummary(this.taskPlan());
+    if (plan) summary.plan = plan;
     if (this.#experiment) {
       summary.experiment = structuredClone(this.#experiment);
     }
@@ -459,6 +466,11 @@ export class AgentSession {
 
   events(after = 0): AgentSessionEvent[] {
     return this.#events.filter((event) => event.seq > after);
+  }
+
+  /** 最近一次任务计划（从事件流投影，恢复与实时路径一致）。 */
+  taskPlan(): TaskPlanState | undefined {
+    return taskPlanFromEvents(this.#events);
   }
 
   /** Agent Harness Flight Recorder trace metadata/details. */
