@@ -852,6 +852,15 @@ export class AgentSession {
     }
     const text = message.trim();
     if (!text) throw new Error("消息不能为空");
+    if (this.taskPlan()?.status === "planning") {
+      throw new Error("计划正在生成，请等待完成或先中止规划");
+    }
+    if (
+      !this.#processing &&
+      this.taskPlan()?.status === "awaiting_approval"
+    ) {
+      throw new Error("当前计划等待决策，请先批准、修改或选择仅分析");
+    }
     if (this.#processing) {
       const steer = options?.steer === true;
       const queued: QueuedInput = {
@@ -1008,6 +1017,9 @@ export class AgentSession {
     }
     if (this.#processing || this.#taskBox) {
       throw new Error("当前会话已有任务在运行");
+    }
+    if (this.taskPlan()?.status === "awaiting_approval") {
+      throw new Error("当前计划等待决策，请先批准、修改或选择仅分析");
     }
     if (options.budgetCny !== undefined && !this.#pricing?.main) {
       throw new Error(

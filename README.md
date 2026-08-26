@@ -1,8 +1,8 @@
 # MyAgent — 可恢复、可控的本地 Agent Harness
 
-MyAgent is a local-first Agent Harness with a bundled coding-agent runtime for tracing, forking, comparing, and evaluating tool-using agent runs.
+MyAgent is a local-first Agent Harness for tracing, controlling, forking, and debugging tool-using agent runs.
 
-MyAgent 把模型、工具、权限、事件持久化、恢复和 CLI/Web/API 入口组合成可调试、可实验的本地执行系统。当前内置 Coding Agent 是 Harness 的第一个 Runtime；项目重点不是再造一套聊天 UI，而是让 Agent 在真实代码库里的行为可以追踪、复现、隔离对照和机器验收。
+MyAgent 把模型、工具、权限、事件持久化、恢复和 CLI/Web/API 入口组合成给人使用的本地 Agent 工作台。当前内置 Coding Agent 是 Harness 的第一个 Runtime；项目重点是让人在真实代码库里看得见、控得住、能恢复、可调试 Agent 的行为，而不是把产品做成评测平台。
 
 > 当前项目适合作为 Agent/AI Infra 面试项目：代码和测试是事实证据；真实模型的成功率、成本和延迟需要通过 Eval 再测量，不能从功能清单推断。
 
@@ -50,6 +50,7 @@ Core 只产生结构化事件，前端、持久化、统计和通知订阅事件
 - **todo 可视化**：多步骤任务自动建清单，实时翻转状态
 - **原子文件编辑**：临时文件 + rename，中止不留半文件；EditJournal 记录每次编辑，收尾可精确撤销
 - **统一硬中止**：Esc 立即取消模型与当前工具；Bash 终止整个进程组
+- **计划批准门**：Web 可开启“先规划再执行”，Agent 仅用 Read/Grep/Glob 探索并提交结构化计划；随后弹窗选择“批准执行 / 反馈修改 / 仅保留分析”。批准后沿用同一会话执行，未决计划不能被普通输入或 `/run` 绕过。CLI 对应 `/plan`、`/plan-approve`、`/plan-revise`、`/plan-analysis`
 - **任务验收链**：带 `--check` 的 `/run` 由系统执行验收命令；通过且产生文件修改时，无论 `behavior.completionReview` 开关如何都会自动独立审查。未带 `--check` 的任务仍由该开关或 `/review` 控制审查，运行时默认关闭，纯问答不触发
 
 ### Flight Recorder 调试闭环
@@ -90,7 +91,8 @@ Core 只产生结构化事件，前端、持久化、统计和通知订阅事件
 
 ### Web 界面（myagent --web）
 
-- **监控台**：所有会话实时状态卡（进度 / 花费 / 时长），审批请求标签页标题提示
+- **监控台**：所有会话实时状态卡（进度 / 花费 / 时长），权限审批和计划决策都会触发标签页标题提示
+- **计划决策弹窗**：任务输入区可开启“先规划再执行”；每一版计划生成后都弹出三态选择，移动端使用单栏底部弹层，直接执行模式继续保留
 - **会话详情**：`对话 / Trace / 对比` 三视图；对话包含完整事件流（文本 / 工具 / diff / 子代理卡片）和来源筛选，Trace 支持脱敏展开、显式查看原文与从 Turn 创建隔离实验，对比页展示父子 Run 的首个行为分歧；移动端为单栏 Turn 卡和横向滚动指标
 - **记忆面板**：四类记忆直接编辑 / 删除，自动写入有时间线审计
 - **定时任务面板**：按项目注册 / 取消定时 `/run`（`--at` / `--every`），到期服务端自动启动会话；启动失败自动重试（5 分钟 × 3 次后丢弃），可设**每日花费上限**（超限顺延）；每行展示上次触发结果与会话

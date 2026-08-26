@@ -230,6 +230,7 @@ test("已有会话发消息兼容 message 字段（与 task 一致）", async ()
   const fakeSession = {
     id: "sess-test",
     isProcessing: () => false,
+    taskPlan: () => undefined,
     sendInput: async () => undefined,
     startRunTask: () => undefined,
   } as never;
@@ -290,6 +291,13 @@ test("规划 API：启动只读规划、读取计划并提交三态决策", asyn
   const fetched = await app.request("/api/sessions/sess-plan/plan");
   assert.equal(fetched.status, 200);
   assert.deepEqual((await fetched.json()).plan, plan);
+
+  const bypass = await app.request("/api/sessions/sess-plan/input", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "绕过计划直接执行" }),
+  });
+  assert.equal(bypass.status, 409);
 
   const revised = await app.request("/api/sessions/sess-plan/plan/decision", {
     method: "POST",

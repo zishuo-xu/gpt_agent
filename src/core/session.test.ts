@@ -200,6 +200,10 @@ test("任务规划只暴露只读工具，并硬拒绝模型幻觉出的写工�
   await assert.rejects(readFile(path.join(cwd, "should-not-exist.txt"), "utf8"), /ENOENT/);
   assert.equal(session.taskPlan()?.status, "awaiting_approval");
   assert.equal(session.summary().status, "waiting_plan");
+  await assert.rejects(
+    session.sendInput("绕过计划直接执行"),
+    /当前计划等待决策/,
+  );
 });
 
 test("批准计划后在同一会话执行，执行提示携带原任务与已批准计划", async () => {

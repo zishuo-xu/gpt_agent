@@ -271,6 +271,30 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
           pushLedgerCard(String(event.taskId), seq);
         }
         break;
+      case "plan_started":
+        system(
+          seq,
+          `只读规划第 ${event.revision} 版已开始 · ${event.task}`,
+          "running",
+        );
+        break;
+      case "plan_proposed":
+        system(seq, "计划已就绪，等待你的决定", "warning");
+        break;
+      case "plan_decision":
+        system(
+          seq,
+          event.decision === "approved"
+            ? "计划已批准，开始执行"
+            : event.decision === "revision_requested"
+              ? "已提交修改意见，重新规划"
+              : "已选择仅保留分析，不执行修改",
+          event.decision === "approved" ? "running" : undefined,
+        );
+        break;
+      case "plan_failed":
+        system(seq, `规划失败：${event.message}`, "error");
+        break;
       case "ledger_update":
         // 无 run_started 的极端情况（事件流不完整）：首个 ledger_update 建卡
         if (!ledgerCards.has(String(event.taskId))) {

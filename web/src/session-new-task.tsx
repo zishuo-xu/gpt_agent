@@ -19,6 +19,8 @@ export function NewTaskOverlay(props: {
   message: string;
   runMode: boolean;
   onRunModeChange: (runMode: boolean) => void;
+  planMode: boolean;
+  onPlanModeChange: (planMode: boolean) => void;
   onEnvChange: (env: "project" | "lobby") => void;
   onProjectChange: (key: string) => void;
   onPermissionMode: (mode: PermissionMode) => void;
@@ -155,6 +157,8 @@ export function NewTaskOverlay(props: {
         selected={false}
         runMode={props.runMode}
         onRunModeChange={props.onRunModeChange}
+        planMode={props.planMode}
+        onPlanModeChange={props.onPlanModeChange}
         onSubmit={props.onSubmit}
       />
     </section>

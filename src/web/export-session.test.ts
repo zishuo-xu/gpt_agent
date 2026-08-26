@@ -116,3 +116,23 @@ test("导出 HTML：包含 Flight Recorder Fork 来源", () => {
   assert.match(html, /provider\/model/);
   assert.match(html, /替代策略/);
 });
+
+test("导出 HTML：包含计划正文、反馈与决策证据", () => {
+  const html = exportSessionHtml({
+    sessionId: "sess-plan",
+    title: "计划门",
+    createdAt: "2026-08-07T09:00:00.000Z",
+    updatedAt: "2026-08-07T10:00:00.000Z",
+    permissionMode: "normal",
+    records: [
+      record(1, { type: "plan_started", planId: "p1", task: "实现登录", revision: 1 }),
+      record(2, { type: "plan_proposed", planId: "p1", task: "实现登录", revision: 1, content: "## 目标\n实现登录" }),
+      record(3, { type: "plan_decision", planId: "p1", decision: "revision_requested", feedback: "不要改 API" }),
+    ],
+  });
+  assert.match(html, /只读规划第 1 版/);
+  assert.match(html, /待批准计划/);
+  assert.match(html, /实现登录/);
+  assert.match(html, /revision_requested/);
+  assert.match(html, /不要改 API/);
+});

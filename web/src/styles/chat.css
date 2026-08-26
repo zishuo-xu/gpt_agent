@@ -1975,6 +1975,14 @@
   accent-color: #5369b7;
 }
 
+.plan-mode-toggle {
+  color: #aebcf1;
+}
+
+.plan-mode-toggle input {
+  accent-color: #7597ff;
+}
+
 .composer-footer .run-mode-toggle + span {
   margin-left: auto;
 }
@@ -2050,6 +2058,137 @@
   color: #cfc4aa;
 }
 
+/* ========== 人在闭环：计划决策弹窗 ========== */
+
+.plan-decision-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(4, 8, 14, 0.76);
+  backdrop-filter: blur(8px);
+}
+
+.plan-decision-dialog {
+  display: flex;
+  width: min(780px, 100%);
+  max-height: calc(100dvh - 56px);
+  flex-direction: column;
+  padding: 24px;
+  border: 1px solid #405382;
+  border-radius: 16px;
+  background: #131a24;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.58);
+}
+
+.plan-decision-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.plan-decision-kicker {
+  color: #82a8ff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.plan-decision-header h2 {
+  margin: 6px 0 0;
+  color: #eef3fb;
+  font-size: 21px;
+}
+
+.plan-decision-header p {
+  margin: 7px 0 0;
+  color: #8491a5;
+  font-size: 12px;
+}
+
+.plan-readonly-badge {
+  flex: none;
+  padding: 5px 10px;
+  border: 1px solid #365a54;
+  border-radius: 999px;
+  background: #142922;
+  color: #79d4b5;
+  font-size: 11px;
+}
+
+.plan-task {
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px solid #29364c;
+  border-radius: 8px;
+  background: #0f151e;
+  color: #99a9bf;
+  font-size: 12px;
+}
+
+.plan-content {
+  min-height: 150px;
+  margin-top: 12px;
+  padding: 16px 18px;
+  border: 1px solid #293443;
+  border-radius: 10px;
+  background: #0d131b;
+  overflow-y: auto;
+  color: #d8e0ea;
+}
+
+.plan-feedback {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  color: #8e9bad;
+  font-size: 11px;
+}
+
+.plan-feedback textarea {
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 1px solid #2e3b4c;
+  border-radius: 8px;
+  background: #0f151e;
+  color: #dce4ef;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.plan-feedback textarea:focus {
+  border-color: #607fd4;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(96, 127, 212, 0.14);
+}
+
+.plan-decision-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.plan-decision-actions button {
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid #354155;
+  border-radius: 8px;
+  background: #19212d;
+  color: #bdc7d5;
+  cursor: pointer;
+}
+
+.plan-decision-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 
 /* ========== 移动端（≤768px） ========== */
 @media (max-width: 768px) {
@@ -2059,6 +2198,12 @@
   }
   .sessions-header {
     padding-bottom: 10px;
+  }
+  .session-workspace.with-rail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .session-rail {
+    display: none;
   }
   .header-actions {
     flex-wrap: wrap;
@@ -2071,6 +2216,39 @@
     font-size: 16px;
   }
   .web-approval-card .approval-actions button {
+    min-height: 44px;
+  }
+  .composer-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .composer-footer .run-mode-toggle + span {
+    width: 100%;
+    margin-left: 0;
+    order: 3;
+  }
+  .plan-decision-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .plan-decision-dialog {
+    width: 100%;
+    max-height: 92dvh;
+    padding: 20px 16px 16px;
+    border-radius: 16px 16px 0 0;
+  }
+  .plan-decision-header h2 {
+    font-size: 18px;
+  }
+  .plan-content {
+    min-height: 120px;
+  }
+  .plan-decision-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .plan-decision-actions button {
+    width: 100%;
     min-height: 44px;
   }
 }

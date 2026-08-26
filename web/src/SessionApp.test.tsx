@@ -244,6 +244,21 @@ describe("buildDisplayItems（会话回放事件流转换）", () => {
     }
   });
 
+  it("规划事件在时间线展示开始、待决定、批准与失败", () => {
+    const items = buildDisplayItems([
+      ev(1, { type: "plan_started", planId: "p1", task: "实现功能", revision: 1 }),
+      ev(2, { type: "plan_proposed", planId: "p1", task: "实现功能", revision: 1, content: "## 目标\n完成" }),
+      ev(3, { type: "plan_decision", planId: "p1", decision: "approved" }),
+      ev(4, { type: "plan_failed", planId: "p2", revision: 1, message: "模型不可用" }),
+    ]);
+    assert.equal(items.length, 4);
+    assert.ok(items.every((item) => item.kind === "system"));
+    if (items[0]?.kind === "system") assert.match(items[0].text, /只读规划/);
+    if (items[1]?.kind === "system") assert.match(items[1].text, /等待你的决定/);
+    if (items[2]?.kind === "system") assert.match(items[2].text, /开始执行/);
+    if (items[3]?.kind === "system") assert.match(items[3].text, /模型不可用/);
+  });
+
   it("run_started 后同 taskId 的 ledger_update 合并为一张账本卡（随事件流刷新）", () => {
     const unitA = {
       type: "ledger_update",
@@ -770,7 +785,7 @@ describe("Composer（无人值守任务模式开关）", () => {
     (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
   });
 
-  async function renderComposer(runMode: boolean) {
+  async function renderComposer(runMode: boolean, planMode = false) {
     const [{ act }, { createRoot }, { Composer }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
@@ -780,6 +795,7 @@ describe("Composer（无人值守任务模式开关）", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     const changed: boolean[] = [];
+    const planChanged: boolean[] = [];
     await act(async () => {
       root.render(
         <Composer
@@ -792,11 +808,15 @@ describe("Composer（无人值守任务模式开关）", () => {
           onRunModeChange={(value) => {
             changed.push(value);
           }}
+          planMode={planMode}
+          onPlanModeChange={(value) => {
+            planChanged.push(value);
+          }}
           onSubmit={async () => undefined}
         />,
       );
     });
-    return { container, root, act, changed };
+    return { container, root, act, changed, planChanged };
   }
 
   it("任务模式开关渲染且可切换；开启后按钮文案变为「启动任务」", async () => {
@@ -829,6 +849,25 @@ describe("Composer（无人值守任务模式开关）", () => {
     assert.match(onSendButton?.textContent ?? "", /启动任务/);
     assert.match(on.container.textContent ?? "", /无人值守任务/);
     await on.act(async () => on.root.unmount());
+  });
+
+  it("规划模式可切换，开启后主按钮显示生成计划", async () => {
+    const rendered = await renderComposer(false, true);
+    const toggle = rendered.container.querySelector(
+      ".plan-mode-toggle input",
+    ) as HTMLInputElement | null;
+    assert.ok(toggle);
+    assert.equal(toggle!.checked, true);
+    assert.match(rendered.container.textContent ?? "", /先规划再执行/);
+    assert.match(
+      Array.from(rendered.container.querySelectorAll("button.save-button")).at(-1)?.textContent ?? "",
+      /生成计划/,
+    );
+    await rendered.act(async () => {
+      toggle!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    assert.deepEqual(rendered.planChanged, [false]);
+    await rendered.act(async () => rendered.root.unmount());
   });
 });
 

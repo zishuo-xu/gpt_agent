@@ -163,6 +163,29 @@ function renderRecord(record: RecordedEvent): string {
         ts,
         `🚀 无人值守任务：${escapeHtml(event.description)}`,
       );
+    case "plan_started":
+      return item(
+        "system",
+        seq,
+        ts,
+        `🧭 只读规划第 ${event.revision} 版：${escapeHtml(event.task)}`,
+      );
+    case "plan_proposed":
+      return item(
+        "assistant",
+        seq,
+        ts,
+        `📋 待批准计划\n${escapeHtml(event.content)}`,
+      );
+    case "plan_decision":
+      return item(
+        "system",
+        seq,
+        ts,
+        `计划决策：${escapeHtml(event.decision)}${event.feedback ? `\n反馈：${escapeHtml(event.feedback)}` : ""}`,
+      );
+    case "plan_failed":
+      return item("error", seq, ts, `规划失败：${escapeHtml(event.message)}`);
     case "run_finished":
       return item(
         "system",

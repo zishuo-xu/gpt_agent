@@ -34,6 +34,10 @@ import { SessionStream } from "./session-stream";
 import { NewTaskOverlay } from "./session-new-task";
 import { ProjectPicker } from "./ProjectPicker";
 import { FlightRecorder } from "./flight-recorder";
+import {
+  PlanDecisionOverlay,
+  type TaskPlanDetail,
+} from "./session-plan";
 
 /** SSE 事件记录（后端 RecordedEvent 的会话内形态） */
 export type SessionEvent = RecordedEvent;
@@ -102,6 +106,11 @@ export function SessionApp(props: { initialSessionId?: string }) {
     useState<RunBoundsPreview | null>(null);
   /** 无人值守任务模式：提交自动加 /run 前缀（任务边界确认链路） */
   const [runMode, setRunMode] = useState(false);
+  /** 可选的人在闭环规划门：关闭时保留原有直接执行语义。 */
+  const [planMode, setPlanMode] = useState(false);
+  const [planDetail, setPlanDetail] = useState<TaskPlanDetail | null>(null);
+  const [planFeedback, setPlanFeedback] = useState("");
+  const [planSubmitting, setPlanSubmitting] = useState(false);
   const chatStreamRef = useRef<HTMLDivElement>(null);
   const previousStatuses = useRef<Record<string, SessionStatus>>({});
   const seenSeqs = useRef<Set<number>>(new Set());
@@ -192,6 +201,18 @@ export function SessionApp(props: { initialSessionId?: string }) {
     setSessionsLoaded(true);
   }
 
+  async function loadPlan(sessionId: string) {
+    const response = await fetch(
+      projectUrl(`/api/sessions/${sessionId}/plan`),
+    );
+    if (!response.ok) return;
+    const payload = await response.json() as { plan?: TaskPlanDetail | null };
+    if (payload.plan?.status === "awaiting_approval") {
+      setPlanDetail(payload.plan);
+      setPlanFeedback(payload.plan.feedback ?? "");
+    }
+  }
+
   // 记忆面板「打开会话」跳转：列表加载后自动选中目标会话（仅首次；找不到静默回退列表视图）
   const appliedInitialSessionRef = useRef(false);
   useEffect(() => {
@@ -208,6 +229,15 @@ export function SessionApp(props: { initialSessionId?: string }) {
       setShowNewTask(false);
     }
   }, [sessionsLoaded, sessions, initialSessionId]);
+
+  useEffect(() => {
+    if (!selected || selected.status !== "waiting_plan") {
+      setPlanDetail(null);
+      setPlanFeedback("");
+      return;
+    }
+    void loadPlan(selected.id);
+  }, [selected?.id, selected?.status, selected?.plan?.revision, currentProject]);
 
   async function deleteSession(id: string) {
     const response = await fetch(
@@ -343,7 +373,9 @@ export function SessionApp(props: { initialSessionId?: string }) {
   // 标题统一在此设置：等待审批 > 刚完成提醒 > 当前会话 > 默认
   useEffect(() => {
     const waiting = sessions.filter(
-      (session) => session.status === "waiting_permission",
+      (session) =>
+        session.status === "waiting_permission" ||
+        session.status === "waiting_plan",
     ).length;
     for (const session of sessions) {
       const previous = previousStatuses.current[session.id];
@@ -361,7 +393,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
       justCompleted.current = null;
     }
     if (waiting > 0) {
-      document.title = `(${waiting}) 等待审批 · MyAgent`;
+      document.title = `(${waiting}) 等待决定 · MyAgent`;
     } else if (justCompleted.current) {
       document.title = `任务完成 · ${justCompleted.current.title} · MyAgent`;
     } else if (selected) {
@@ -394,6 +426,10 @@ export function SessionApp(props: { initialSessionId?: string }) {
       // 分支切换事件实时刷新分支树（含跨端切换：CLI /branch 或 /goto）
       if (record.event.type === "branch_switch") {
         void refreshBranches();
+      }
+      if (record.event.type === "plan_proposed") {
+        void loadPlan(selectedId);
+        void refreshSessions();
       }
     };
     source.onerror = () => {
@@ -476,12 +512,14 @@ export function SessionApp(props: { initialSessionId?: string }) {
               ? {
                   message: content,
                   confirmBounds,
+                  ...(planMode ? { planMode: true } : {}),
                   ...(steer && busy ? { steer: true } : {}),
                 }
               : {
                   task: content,
                   permissionMode,
                   confirmBounds,
+                  ...(planMode ? { planMode: true } : {}),
                 },
           ),
         },
@@ -546,6 +584,39 @@ export function SessionApp(props: { initialSessionId?: string }) {
       await refreshSessions();
     } finally {
       setPendingPermissionCallId(null);
+    }
+  }
+
+  async function decidePlan(
+    decision: "approved" | "revision_requested" | "analysis_only",
+    feedback?: string,
+  ) {
+    if (!selectedId) return;
+    setPlanSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch(
+        projectUrl(`/api/sessions/${selectedId}/plan/decision`),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            decision,
+            ...(feedback?.trim() ? { feedback: feedback.trim() } : {}),
+          }),
+        },
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "计划决策失败");
+      }
+      setPlanDetail(null);
+      setPlanFeedback("");
+      await refreshSessions();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "计划决策失败");
+    } finally {
+      setPlanSubmitting(false);
     }
   }
 
@@ -702,6 +773,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
                       selected
                       runMode={runMode}
                       onRunModeChange={setRunMode}
+                      planMode={planMode}
+                      onPlanModeChange={setPlanMode}
                       onSubmit={submitMessage}
                     />
                 </>
@@ -756,6 +829,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   message={message}
                   runMode={runMode}
                   onRunModeChange={setRunMode}
+                  planMode={planMode}
+                  onPlanModeChange={setPlanMode}
                   onEnvChange={setNewTaskEnv}
                   onProjectChange={setNewTaskProject}
                   onPermissionMode={setPermissionMode}
@@ -767,6 +842,15 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   onCancelBounds={() => setRunBoundsPreview(null)}
                 />
               </div>
+            )}
+            {planDetail && (
+              <PlanDecisionOverlay
+                plan={planDetail}
+                feedback={planFeedback}
+                submitting={planSubmitting}
+                onFeedback={setPlanFeedback}
+                onDecision={decidePlan}
+              />
             )}
             {projectPicker.showProjectPicker && (
               <ProjectPicker

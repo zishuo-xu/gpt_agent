@@ -332,7 +332,7 @@
   font-size: 12px;
 }
 
-@media (max-width: 1180px) {
+@media (min-width: 769px) and (max-width: 1180px) {
   .session-workspace.with-rail {
     grid-template-columns: minmax(0, 1fr) 248px;
   }

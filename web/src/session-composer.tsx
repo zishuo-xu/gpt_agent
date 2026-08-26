@@ -57,6 +57,9 @@ export function Composer(props: {
   /** 无人值守任务模式：提交时自动加 /run 前缀（走任务边界确认链路） */
   runMode: boolean;
   onRunModeChange: (runMode: boolean) => void;
+  /** 先只读探索生成计划，批准后才进入同会话执行。 */
+  planMode: boolean;
+  onPlanModeChange: (planMode: boolean) => void;
   onSubmit: (
     boundsConfirmed?: boolean,
     steer?: boolean,
@@ -105,6 +108,19 @@ export function Composer(props: {
           />
           无人值守任务
         </label>
+        <label
+          className="run-mode-toggle plan-mode-toggle"
+          title="先只读探索并生成计划，再通过弹窗批准、修改或仅保留分析"
+        >
+          <input
+            type="checkbox"
+            checked={props.planMode}
+            onChange={(event) =>
+              props.onPlanModeChange(event.target.checked)
+            }
+          />
+          先规划再执行
+        </label>
         <span>
           {props.busy
             ? "排队发送 · 插队打断会中断剩余工具调用"
@@ -130,7 +146,9 @@ export function Composer(props: {
         >
           {props.submitting
             ? "发送中…"
-            : props.runMode
+            : props.planMode
+              ? "生成计划"
+              : props.runMode
               ? "启动任务"
               : props.selected
                 ? props.busy

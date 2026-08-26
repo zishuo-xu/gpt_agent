@@ -112,6 +112,12 @@ export function registerSessionRoutes(
         await session.startPlan(task);
         return context.json({ accepted: true, queued: false });
       }
+      if (session.taskPlan()?.status === "awaiting_approval") {
+        return context.json(
+          { error: "当前计划等待决策，请先批准、修改或选择仅分析" },
+          409,
+        );
+      }
       if (task.startsWith("/run")) {
         if (session.isProcessing()) {
           return context.json(
