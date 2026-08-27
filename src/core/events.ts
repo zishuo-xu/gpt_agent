@@ -6,6 +6,7 @@ import { readJsonl } from "../utils/fs.js";
 import type { AgentEvent, RecordedEvent } from "./types.js";
 import type { ToolCall } from "./types.js";
 import { ROOT_BRANCH } from "./branch.js";
+import type { WorkspaceFingerprint } from "./workspace-fingerprint.js";
 
 export class AgentEventBus {
   readonly #emitter = new EventEmitter();
@@ -135,6 +136,8 @@ export interface AgentTurnTrace {
     ms: number;
   }>;
   usage?: { input: number; output: number; cached: number };
+  /** Git HEAD + dirty hash at record time. Absent on legacy or non-git cwd. */
+  workspace?: WorkspaceFingerprint;
 }
 
 export class TraceStore {
@@ -147,17 +150,22 @@ export class TraceStore {
 
   readonly #getBranchId: (() => string) | undefined;
   readonly #getEventSeq: (() => number) | undefined;
+  readonly #getWorkspace:
+    | (() => Promise<WorkspaceFingerprint | undefined>)
+    | undefined;
 
   constructor(
     filePath: string,
     options: {
       getBranchId?: () => string;
       getEventSeq?: () => number;
+      getWorkspace?: () => Promise<WorkspaceFingerprint | undefined>;
     } = {},
   ) {
     this.#filePath = filePath;
     this.#getBranchId = options.getBranchId;
     this.#getEventSeq = options.getEventSeq;
+    this.#getWorkspace = options.getWorkspace;
   }
 
   /** 关闭写链：后续 trace 静默丢弃 */
@@ -185,14 +193,25 @@ export class TraceStore {
       ...(eventSeqStart === undefined ? {} : { eventSeqStart }),
       ...(eventSeqEnd === undefined ? {} : { eventSeqEnd }),
     };
+    // Start the sensor at record() time. The write queue may be delayed by a
+    // previous trace; sampling inside the queue would attribute a later
+    // workspace state to this turn.
+    const workspaceAtRecord = trace.workspace ?? this.#getWorkspace?.();
     this.#writeTail = this.#writeTail
       .then(async () => {
         await this.#initializeTurn();
+        let workspace: WorkspaceFingerprint | undefined;
+        try {
+          workspace = await workspaceAtRecord;
+        } catch {
+          workspace = undefined;
+        }
         const record: AgentTurnTrace = {
           turn: ++this.#turn,
           ts: endedAt,
           ...captured,
           ...trace,
+          ...(workspace ? { workspace } : {}),
         };
         await mkdir(path.dirname(this.#filePath), {
           recursive: true,

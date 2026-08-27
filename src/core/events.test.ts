@@ -80,6 +80,42 @@ test("TraceStore 独立按 turn 追加完整工程追踪", async () => {
   assert.equal(traces[0]?.durationMs, 0);
 });
 
+test("TraceStore attaches a workspace fingerprint captured at write time", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-trace-fp-"));
+  const store = new TraceStore(path.join(directory, "trace.jsonl"), {
+    getWorkspace: async () => ({ head: "abc123", dirty: "ffff" }),
+  });
+  store.record({ tools: [] });
+  const traces = await store.readAll();
+  assert.deepEqual(traces[0]?.workspace, { head: "abc123", dirty: "ffff" });
+});
+
+test("TraceStore samples workspace when record is called, even if the write queue is blocked", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-trace-fp-queued-"));
+  let calls = 0;
+  let releaseFirst!: () => void;
+  const first = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const store = new TraceStore(path.join(directory, "trace.jsonl"), {
+    getWorkspace: async () => {
+      calls += 1;
+      const snapshot = { head: `head-${calls}`, dirty: `dirty-${calls}` };
+      if (calls === 1) await first;
+      return snapshot;
+    },
+  });
+  store.record({ tools: [] });
+  store.record({ tools: [] });
+  assert.equal(calls, 2, "both sensors start at record() time");
+  releaseFirst();
+  const traces = await store.readAll();
+  assert.deepEqual(traces.map((trace) => trace.workspace), [
+    { head: "head-1", dirty: "dirty-1" },
+    { head: "head-2", dirty: "dirty-2" },
+  ]);
+});
+
 test("TraceStore 兼容旧记录并在写入时捕获分支/事件关联", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-trace-v2-"));
   const filePath = path.join(directory, "trace.jsonl");

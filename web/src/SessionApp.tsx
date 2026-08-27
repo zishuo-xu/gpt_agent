@@ -113,6 +113,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [planSubmitting, setPlanSubmitting] = useState(false);
   const chatStreamRef = useRef<HTMLDivElement>(null);
   const previousStatuses = useRef<Record<string, SessionStatus>>({});
+  const appliedInitialSessionId = useRef<string | undefined>(undefined);
   const seenSeqs = useRef<Set<number>>(new Set());
   /** 刚完成会话的标题提醒（用户查看后清除） */
   const justCompleted = useRef<{ id: string; title: string } | null>(null);
@@ -213,22 +214,37 @@ export function SessionApp(props: { initialSessionId?: string }) {
     }
   }
 
-  // 记忆面板「打开会话」跳转：列表加载后自动选中目标会话（仅首次；找不到静默回退列表视图）
-  const appliedInitialSessionRef = useRef(false);
+  // 记忆面板 / 地址栏直达：#sessions/<id>
   useEffect(() => {
-    if (
-      appliedInitialSessionRef.current ||
-      !sessionsLoaded ||
-      !initialSessionId
-    ) {
-      return;
-    }
-    appliedInitialSessionRef.current = true;
+    if (!sessionsLoaded || !initialSessionId) return;
+    if (appliedInitialSessionId.current === initialSessionId) return;
     if (sessions.some((session) => session.id === initialSessionId)) {
       setSelectedId(initialSessionId);
+      appliedInitialSessionId.current = initialSessionId;
       setShowNewTask(false);
     }
   }, [sessionsLoaded, sessions, initialSessionId]);
+
+  useEffect(() => {
+    const current = window.location.hash.slice(1);
+    if (
+      current === "settings" ||
+      current === "memory" ||
+      current === "plugins" ||
+      current === "scheduled" ||
+      current === "stats"
+    ) {
+      return;
+    }
+    const next = selectedId ? `sessions/${selectedId}` : "sessions";
+    if (current !== next) {
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${window.location.search}#${next}`,
+      );
+    }
+  }, [selectedId]);
 
   useEffect(() => {
     if (!selected || selected.status !== "waiting_plan") {

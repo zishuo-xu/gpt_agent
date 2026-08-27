@@ -46,6 +46,27 @@ export interface ExperimentForkState {
   conversation: ConversationMessage[];
 }
 
+/**
+ * Parent side of a compare. Model comes from the selected parent turn.
+ * Overlay is never copied from the child experiment.
+ */
+export function parentCompareMeta(
+  child: ExperimentSessionMeta,
+  model: ExperimentPinnedModel,
+): ExperimentSessionMeta {
+  return {
+    version: 1,
+    parentSessionId: "",
+    parentTurnId: "",
+    parentEventSeq: 0,
+    projectCwd: child.projectCwd,
+    workspaceSnapshot: child.workspaceSnapshot,
+    pinnedModel: { ...model },
+    status: child.status,
+    createdAt: child.createdAt,
+  };
+}
+
 /** Convert persisted metadata into a deliberately non-sensitive list summary. */
 export function experimentSessionSummary(
   id: string,

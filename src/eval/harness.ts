@@ -173,7 +173,9 @@ export async function runScenario(scenario: EvalScenario, options: EvalOptions =
         flightVerified =
           diff.model.changed &&
           diff.overlay.changed &&
-          divergenceIndex === 0;
+          divergenceIndex === 0 &&
+          diff.isolation.isolatable === false &&
+          diff.isolation.reasons.includes("multiple_knobs");
         flightDiffed = diff.model.changed && diff.overlay.changed;
         verification = [
           options.injected
@@ -181,8 +183,8 @@ export async function runScenario(scenario: EvalScenario, options: EvalOptions =
               ? `parent/child differ in model and overlay; first divergence at tool index ${divergenceIndex ?? "none"}`
               : "flight diff missing model or overlay change")
             : (flightVerified
-              ? `first divergence at tool index ${divergenceIndex}`
-              : "flight diff did not identify the first divergence"),
+              ? `first divergence at tool index ${divergenceIndex}; isolation refused`
+              : "flight diff did not identify the first divergence or isolation gate"),
         ];
       }
     }

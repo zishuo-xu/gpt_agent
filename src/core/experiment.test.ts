@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { conversationFromAt } from "./branch.js";
 import { computeExperimentDiff } from "./experiment-diff.js";
-import type { ExperimentSessionMeta } from "./experiment.js";
+import { parentCompareMeta, type ExperimentSessionMeta } from "./experiment.js";
 import type { AgentTurnTrace } from "./events.js";
 import type { BranchEventLike } from "./branch.js";
 
@@ -76,4 +76,77 @@ test("computeExperimentDiff compares tools, usage, status and first divergence",
   assert.equal(diff.costCny.delta, 1);
   assert.equal(diff.durationMs.delta, 10);
   assert.equal(diff.status.changed, true);
+  assert.equal(diff.isolation.isolatable, false);
+  assert.deepEqual(diff.isolation.changedKnobs, ["model", "overlay"]);
+  assert.ok(diff.isolation.reasons.includes("multiple_knobs"));
+  assert.ok(diff.isolation.reasons.includes("missing_fingerprint"));
+});
+
+test("parentCompareMeta does not copy the child overlay", () => {
+  const parent = parentCompareMeta(
+    meta({ systemPromptOverlay: "只用不超过 15 个汉字回答。" }),
+    { providerId: "opencode", model: "deepseek-v4-flash" },
+  );
+  assert.equal(parent.systemPromptOverlay, undefined);
+  assert.deepEqual(parent.pinnedModel, {
+    providerId: "opencode",
+    model: "deepseek-v4-flash",
+  });
+});
+
+test("computeExperimentDiff does not treat an empty parent window as full-session tokens", () => {
+  const diff = computeExperimentDiff(
+    {
+      meta: meta(),
+      traces: [],
+      summary: { status: "done", totalInputTokens: 4419, totalOutputTokens: 251, totalCostCny: 0 },
+    },
+    {
+      meta: meta({ systemPromptOverlay: "be concise" }),
+      traces: [{
+        version: 2,
+        turn: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        tools: [],
+        usage: { input: 100, output: 10, cached: 0 },
+      }],
+      summary: { status: "done", totalInputTokens: 100, totalOutputTokens: 10 },
+    },
+  );
+  assert.equal(diff.turns.parent, 0);
+  assert.equal(diff.tokens.parent.input, 0);
+  assert.equal(diff.overlay.changed, true);
+  assert.equal(diff.overlay.parent, "");
+});
+
+test("computeExperimentDiff is isolatable only with one knob and matching fingerprints", () => {
+  const workspace = { head: "abc123", dirty: "same" };
+  const trace = (tool: string): AgentTurnTrace => ({
+    version: 2,
+    turn: 1,
+    ts: "2026-01-01T00:00:00.000Z",
+    tools: [{ call: { id: tool, tool, target: "a", args: {} }, permission: "allow", ms: 1 }],
+  });
+  const isolatable = computeExperimentDiff(
+    { meta: meta(), traces: [trace("Read")], workspace },
+    {
+      meta: meta({ pinnedModel: { providerId: "q", model: "new" } }),
+      traces: [trace("Read")],
+      workspace,
+    },
+  );
+  assert.equal(isolatable.isolation.isolatable, true);
+  assert.deepEqual(isolatable.isolation.changedKnobs, ["model"]);
+  assert.deepEqual(isolatable.isolation.reasons, []);
+
+  const drifted = computeExperimentDiff(
+    { meta: meta(), traces: [trace("Read")], workspace },
+    {
+      meta: meta({ pinnedModel: { providerId: "q", model: "new" } }),
+      traces: [trace("Read")],
+      workspace: { head: "abc123", dirty: "other" },
+    },
+  );
+  assert.equal(drifted.isolation.isolatable, false);
+  assert.deepEqual(drifted.isolation.reasons, ["workspace_drift"]);
 });

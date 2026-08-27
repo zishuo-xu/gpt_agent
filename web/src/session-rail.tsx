@@ -33,6 +33,7 @@ export function SessionRail(props: {
   return (
     <aside className="session-rail">
       {props.selected.status === "done" &&
+        props.selected.kind === "run" &&
         props.selected.toolCallCount === 0 && (
           <div className="rail-todo-warning">
             Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，

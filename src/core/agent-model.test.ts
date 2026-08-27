@@ -238,6 +238,17 @@ test("buildSystemPrompt 默认输出与历史全量指南逐字一致", () => {
   assert.ok(prompt.includes("persist one concise dated entry under .myagent/memory/"));
 });
 
+test("实验 identity 在响应未带模型名时回填 provider/model", async () => {
+  const client = new CapturingClient([response("done")]);
+  const model = new ConversationAgentModel(client, [], undefined, {
+    identity: { providerId: "opencode", model: "deepseek-v4-flash" },
+  });
+  model.addUserMessage("一句话");
+  const turn = await model.next(new AbortController().signal);
+  assert.equal(turn.providerId, "opencode");
+  assert.equal(turn.model, "deepseek-v4-flash");
+});
+
 test("实验 System Prompt Overlay 追加在内置协议后并进入真实请求", async () => {
   const client = new CapturingClient([response("done")]);
   const model = new ConversationAgentModel(client, [], undefined, {

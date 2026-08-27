@@ -6,6 +6,7 @@ import { exportSessionHtml } from "./export-session.js";
 import type { WebSessionEvent } from "./sessions.js";
 import type { WebRouteDeps } from "./routes-context.js";
 import { redactTrace } from "../core/trace-redaction.js";
+import { observeTurn } from "../core/turn-observation.js";
 
 /** 会话路由：集合创建 / 详情操作（输入/审批/导出/中断/续跑/分支/书签）/ SSE 事件流 */
 export function registerSessionRoutes(
@@ -467,11 +468,10 @@ export function registerSessionRoutes(
     const manager = target.sessionManager;
     if (!manager) return context.json({ error: "会话服务未启用" }, 503);
     try {
-      return context.json({
-        comparison: await manager.experimentDiff(
-          context.req.param("childId"),
-        ),
-      });
+      const comparison = await manager.experimentDiff(
+        context.req.param("childId"),
+      );
+      return context.json({ comparison: redactTrace(comparison) });
     } catch (error) {
       return context.json(
         { error: error instanceof Error ? error.message : "对比失败" },
@@ -487,9 +487,16 @@ export function registerSessionRoutes(
     const session = target.sessionManager?.get(context.req.param("id"));
     if (!session) return context.json({ error: "会话不存在" }, 404);
     const traces = await session.traces();
+    const pinned = session.summary?.().experiment?.pinnedModel;
     return context.json({
       traces: traces.map((trace) => {
         const tools = Array.isArray(trace.tools) ? trace.tools : [];
+        // The list is a lightweight card endpoint, but observation still
+        // contains short user/model previews. Derive it from the redacted
+        // payload so those previews cannot bypass the trace boundary.
+        const observation = observeTurn(redactTrace(trace));
+        const providerId = trace.providerId ?? pinned?.providerId;
+        const model = trace.model ?? pinned?.model;
         return {
           version: trace.version,
           turn: trace.turn,
@@ -502,8 +509,8 @@ export function registerSessionRoutes(
           eventSeqStart: trace.eventSeqStart,
           eventSeqEnd: trace.eventSeqEnd,
           modelRole: trace.modelRole,
-          providerId: trace.providerId,
-          model: trace.model,
+          ...(providerId ? { providerId } : {}),
+          ...(model ? { model } : {}),
           usage: trace.usage,
           toolCount: tools.length,
           tools: tools.map((tool) => ({
@@ -511,6 +518,12 @@ export function registerSessionRoutes(
             permission: tool.permission,
             ms: tool.ms,
           })),
+          observation: {
+            saw: observation.saw,
+            decided: observation.decided,
+            did: observation.did,
+          },
+          ...(trace.workspace ? { workspace: trace.workspace } : {}),
           // Legacy records have no event range and cannot safely be forked.
           canFork:
             trace.version === 2 &&
@@ -537,9 +550,11 @@ export function registerSessionRoutes(
       return context.json({ error: "view 必须是 raw 或 redacted" }, 400);
     }
     const view = requestedView ?? "redacted";
+    const payload = view === "raw" ? trace : redactTrace(trace);
     // Raw is intentionally opt-in; no raw payload is cached by this route.
     return context.json({
-      trace: view === "raw" ? trace : redactTrace(trace),
+      trace: payload,
+      observation: observeTurn(payload),
       redacted: view !== "raw",
     });
   });

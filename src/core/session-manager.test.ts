@@ -1149,9 +1149,12 @@ test("Flight Recorder Fork：隔离 dirty Git 快照、固定模型并可恢复�
       new ScriptedClient([response("实验完成")]),
       messages,
       undefined,
-      options?.systemPromptOverlay
-        ? { systemPromptOverlay: options.systemPromptOverlay }
-        : {},
+      {
+        ...(options?.systemPromptOverlay
+          ? { systemPromptOverlay: options.systemPromptOverlay }
+          : {}),
+        ...(options?.pinnedModel ? { identity: options.pinnedModel } : {}),
+      },
     );
   };
   const manager = new AgentSessionManager({
@@ -1178,6 +1181,7 @@ test("Flight Recorder Fork：隔离 dirty Git 快照、固定模型并可恢复�
     systemPromptOverlay: "只尝试替代策略",
     continuation: "继续实验",
   });
+  assert.match(child.summary().title, /实验 Fork · #/);
   while (child.isProcessing()) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -1205,6 +1209,20 @@ test("Flight Recorder Fork：隔离 dirty Git 快照、固定模型并可恢复�
   const comparison = await manager.experimentDiff(child.id);
   assert.equal(comparison.parentSessionId, parent.id);
   assert.equal(comparison.childSessionId, child.id);
+  assert.equal(comparison.diff.overlay.parent, "");
+  assert.equal(comparison.diff.overlay.child, "只尝试替代策略");
+  assert.equal(comparison.diff.overlay.changed, true);
+  assert.equal(comparison.diff.turns.parent, 0, "Fork 点不计入父 continuation 窗口");
+  assert.equal(comparison.diff.costCny.parent, 0, "Fork 点成本不计入父 continuation");
+  assert.ok(comparison.diff.observation.parent);
+  assert.ok(comparison.diff.observation.child);
+  assert.deepEqual(comparison.diff.tools.parentSequence, [], "Fork 点工具不进入父 Run 工具序列");
+  assert.equal(child.summary().permissionMode, parent.summary().permissionMode);
+  const childTrace = (await child.traces()).find(
+    (trace) => trace.version === 2 && trace.modelRole === "main",
+  );
+  assert.equal(childTrace?.providerId, "fixed-provider");
+  assert.equal(childTrace?.model, "fixed-model");
 
   const missingWorkspaceChild = await manager.createExperimentFork({
     parentSessionId: parent.id,

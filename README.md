@@ -1,4 +1,4 @@
-# MyAgent — 可恢复、可控的本地 Agent Harness
+# MyAgent — 可观测、可控、可恢复的本地 Agent Harness
 
 MyAgent is a local-first Agent Harness for tracing, controlling, forking, and debugging tool-using agent runs.
 
@@ -57,11 +57,12 @@ Core 只产生结构化事件，前端、持久化、统计和通知订阅事件
 
 ### Flight Recorder 调试闭环
 
-- **Turn 级 Trace**：每个主模型、压缩模型和探索模型 Turn 都记录稳定 `turnId`、分支、事件范围、实际 Provider/Model、请求上下文、响应、Token、耗时和有序工具阶段；旧 Trace 保持可读
+- **Turn 级 Trace**：每个主模型、压缩模型和探索模型 Turn 都记录稳定 `turnId`、分支、事件范围、实际 Provider/Model、请求上下文、响应、Token、耗时和有序工具阶段；并从已有记录导出「看见 / 决定 / 做了」读法，包含工具成功/错误/拒绝/中断结果。旧 Trace 保持可读
+- **工作区指纹**：Turn 结束时记录 Git `HEAD + dirty hash`（不是文件时光机）。Fork 快照在创建时另记一份，供对照时判断工作区还能不能比
 - **默认脱敏**：Web 详情默认递归遮盖 Key、Token、Authorization、Cookie、Password、Secret 和常见环境变量值；原文仅在本次页面显式点击后请求，不持久化显示状态
 - **隔离实验 Fork**：可从已完成的 v2 主 Turn 重建当时对话，追加 System Prompt Overlay，固定一个模型并禁用 fallback，然后在 detached Git worktree 中立即继续普通输入或 `/run`
 - **快照边界明确**：文件快照代表“创建 Fork 时的当前项目状态”，包含 staged/unstaged binary diff 与未忽略 untracked 文件；它不是历史 Turn 的文件时光机。ignored、依赖目录、submodule 工作内容和可能逃逸隔离的符号链接不复制并显示警告
-- **Run Diff**：父子 Run 对比模型、Overlay、Turn、标准化 `tool + target` 序列、Token、费用、耗时、Acceptance 和 Review，并定位第一个行为分歧
+- **Run Diff**：先比旋钮（模型 / Overlay / 工作区指纹）。多于一个旋钮变化、指纹对不上或旧 Trace 没有指纹 → `not_isolatable`，只展示工具序列事实，不下结论。可对照时仍只报告第一个 `tool + target` 分叉，不把分叉归因到原因
 
 ### 权限安全（strict / normal / trust 三档）
 
@@ -74,7 +75,7 @@ Core 只产生结构化事件，前端、持久化、统计和通知订阅事件
 
 ### 无人值守（/run）
 
-- 任务验收：`--goal` 是目标描述，`--check` 是由系统实际执行的机器验收命令（可重复，按顺序执行）；检查失败会把证据反馈给 Agent 并最多自动修复 2 轮。`--check-timeout` 默认 300 秒。`--bounds` 负面清单（编译为 deny 硬规则，启动前确认）、`--until/--budget` 时间/预算盒
+- 任务验收：`--goal` 是目标描述，`--check` 是由系统实际执行的机器验收命令（可重复，按顺序执行）；检查失败证据会回灌给 Agent，由 Agent 在当前任务内最多进行 2 轮受限修复重试，每轮错误、工具与验收结果都会进入事件与 Trace。`--check-timeout` 默认 300 秒。`--bounds` 负面清单（编译为 deny 硬规则，启动前确认）、`--until/--budget` 时间/预算盒
 - 优雅终止：分阶段收窄范围 → 收尾 → 纯总结，产出总结报告 + todo 快照 + 记忆写入
 - `--permission trust` 任务期生效，结束后回落原档位
 - **任务级审批控制**：`--approve-timeout 30`（任务期审批超时秒数，无人值守不再干等 5 分钟）、`--auto-allow "Bash(pnpm*),Read(*)"`（任务期自动放行规则白名单，结束回落）

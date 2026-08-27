@@ -1,5 +1,11 @@
 import type { AgentTurnTrace } from "./events.js";
 import type { ExperimentSessionMeta } from "./experiment.js";
+import { observeTurn, type TurnObservation } from "./turn-observation.js";
+import {
+  isWorkspaceFingerprint,
+  workspaceFingerprintKey,
+  type WorkspaceFingerprint,
+} from "./workspace-fingerprint.js";
 
 export interface ExperimentRunSummary {
   status?: string;
@@ -19,8 +25,19 @@ export interface ExperimentRunSummary {
 export interface ExperimentRunSnapshot {
   meta: ExperimentSessionMeta;
   traces?: readonly AgentTurnTrace[];
+  /** Fork-point trace shown as context; excluded from continuation metrics. */
+  observationTrace?: AgentTurnTrace;
   summary?: ExperimentRunSummary;
+  /** Explicit workspace identity for this side. Do not infer from copied meta. */
+  workspace?: WorkspaceFingerprint;
 }
+
+export type IsolationReason =
+  | "multiple_knobs"
+  | "workspace_drift"
+  | "missing_fingerprint";
+
+export type IsolationKnob = "model" | "overlay";
 
 export interface NormalizedToolCall {
   index: number;
@@ -54,6 +71,21 @@ export interface ExperimentDiff {
   status: { parent?: string; child?: string; changed: boolean };
   acceptance?: { parent?: unknown; child?: unknown; changed: boolean };
   review?: { parent?: unknown; child?: unknown; changed: boolean };
+  workspace: {
+    parent?: WorkspaceFingerprint;
+    child?: WorkspaceFingerprint;
+    changed: boolean;
+    comparable: boolean;
+  };
+  isolation: {
+    isolatable: boolean;
+    changedKnobs: IsolationKnob[];
+    reasons: IsolationReason[];
+  };
+  observation: {
+    parent?: TurnObservation;
+    child?: TurnObservation;
+  };
 }
 
 function modelKey(meta: ExperimentSessionMeta): string {
@@ -85,7 +117,13 @@ function usage(traces: readonly AgentTurnTrace[], summary?: ExperimentRunSummary
     result.output += trace.usage?.output ?? 0;
     result.cached += trace.usage?.cached ?? 0;
   }
-  if (result.input === 0 && result.output === 0 && result.cached === 0) {
+  // Empty window is a real 0. Only fall back when traces exist but lack usage.
+  if (
+    traces.length > 0 &&
+    result.input === 0 &&
+    result.output === 0 &&
+    result.cached === 0
+  ) {
     result.input = summary?.totalInputTokens ?? 0;
     result.output = summary?.totalOutputTokens ?? 0;
   }
@@ -130,6 +168,26 @@ export function computeExperimentDiff(
   const divergence = firstDivergence(parentTools, childTools);
   const parentDuration = duration(parentTraces);
   const childDuration = duration(childTraces);
+  const parentWorkspace = explicitWorkspace(parent.workspace);
+  const childWorkspace = explicitWorkspace(child.workspace);
+  const workspaceComparable = Boolean(parentWorkspace && childWorkspace);
+  const workspaceChanged = Boolean(
+    parentWorkspace &&
+      childWorkspace &&
+      workspaceFingerprintKey(parentWorkspace) !==
+        workspaceFingerprintKey(childWorkspace),
+  );
+  const changedKnobs: IsolationKnob[] = [
+    ...(modelKey(parent.meta) !== modelKey(child.meta) ? (["model"] as const) : []),
+    ...((parent.meta.systemPromptOverlay ?? "") !==
+    (child.meta.systemPromptOverlay ?? "")
+      ? (["overlay"] as const)
+      : []),
+  ];
+  const reasons: IsolationReason[] = [];
+  if (!workspaceComparable) reasons.push("missing_fingerprint");
+  if (workspaceChanged) reasons.push("workspace_drift");
+  if (changedKnobs.length > 1) reasons.push("multiple_knobs");
   return {
     model: { parent: modelKey(parent.meta), child: modelKey(child.meta), changed: modelKey(parent.meta) !== modelKey(child.meta) },
     overlay: { parent: parent.meta.systemPromptOverlay ?? "", child: child.meta.systemPromptOverlay ?? "", changed: (parent.meta.systemPromptOverlay ?? "") !== (child.meta.systemPromptOverlay ?? "") },
@@ -159,5 +217,28 @@ export function computeExperimentDiff(
     },
     ...(parentAcceptance || childAcceptance ? { acceptance: { parent: parentAcceptance, child: childAcceptance, changed: changedValue(parentAcceptance, childAcceptance) } } : {}),
     ...(parentReview || childReview ? { review: { parent: parentReview, child: childReview, changed: changedValue(parentReview, childReview) } } : {}),
+    workspace: {
+      ...(parentWorkspace ? { parent: parentWorkspace } : {}),
+      ...(childWorkspace ? { child: childWorkspace } : {}),
+      changed: workspaceChanged,
+      comparable: workspaceComparable,
+    },
+    isolation: {
+      isolatable: reasons.length === 0,
+      changedKnobs,
+      reasons,
+    },
+    observation: {
+      ...(parent.observationTrace ?? parentTraces[0]
+        ? { parent: observeTurn(parent.observationTrace ?? parentTraces[0]!) }
+        : {}),
+      ...(child.observationTrace ?? childTraces[0]
+        ? { child: observeTurn(child.observationTrace ?? childTraces[0]!) }
+        : {}),
+    },
   };
+}
+
+function explicitWorkspace(value: unknown): WorkspaceFingerprint | undefined {
+  return isWorkspaceFingerprint(value) ? value : undefined;
 }

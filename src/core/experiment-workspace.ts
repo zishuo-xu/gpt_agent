@@ -9,6 +9,10 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import {
+  captureWorkspaceFingerprint,
+  type WorkspaceFingerprint,
+} from "./workspace-fingerprint.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,6 +24,8 @@ export interface ExperimentWorkspaceSnapshot {
   head: string;
   untrackedCopied: string[];
   warnings: string[];
+  /** Fingerprint of the isolated worktree at creation. Not a time machine. */
+  fingerprint?: WorkspaceFingerprint;
 }
 
 export interface ExperimentWorkspaceManagerOptions {
@@ -93,13 +99,16 @@ export class ExperimentWorkspaceManager {
       ) {
         warnings.push(`依赖目录未复制（${skippedDependencies} 个文件）`);
       }
+      const cwd = path.join(worktreePath, relativeCwd);
+      const fingerprint = await captureWorkspaceFingerprint(cwd, this.#runGit);
       return {
         worktreePath,
-        cwd: path.join(worktreePath, relativeCwd),
+        cwd,
         gitRoot,
         head,
         untrackedCopied,
         warnings,
+        ...(fingerprint ? { fingerprint } : {}),
       };
     } catch (error) {
       if (worktreeAdded) {
@@ -142,7 +151,12 @@ export class ExperimentWorkspaceManager {
   async #warnings(gitRoot: string): Promise<string[]> {
     const warnings: string[] = [];
     const ignored = splitNull(Buffer.from(await this.#runGit(["-C", gitRoot, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"]))).filter(Boolean);
-    if (ignored.length) warnings.push(`忽略文件未复制（${ignored.length} 个）`);
+    if (ignored.length) {
+      const tops = new Set(
+        ignored.map((item) => item.split(/[\\/]/)[0] ?? item),
+      );
+      warnings.push(`忽略文件未复制（${tops.size} 个顶层路径）`);
+    }
     const submodules = String(await this.#runGit(["-C", gitRoot, "submodule", "status", "--recursive"])).trim();
     if (submodules) warnings.push("Submodule 内容未复制");
     if (ignored.some((item) => item === "node_modules" || item.startsWith("node_modules/"))) warnings.push("依赖目录未复制");

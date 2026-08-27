@@ -41,6 +41,8 @@ test("ExperimentWorkspace copies staged/unstaged/deleted/binary and untracked st
   assert.deepEqual([...await readFile(path.join(snapshot.cwd, "binary.bin"))], [...binary]);
   await assert.rejects(() => stat(path.join(snapshot.cwd, "tracked.txt")));
   assert.deepEqual(snapshot.untrackedCopied, ["untracked.txt"]);
+  assert.equal(typeof snapshot.fingerprint?.head, "string");
+  assert.equal(typeof snapshot.fingerprint?.dirty, "string");
   await manager.removeSnapshot(snapshot);
   await assert.rejects(() => stat(snapshot.worktreePath));
   assert.equal(await readFile(path.join(cwd, "tracked.txt")).catch(() => "missing"), "missing");

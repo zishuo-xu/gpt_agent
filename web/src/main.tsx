@@ -26,13 +26,12 @@ function Router() {
   if (route === "plugins") return <PluginApp />;
   if (route === "scheduled") return <ScheduledApp />;
   if (route === "stats") return <StatsApp />;
-  // 记忆面板「打开会话」直达：#sessions/<id>
-  if (route.startsWith("sessions/")) {
-    return (
-      <SessionApp
-        initialSessionId={route.slice("sessions/".length)}
-      />
-    );
+  // 会话列表 / 直达：#sessions 或 #sessions/<id>
+  if (route === "sessions" || route.startsWith("sessions/")) {
+    const sessionId = route.startsWith("sessions/")
+      ? route.slice("sessions/".length)
+      : undefined;
+    return <SessionApp initialSessionId={sessionId} />;
   }
   return <SessionApp />;
 }

@@ -52,6 +52,7 @@ import {
   type TaskPlanState,
 } from "./task-plan.js";
 import { ContextManager } from "./context.js";
+import { captureWorkspaceFingerprint } from "./workspace-fingerprint.js";
 import type { ExperimentSessionSummary } from "./experiment.js";
 import type {
   AgentEvent,
@@ -261,6 +262,10 @@ export class AgentSession {
       {
         getBranchId: () => this.#branchOps.currentBranchId(),
         getEventSeq: () => this.#eventSeq,
+        // A fingerprint is a per-Turn observation. Do not reuse a time-based
+        // cache across turns: a Write followed by the next model call must be
+        // able to observe the changed workspace.
+        getWorkspace: () => captureWorkspaceFingerprint(this.#cwd),
       },
     );
     const taskRunner = options.exploreModelClient

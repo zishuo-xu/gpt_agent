@@ -112,6 +112,8 @@ export class ConversationAgentModel implements AgentModel {
       maxTokens?: number | undefined;
       /** Flight Recorder 实验专用：追加在内置系统提示之后，不替换工具协议。 */
       systemPromptOverlay?: string | undefined;
+      /** 响应没带模型名时回退（实验 pinned 模型）。 */
+      identity?: { providerId: string; model: string } | undefined;
     } = {},
   ) {
     this.#client = client;
@@ -123,11 +125,13 @@ export class ConversationAgentModel implements AgentModel {
     this.#toolNames = options.toolNames;
     this.#maxTokens = options.maxTokens;
     this.#systemPromptOverlay = options.systemPromptOverlay?.trim();
+    this.#identity = options.identity;
   }
 
   readonly #toolNames: readonly (ToolName | string)[] | undefined;
   readonly #maxTokens: number | undefined;
   readonly #systemPromptOverlay: string | undefined;
+  readonly #identity: { providerId: string; model: string } | undefined;
 
   /** 底层 API 客户端（审查/独立上下文复用；同一 client 可建多个 ConversationAgentModel） */
   get client(): ModelClient {
@@ -320,10 +324,7 @@ export class ConversationAgentModel implements AgentModel {
         ? { usagePricing: response.pricing }
         : {}),
       // 成本按模型/供应商拆分：cost_update 携带来源，统计面板可按维度聚合
-      ...(response.providerId
-        ? { providerId: response.providerId }
-        : {}),
-      ...(response.model ? { model: response.model } : {}),
+      ...resolvedModelIdentity(response, this.#identity),
       ...(response.fallbacks
         ? { fallbacks: response.fallbacks }
         : {}),
@@ -339,10 +340,7 @@ export class ConversationAgentModel implements AgentModel {
           ...(response.stopReason
             ? { stopReason: response.stopReason }
             : {}),
-          ...(response.model ? { model: response.model } : {}),
-          ...(response.providerId
-            ? { providerId: response.providerId }
-            : {}),
+          ...resolvedModelIdentity(response, this.#identity),
           ...(response.fallbacks
             ? { fallbacks: response.fallbacks }
             : {}),
@@ -447,6 +445,18 @@ export function findCompactionCutPoint(
 
 function estimateMessageTokens(message: ConversationMessage): number {
   return Math.ceil(JSON.stringify(message).length / 4);
+}
+
+function resolvedModelIdentity(
+  response: { providerId?: string; model?: string },
+  fallback?: { providerId: string; model: string },
+): { providerId?: string; model?: string } {
+  const providerId = response.providerId || fallback?.providerId;
+  const model = response.model || fallback?.model;
+  return {
+    ...(providerId ? { providerId } : {}),
+    ...(model ? { model } : {}),
+  };
 }
 
 /**

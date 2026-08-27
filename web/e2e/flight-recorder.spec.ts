@@ -185,7 +185,7 @@ test.describe.serial("provider-free Flight Recorder", () => {
     const compare = page.getByRole("button", { name: "对比" });
     await expect(compare).toBeEnabled();
     await compare.click();
-    await expect(page.getByText("首个分歧：第 1 项")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(/write\+child-marker\.txt/i)).toBeVisible();
+    await expect(page.getByText("序列分叉：第 1 项")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("child-marker.txt", { exact: true })).toBeVisible();
   });
 });

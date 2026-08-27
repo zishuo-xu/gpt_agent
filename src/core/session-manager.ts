@@ -52,6 +52,7 @@ import { ExperimentWorkspaceManager } from "./experiment-workspace.js";
 import {
   experimentSessionSummary,
   isExperimentForkState,
+  parentCompareMeta,
   type ExperimentForkState,
   type ExperimentSessionMeta,
   type ExperimentSessionSummary,
@@ -312,7 +313,16 @@ export class AgentSessionManager {
         ...(meta.systemPromptOverlay ? { systemPromptOverlay: meta.systemPromptOverlay } : {}),
       });
       const summary = experimentSessionSummary(id, { ...meta, status: "ready" });
-      const session = await this.#createExperimentSession(id, summary, model, snapshot.cwd, config);
+      const session = await this.#createExperimentSession(
+        id,
+        summary,
+        model,
+        snapshot.cwd,
+        config,
+        undefined,
+        undefined,
+        parent.summary().permissionMode,
+      );
       session.recordExperimentCreated({ parentSessionId: parent.id, parentTurnId: options.turnId, parentEventSeq: trace.eventSeqEnd, providerId: pinned.providerId, model: pinned.model, ...(meta.systemPromptOverlay ? { systemPromptOverlay: meta.systemPromptOverlay } : {}) });
       state.meta.status = "ready";
       await this.#writeExperimentState(id, state);
@@ -356,30 +366,32 @@ export class AgentSessionManager {
     const parent = this.#sessions.get(childState.meta.parentSessionId);
     const child = this.#sessions.get(childId);
     if (!parent || !child) throw new Error("实验会话尚未加载");
-    const selected = (await parent.traces()).find((trace) => trace.turnId === childState.meta.parentTurnId);
-    const parentTraces = (await parent.traces()).filter((trace) => selected ? trace.turn > selected.turn : true);
+    const allParentTraces = await parent.traces();
+    const selected = allParentTraces.find((trace) => trace.turnId === childState.meta.parentTurnId);
+    const parentTraces = allParentTraces.filter((trace) =>
+      selected ? trace.turn > selected.turn : true,
+    );
     const childTraces = await child.traces();
-    const makeMeta = (model: { providerId: string; model: string }): ExperimentSessionMeta => ({ ...childState.meta, parentSessionId: "", parentTurnId: "", parentEventSeq: 0, pinnedModel: model });
+    const parentModel =
+      recordedTraceModel(selected) ??
+      recordedTraceModel(allParentTraces.find((trace) => recordedTraceModel(trace))) ??
+      { providerId: "unknown", model: "unrecorded" };
+    // The continuation starts after the Fork point's final event, so the
+    // selected Turn's own cost is not attributed to the parent continuation.
+    const parentCostFrom = childState.meta.parentEventSeq ?? 0;
     const parentSummary = parent.summary();
     const childSummary = child.summary();
     const diff = computeExperimentDiff(
       {
-        meta: makeMeta(
-          selected?.providerId && selected.model
-            ? { providerId: selected.providerId, model: selected.model }
-            : childState.meta.pinnedModel,
-        ),
+        meta: parentCompareMeta(childState.meta, parentModel),
         traces: parentTraces,
+        ...(selected ? { observationTrace: selected } : {}),
         summary: {
           status: parentSummary.status,
-          totalCostCny: costAfter(
-            parent.events(),
-            childState.meta.parentEventSeq,
-          ),
-          totalInputTokens: parentSummary.totalInputTokens,
-          totalOutputTokens: parentSummary.totalOutputTokens,
+          totalCostCny: costAfter(parent.events(), parentCostFrom),
           ...runEvidence(parent.events()),
         },
+        ...(selected?.workspace ? { workspace: selected.workspace } : {}),
       },
       {
         meta: childState.meta,
@@ -391,6 +403,9 @@ export class AgentSessionManager {
           totalOutputTokens: childSummary.totalOutputTokens,
           ...runEvidence(child.events()),
         },
+        ...(childState.meta.workspaceSnapshot.fingerprint
+          ? { workspace: childState.meta.workspaceSnapshot.fingerprint }
+          : {}),
       },
     );
     return {
@@ -676,6 +691,7 @@ export class AgentSessionManager {
       {
         ...(maxOutputTokens === undefined ? {} : { maxTokens: maxOutputTokens }),
         ...(experiment?.systemPromptOverlay ? { systemPromptOverlay: experiment.systemPromptOverlay } : {}),
+        ...(experiment?.pinnedModel ? { identity: experiment.pinnedModel } : {}),
       },
     );
   }
@@ -688,16 +704,17 @@ export class AgentSessionManager {
     runtimeConfig: Awaited<ReturnType<ConfigService["readEffective"]>>,
     runtimeUnavailableReason?: string,
     restoredEvents?: RecordedEvent[],
+    permissionMode?: PermissionMode,
   ): Promise<AgentSession> {
     return new AgentSession({
       id,
       title:
         sessionInfoTitle(restoredEvents ?? []) ??
-        `实验 Fork · ${experiment.parentTurnId}`,
+        `实验 Fork · #${experiment.parentSessionId}`,
       cwd,
       storageDir: this.#sessionsDir,
       stateDir: this.#stateDir,
-      mode: runtimeConfig.permissions.mode,
+      mode: permissionMode ?? runtimeConfig.permissions.mode,
       model,
       modelPinned: true,
       experiment,
@@ -783,6 +800,7 @@ export class AgentSessionManager {
       runtimeConfig,
       unavailableReason,
       records,
+      this.#sessions.get(state.meta.parentSessionId)?.summary().permissionMode,
     );
     this.#register(session);
   }
@@ -983,6 +1001,15 @@ function runEvidence(records: RecordedEvent[]): {
     ...(acceptance ? { acceptance } : {}),
     ...(acceptance?.review ? { review: acceptance.review } : {}),
   };
+}
+
+function recordedTraceModel(
+  trace?: { providerId?: string; model?: string },
+): { providerId: string; model: string } | undefined {
+  if (trace?.providerId && trace.model) {
+    return { providerId: trace.providerId, model: trace.model };
+  }
+  return undefined;
 }
 
 function experimentPricing(

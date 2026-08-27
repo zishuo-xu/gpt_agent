@@ -104,6 +104,7 @@ describe("FlightRecorder Web 调试闭环", () => {
           modelRole: "main",
           usage: { input: 10, output: 2, cached: 0 },
           tools: [],
+          observation: { saw: { lastUser: "继续修测试" }, decided: { tools: ["Read"] }, did: [{ tool: "Read", target: "math.ts" }] },
           canFork: true,
         }],
       });
@@ -136,6 +137,11 @@ describe("FlightRecorder Web 调试闭环", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     assert.match(container.textContent ?? "", /Turn 1/);
+    assert.match(container.textContent ?? "", /看见/);
+    assert.match(container.textContent ?? "", /继续修测试/);
+    assert.match(container.textContent ?? "", /Read math.ts/);
+    assert.match(container.textContent ?? "", /查看详情/);
+    assert.equal((container.textContent ?? "").includes("刷新详情"), false);
 
     await act(async () => {
       (Array.from(container.querySelectorAll("button")).find(
@@ -179,6 +185,43 @@ describe("FlightRecorder Web 调试闭环", () => {
     await act(async () => root.unmount());
   });
 
+  it("旧 Trace 没有 turnId 时不把全部卡片标成选中", async () => {
+    globalThis.fetch = (async () => json({
+      traces: [
+        { turn: 1, observation: { saw: { lastUser: "旧任务" }, decided: { tools: ["Read"] }, did: [] } },
+        { turn: 2, observation: { saw: { lastUser: "旧任务" }, decided: { tools: ["Bash"] }, did: [] } },
+      ],
+    })) as typeof fetch;
+    const [{ act }, { createRoot }, { FlightRecorder }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./flight-recorder"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <FlightRecorder
+          session={session()}
+          project="project-key"
+          conversation={<div />}
+          onSelectSession={() => undefined}
+        />,
+      );
+    });
+    await act(async () => {
+      (Array.from(container.querySelectorAll("button")).find(
+        (button) => button.textContent === "Trace",
+      ) as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.match(container.textContent ?? "", /旧记录/);
+    assert.equal((container.textContent ?? "").includes("刷新详情"), false);
+    assert.equal((container.textContent ?? "").includes("查看详情"), false);
+    await act(async () => root.unmount());
+  });
+
   it("实验会话对比页读取嵌套 diff 并展示首个行为分歧", async () => {
     globalThis.fetch = (async () => json({
       comparison: {
@@ -200,6 +243,11 @@ describe("FlightRecorder Web 调试闭环", () => {
           tokens: { parent: { input: 10 }, child: { input: 20 }, delta: { input: 10 } },
           costCny: { parent: 1, child: 2, delta: 1 },
           status: { parent: "done", child: "done", changed: false },
+          isolation: { isolatable: false, changedKnobs: ["model", "overlay"], reasons: ["multiple_knobs"] },
+          observation: {
+            parent: { saw: { lastUser: "父问题" }, decided: { text: "父回答", tools: [] }, did: [] },
+            child: { saw: { lastUser: "子继续" }, decided: { text: "子回答", tools: [] }, did: [] },
+          },
         },
       },
     })) as typeof fetch;
@@ -227,9 +275,57 @@ describe("FlightRecorder Web 调试闭环", () => {
       ) as HTMLButtonElement).click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    assert.match(container.textContent ?? "", /首个分歧：第 1 项/);
+    assert.match(container.textContent ?? "", /序列分叉：第 1 项/);
+    assert.match(container.textContent ?? "", /隔离失败，只展示事实，不下结论/);
+    assert.match(container.textContent ?? "", /父问题/);
+    assert.match(container.textContent ?? "", /子继续/);
+    assert.match(container.textContent ?? "", /可以对照|隔离失败/);
     assert.match(container.textContent ?? "", /耗时 ms/);
-    assert.match(container.textContent ?? "", /bash\+pnpm test/);
+    assert.match(container.textContent ?? "", /pnpm test/);
+    await act(async () => root.unmount());
+  });
+
+  it("大厅会话不提供 Fork，避免提交后才发现没有 Git", async () => {
+    globalThis.fetch = (async () => json({
+      traces: [{
+        version: 2,
+        turn: 1,
+        turnId: "turn-1",
+        providerId: "test",
+        model: "parent",
+        eventSeqStart: 1,
+        eventSeqEnd: 3,
+        modelRole: "main",
+        canFork: true,
+        observation: { saw: { lastUser: "问好" }, decided: { text: "你好" }, did: [] },
+      }],
+    })) as typeof fetch;
+    const [{ act }, { createRoot }, { FlightRecorder }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./flight-recorder"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <FlightRecorder
+          session={session()}
+          project="lobby"
+          conversation={<div />}
+          onSelectSession={() => undefined}
+        />,
+      );
+    });
+    await act(async () => {
+      (Array.from(container.querySelectorAll("button")).find(
+        (button) => button.textContent === "Trace",
+      ) as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.match(container.textContent ?? "", /大厅不能 Fork/);
+    assert.equal((container.textContent ?? "").includes("从这里 Fork"), false);
     await act(async () => root.unmount());
   });
 });

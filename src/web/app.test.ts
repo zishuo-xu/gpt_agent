@@ -509,7 +509,7 @@ test("Flight Recorder Trace API 默认脱敏并限制旧/非主 Turn Fork", asyn
         model: "model-a",
         request: {
           headers: { authorization: "Bearer raw-secret" },
-          messages: ["OPENAI_API_KEY=env-secret"],
+          messages: [{ role: "user", content: "OPENAI_API_KEY=env-secret" }],
         },
         response: { text: "done" },
         tools: [
@@ -543,6 +543,7 @@ test("Flight Recorder Trace API 默认脱敏并限制旧/非主 Turn Fork", asyn
         tools: [],
       },
     ],
+    summary: () => ({}),
   } as never;
   const fakeManager = {
     get: (id: string) => (id === "sess-trace" ? fakeSession : undefined),
@@ -558,6 +559,17 @@ test("Flight Recorder Trace API 默认脱敏并限制旧/非主 Turn Fork", asyn
   );
   assert.equal(list.traces[0].tools[0].tool, "Bash");
   assert.equal("args" in list.traces[0].tools[0], false);
+  assert.deepEqual(list.traces[0].observation.did[0], {
+    tool: "Bash",
+    target: "pnpm test",
+    permission: "allow",
+    outcome: "success",
+  });
+  assert.equal(
+    list.traces[0].observation.saw.lastUser,
+    "OPENAI_API_KEY=[REDACTED]",
+    "list observation previews must use the redacted trace",
+  );
 
   const redactedResponse = await app.request(
     "/api/sessions/sess-trace/traces/turn-main",
@@ -565,12 +577,13 @@ test("Flight Recorder Trace API 默认脱敏并限制旧/非主 Turn Fork", asyn
   assert.equal(redactedResponse.status, 200);
   const redacted = await redactedResponse.json();
   assert.equal(redacted.redacted, true);
+  assert.equal(redacted.observation.decided.text, "done");
   assert.equal(
     redacted.trace.request.headers.authorization,
     "[REDACTED]",
   );
   assert.equal(
-    redacted.trace.request.messages[0],
+    redacted.trace.request.messages[0].content,
     "OPENAI_API_KEY=[REDACTED]",
   );
 
@@ -651,6 +664,7 @@ test("Flight Recorder Fork API 创建、列出并返回父子 Run 对比", async
       parentTurnId: "turn-01",
       diff: {
         tools: { firstDivergence: { index: 0 } },
+        observation: { parent: { saw: { lastUser: "OPENAI_API_KEY=raw-secret" } } },
       },
     }),
   } as unknown as WebSessionManager;
@@ -690,6 +704,10 @@ test("Flight Recorder Fork API 创建、列出并返回父子 Run 对比", async
   assert.equal(diffResponse.status, 200);
   const diff = await diffResponse.json();
   assert.equal(diff.comparison.diff.tools.firstDivergence.index, 0);
+  assert.equal(
+    diff.comparison.diff.observation.parent.saw.lastUser,
+    "OPENAI_API_KEY=[REDACTED]",
+  );
 
   const invalid = await app.request("/api/sessions/parent-01/forks", {
     method: "POST",

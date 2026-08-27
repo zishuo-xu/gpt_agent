@@ -908,7 +908,7 @@ async function runCli(): Promise<void> {
         const toolCalls = events.filter(
           (item) => item.event.type === "tool_call",
         ).length;
-        if (toolCalls === 0) {
+        if (toolCalls === 0 && target.summary().kind === "run") {
           output.write(
             "\n⚠ Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，结果可能不完整，请检查产出或让 Agent 重新执行。\n",
           );

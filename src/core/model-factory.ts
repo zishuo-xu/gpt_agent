@@ -5,6 +5,7 @@ import type {
   RoleModelConfig,
 } from "../config/schema.js";
 import { ConfiguredModelClient } from "../model/client.js";
+import { FallbackModelClient } from "../model/fallback-client.js";
 import type { ModelClient } from "../model/types.js";
 import type { ModelPricing } from "./types.js";
 
@@ -52,7 +53,12 @@ export function buildPinnedModelClient(
     );
   }
   try {
-    return new ConfiguredModelClient(provider, target.model);
+    return new FallbackModelClient([
+      {
+        id: `${target.providerId}/${target.model}`,
+        client: new ConfiguredModelClient(provider, target.model),
+      },
+    ]);
   } catch (error) {
     throw new PinnedModelUnavailableError(
       error instanceof Error ? error.message : "实验模型不可用",
