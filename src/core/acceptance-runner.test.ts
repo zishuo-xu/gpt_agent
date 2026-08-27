@@ -7,8 +7,8 @@ test("acceptance runner marks timeout and continues all commands", async () => {
     cwd: process.cwd(),
     // Core 全量测试会并发启动大量子进程；给第二条快速命令留足调度余量，
     // 同时让第一条稳定超过超时界限，避免把机器负载误判成产品失败。
-    checks: ["sleep 3", "printf passed"],
-    timeoutMs: 2_000,
+    checks: ["sleep 6", "printf passed"],
+    timeoutMs: 5_000,
   });
   assert.equal(results.length, 2);
   assert.equal(results[0]?.status, "timed_out");

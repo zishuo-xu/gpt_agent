@@ -269,7 +269,11 @@ function deterministicPassed(
 
 export async function runAllScenarios(options: EvalOptions = {}): Promise<EvalMetrics[]> {
   const scenarios: EvalScenario[] = ["read", "edit", "recovery", "deny", "approval", "cost", "budget", "replay", "branch", "acceptance", "flight"];
-  return Promise.all(scenarios.map((scenario) => runScenario(scenario, options)));
+  // Eval 优先保证固定顺序与可复现性；并发会让多个会话的审批定时器、
+  // 子进程和 trace 落盘相互争抢，偶发导致 CLI 在顶层 await 完成前退出。
+  const results: EvalMetrics[] = [];
+  for (const scenario of scenarios) results.push(await runScenario(scenario, options));
+  return results;
 }
 
 async function exists(filePath: string): Promise<boolean> {
