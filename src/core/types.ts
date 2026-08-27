@@ -12,6 +12,12 @@ export interface TodoItem {
   status: TodoStatus;
 }
 
+/** 批准计划中的稳定执行步骤（由 Markdown 确定性提取，旧事件可缺省）。 */
+export interface PlanExecutionUnit {
+  id: string;
+  content: string;
+}
+
 /** 任务执行账本单元状态（系统自动记账 + 模型显式确认双通道合并） */
 export type LedgerStatus =
   | "pending"
@@ -128,12 +134,16 @@ export type AgentEvent =
       task: string;
       revision: number;
       content: string;
+      digest?: string;
+      units?: PlanExecutionUnit[];
     }
   | {
       type: "plan_decision";
       planId: string;
       decision: "approved" | "revision_requested" | "analysis_only";
       feedback?: string;
+      revision?: number;
+      digest?: string;
     }
   | {
       type: "plan_failed";

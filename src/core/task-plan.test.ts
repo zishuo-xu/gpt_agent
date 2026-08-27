@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   buildApprovedPlanPrompt,
   buildTaskPlanningPrompt,
+  extractPlanExecutionUnits,
   normalizePlanText,
+  taskPlanDigest,
   taskPlanFromEvents,
   taskPlanSummary,
 } from "./task-plan.js";
@@ -134,4 +136,29 @@ test("规划提示与批准提示明确阶段边界，流式前言可规范化",
   const plan = "## 目标\n完成\n## 执行步骤\n1. 做";
   assert.equal(normalizePlanText(`先看一下\n${plan}`), plan);
   assert.match(buildApprovedPlanPrompt("实现登录", plan), /用户已经批准/);
+});
+
+test("计划步骤提取与 digest 稳定且可绑定版本", () => {
+  const content = "## 目标\n完成\n## 执行步骤\n1. 修改后端\n- 补测试\n## 预计修改文件\n- src/a.ts";
+  assert.deepEqual(extractPlanExecutionUnits(content), [
+    { id: "plan-step-1", content: "修改后端" },
+    { id: "plan-step-2", content: "补测试" },
+  ]);
+  assert.equal(taskPlanDigest(1, content), taskPlanDigest(1, content));
+  assert.notEqual(taskPlanDigest(1, content), taskPlanDigest(2, content));
+});
+
+test("带绑定字段的陈旧计划批准会被忽略，旧批准事件仍兼容", () => {
+  const state = taskPlanFromEvents([
+    record(1, { type: "plan_started", planId: "p1", task: "x", revision: 1 }),
+    record(2, { type: "plan_proposed", planId: "p1", task: "x", revision: 1, content: "新", digest: "good" }),
+    record(3, { type: "plan_decision", planId: "p1", decision: "approved", revision: 0, digest: "bad" }),
+  ]);
+  assert.equal(state?.status, "awaiting_approval");
+  const legacy = taskPlanFromEvents([
+    record(1, { type: "plan_started", planId: "p1", task: "x", revision: 1 }),
+    record(2, { type: "plan_proposed", planId: "p1", task: "x", revision: 1, content: "旧" }),
+    record(3, { type: "plan_decision", planId: "p1", decision: "approved" }),
+  ]);
+  assert.equal(legacy?.status, "approved");
 });

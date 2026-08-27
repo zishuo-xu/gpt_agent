@@ -309,24 +309,26 @@ describe("ItemCard（会话展示组件全分支）", () => {
         },
         {
           id: "src/c.ts",
-          kind: "file",
-          label: "src/c.ts",
-          status: "blocked",
+          kind: "task",
+          label: "补充回归测试",
+          status: "done",
+          evidence: "pnpm test 通过",
           updatedAt: ts2,
         },
       ],
     } as never);
     assert.ok(container.querySelector(".ledger-card"), "账本卡应渲染");
     assert.ok(container.textContent?.includes("任务账本：重构 session.ts"));
-    assert.match(container.textContent ?? "", /已记录 1\/3/);
+    assert.match(container.textContent ?? "", /已完成 2\/3/);
     const statuses = Array.from(
       container.querySelectorAll(".ledger-status"),
     ).map((el) => el.textContent);
-    assert.deepEqual(statuses, ["已写入", "进行中", "卡住"]);
+    assert.deepEqual(statuses, ["已修改", "进行中", "已完成"]);
     assert.ok(container.querySelector(".ledger-unit.ledger-done"));
     assert.ok(container.querySelector(".ledger-unit.ledger-in-progress"));
-    assert.ok(container.querySelector(".ledger-unit.ledger-blocked"));
+    assert.equal(container.querySelectorAll(".ledger-unit.ledger-done").length, 2);
     assert.match(container.textContent ?? "", /待验证/, "note 应展示");
+    assert.match(container.textContent ?? "", /证据：pnpm test 通过/, "evidence 应展示");
   });
 
   it("账本卡：无记录时显示占位计数，空 units 不渲染清单", async () => {

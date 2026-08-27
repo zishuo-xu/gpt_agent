@@ -1,11 +1,11 @@
 import path from "node:path";
-import type { LedgerUnit } from "./types.js";
+import type { LedgerUnit, PlanExecutionUnit } from "./types.js";
 
 /**
- * 任务执行账本（Task Ledger）：/run 无人值守任务的显式进度记录。
+ * 任务执行账本（Task Ledger）：批准计划与 /run 任务的显式进度记录。
  *
- * Phase 1 只含系统自动记账通道：Edit/MultiEdit/Write 命中即标记 done。
- * 模型侧显式确认（verified/blocked/pending）为 Phase 2 扩展，状态机已预留。
+ * TodoWrite 推进逻辑步骤；Edit/MultiEdit/Write 仅证明文件被修改，
+ * 因此文件先标记 in_progress，只有验收或完成审查通过后才标记 verified。
  *
  * 账本状态：
  * - 事件流是唯一事实源（ledger_update 事件增量写入，恢复时逐条投影重建）
@@ -27,18 +27,18 @@ export class TaskLedger {
   }
 
   /**
-   * 系统自动记账：文件被 Edit/MultiEdit/Write 实际修改后标记 done。
-   * - 已登记单元（LedgerInit 声明过）→ 状态置 done
+   * 系统自动记账：文件被 Edit/MultiEdit/Write 实际修改后标记 in_progress。
+   * - 已登记单元（LedgerInit 声明过）→ 状态置 in_progress
    * - 未登记文件 → 自动补集新建单元（计划漂移不丢信息）
    * 返回变更单元；无变更（幂等重复命中）返回 undefined。
    */
   markFileWritten(filePath: string): LedgerUnit | undefined {
     const existing = this.#units.get(filePath);
     if (existing) {
-      if (existing.status === "done") return undefined;
+      if (existing.status === "in_progress") return undefined;
       const unit: LedgerUnit = {
         ...existing,
-        status: "done",
+        status: "in_progress",
         note: "系统自动记录：文件已修改，待验证",
         updatedAt: new Date().toISOString(),
       };
@@ -50,13 +50,82 @@ export class TaskLedger {
       id: filePath,
       kind: "file",
       label: filePath,
-      status: "done",
+      status: "in_progress",
       note: "系统自动记录：文件已修改，待验证",
       updatedAt: new Date().toISOString(),
     };
     this.#units.set(created.id, created);
     this.#updatedAt = created.updatedAt;
     return created;
+  }
+
+  /** 将批准计划步骤登记为稳定的任务单元；已有状态和证据不会被覆盖。 */
+  initializeTaskUnits(units: readonly PlanExecutionUnit[]): LedgerUnit[] {
+    const changed: LedgerUnit[] = [];
+    for (const item of units) {
+      if (this.#units.has(item.id)) continue;
+      const unit: LedgerUnit = {
+        id: item.id,
+        kind: "task",
+        label: item.content,
+        status: "pending",
+        updatedAt: new Date().toISOString(),
+      };
+      this.#units.set(unit.id, unit);
+      changed.push(unit);
+    }
+    if (changed.length > 0) this.#updatedAt = changed.at(-1)!.updatedAt;
+    return changed;
+  }
+
+  markNextPendingInProgress(): LedgerUnit | undefined {
+    const current = [...this.#units.values()].find(
+      (unit) => unit.status === "pending",
+    );
+    if (!current) return undefined;
+    const unit: LedgerUnit = { ...current, status: "in_progress", updatedAt: new Date().toISOString() };
+    this.#units.set(unit.id, unit);
+    this.#updatedAt = unit.updatedAt;
+    return unit;
+  }
+
+  applyTodoStatus(
+    id: string,
+    status: "pending" | "in_progress" | "completed",
+  ): LedgerUnit | undefined {
+    const current = this.#units.get(id);
+    if (!current || current.kind !== "task") return undefined;
+    const next: LedgerUnit["status"] = status === "completed" ? "done" : status;
+    if (current.status === next) return undefined;
+    const unit: LedgerUnit = { ...current, status: next, updatedAt: new Date().toISOString() };
+    this.#units.set(id, unit);
+    this.#updatedAt = unit.updatedAt;
+    return unit;
+  }
+
+  /** 验收/完成审查通过后升级未阻塞单元；失败路径不得调用。 */
+  markVerified(evidence: string): LedgerUnit[] {
+    const changed: LedgerUnit[] = [];
+    for (const current of this.#units.values()) {
+      if (current.kind === "task" && current.status !== "done") continue;
+      if (
+        current.kind === "file" &&
+        current.status !== "done" &&
+        current.status !== "in_progress"
+      ) {
+        continue;
+      }
+      const unit: LedgerUnit = {
+        ...current,
+        status: "verified",
+        evidence,
+        updatedAt: new Date().toISOString(),
+      };
+      this.#units.set(unit.id, unit);
+      changed.push(unit);
+    }
+    if (changed.length > 0) this.#updatedAt = changed.at(-1)!.updatedAt;
+    return changed;
   }
 
   /** 恢复投影：应用一条 ledger_update 增量事件 */

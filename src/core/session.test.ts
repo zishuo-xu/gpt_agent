@@ -228,6 +228,42 @@ test("批准计划后在同一会话执行，执行提示携带原任务与已�
   }
 });
 
+test("批准计划初始化首个 Todo/Ledger，并将 TodoWrite 状态同步到账本", async () => {
+  const plan = "## 目标\n闭环\n## 执行步骤\n1. 修改实现\n2. 补充验证\n## 预计修改文件\n- src/main.ts\n## 验证方式\n- pnpm test\n## 风险与待确认\n- 无";
+  const { session, collector } = await setup([
+    response(plan),
+    response("推进步骤", { toolCalls: [toolCall("todo-1", "TodoWrite", "", { todos: [
+      { id: "plan-step-1", content: "修改实现", status: "completed" },
+      { id: "plan-step-2", content: "补充验证", status: "in_progress" },
+    ] })] }),
+    response("完成"),
+  ]);
+  await session.startPlan("闭环");
+  const proposed = await collector.waitFor("plan_proposed");
+  await session.decidePlan("approved");
+  await collector.waitFor("done");
+  const decision = collector.eventsOf("plan_decision")[0]?.event;
+  assert.equal(decision?.type, "plan_decision");
+  if (decision?.type === "plan_decision" && proposed.event.type === "plan_proposed") {
+    assert.equal(decision.revision, proposed.event.revision);
+    assert.equal(decision.digest, proposed.event.digest);
+  }
+  const seeded = collector.eventsOf("todo_update")[0]?.event;
+  assert.equal(seeded?.type, "todo_update");
+  if (seeded?.type === "todo_update") {
+    assert.deepEqual(seeded.todos.map((todo) => todo.status), ["in_progress", "pending"]);
+  }
+  const ledgerEvent = collector.eventsOf("ledger_update").find((record) =>
+    record.event.type === "ledger_update" && record.event.unit.id === "plan-step-1",
+  );
+  assert.ok(ledgerEvent);
+  if (ledgerEvent?.event.type === "ledger_update") {
+    const ledger = session.ledgerFor(ledgerEvent.event.taskId);
+    assert.equal(ledger?.snapshot().units.find((unit) => unit.id === "plan-step-1")?.status, "done");
+    assert.equal(ledger?.snapshot().units.find((unit) => unit.id === "plan-step-2")?.status, "in_progress");
+  }
+});
+
 test("计划可按反馈修订，也可选择仅分析后结束", async () => {
   const { session, collector, client } = await setup([
     response(structuredPlan("第一版")),

@@ -268,15 +268,28 @@ export function SubtaskCard(props: {
   );
 }
 
-/** 账本状态徽标文案与样式类（系统自动记账 + 模型显式确认双通道） */
-const ledgerStatusMeta: Record<string, { label: string; className: string }> =
-  {
+/** 账本状态徽标文案与样式类。done 对任务与文件分别表达“完成”和“已修改”。 */
+function ledgerStatusMeta(unit: { kind: string; status: string }): {
+  label: string;
+  className: string;
+} {
+  const common: Record<string, { label: string; className: string }> = {
     pending: { label: "待开始", className: "ledger-pending" },
     in_progress: { label: "进行中", className: "ledger-in-progress" },
-    done: { label: "已写入", className: "ledger-done" },
     verified: { label: "已验证", className: "ledger-verified" },
     blocked: { label: "卡住", className: "ledger-blocked" },
   };
+  if (unit.status === "done") {
+    return {
+      label: unit.kind === "file" ? "已修改" : "已完成",
+      className: "ledger-done",
+    };
+  }
+  return common[unit.status] ?? {
+    label: unit.status,
+    className: "ledger-pending",
+  };
+}
 
 /** 任务执行账本卡：同任务的文件/子任务进度清单（随 ledger_update 实时刷新） */
 
@@ -299,21 +312,21 @@ export function LedgerCard(props: {
         <span className="ledger-count">
           {units.length === 0
             ? "暂无记录"
-            : `已记录 ${doneCount}/${units.length}`}
+            : `已完成 ${doneCount}/${units.length}`}
         </span>
       </summary>
       {units.length > 0 && (
         <ul className="ledger-units">
           {units.map((unit) => {
-            const meta = ledgerStatusMeta[unit.status] ?? {
-              label: unit.status,
-              className: "ledger-pending",
-            };
+            const meta = ledgerStatusMeta(unit);
             return (
               <li key={unit.id} className={`ledger-unit ${meta.className}`}>
                 <span className="ledger-status">{meta.label}</span>
                 <code>{unit.label}</code>
                 {unit.note && <span className="ledger-note">{unit.note}</span>}
+                {unit.evidence && (
+                  <span className="ledger-note">证据：{unit.evidence}</span>
+                )}
               </li>
             );
           })}

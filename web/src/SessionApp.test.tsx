@@ -321,6 +321,34 @@ describe("buildDisplayItems（会话回放事件流转换）", () => {
     }
   });
 
+  it("普通批准任务的账本沿用计划任务标题，不暴露内部 plan id", () => {
+    const items = buildDisplayItems([
+      ev(1, {
+        type: "plan_proposed",
+        planId: "p1",
+        task: "实现登录功能",
+        revision: 1,
+        content: "## 目标\n实现登录",
+      }),
+      ev(2, {
+        type: "ledger_update",
+        taskId: "plan:p1",
+        unit: {
+          id: "plan-step-1",
+          kind: "task",
+          label: "修改登录逻辑",
+          status: "in_progress",
+          updatedAt: ts,
+        },
+      }),
+    ]);
+    const ledger = items.find((item) => item.kind === "ledger");
+    assert.equal(ledger?.kind, "ledger");
+    if (ledger?.kind === "ledger") {
+      assert.equal(ledger.description, "实现登录功能");
+    }
+  });
+
   it("无 run_started 时首个 ledger_update 建卡；不同 taskId 各自成卡", () => {
     const items = buildDisplayItems([
       ev(1, {

@@ -9,7 +9,8 @@ let originalConfigText: string | undefined;
 
 function writeSse(
   response: import("node:http").ServerResponse,
-  content: string,
+  delta: Record<string, unknown>,
+  finishReason: "stop" | "tool_calls" = "stop",
 ): void {
   response.writeHead(200, {
     "content-type": "text/event-stream",
@@ -19,7 +20,7 @@ function writeSse(
   response.write(`data: ${JSON.stringify({
     id: "chatcmpl-plan-e2e",
     object: "chat.completion.chunk",
-    choices: [{ index: 0, delta: { content }, finish_reason: "stop" }],
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
   })}\n\n`);
   response.write(`data: ${JSON.stringify({
     choices: [],
@@ -62,20 +63,46 @@ test.describe.serial("provider-free 计划批准门", () => {
       incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
       incoming.on("end", () => {
         const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
-          messages?: Array<{ content?: string }>;
+          messages?: Array<{ role?: string; content?: string }>;
         };
-        const conversation = (body.messages ?? [])
+        const messages = body.messages ?? [];
+        const conversation = messages
           .map((message) => message.content ?? "")
           .join("\n");
         if (conversation.includes("只读规划阶段")) {
           const revised = conversation.includes("不要修改公开 API");
           writeSse(
             response,
-            `## 目标\n${revised ? "在不修改公开 API 的前提下完成" : "完成计划门演示"}\n## 执行步骤\n1. 检查现状\n2. 实施最小修改\n## 预计修改文件\n- 无（演示任务）\n## 验证方式\n- 检查最终回复\n## 风险与待确认\n- 无`,
+            {
+              content: `## 目标\n${revised ? "在不修改公开 API 的前提下完成" : "完成计划门演示"}\n## 执行步骤\n1. 检查现状\n2. 实施最小修改\n## 预计修改文件\n- 无（演示任务）\n## 验证方式\n- 检查最终回复\n## 风险与待确认\n- 无`,
+            },
           );
           return;
         }
-        writeSse(response, "已按批准计划执行。");
+        if (messages.some((message) => message.role === "tool")) {
+          writeSse(response, { content: "已按批准计划执行。" });
+          return;
+        }
+        writeSse(
+          response,
+          {
+            tool_calls: [{
+              index: 0,
+              id: "plan-e2e-todos",
+              type: "function",
+              function: {
+                name: "TodoWrite",
+                arguments: JSON.stringify({
+                  todos: [
+                    { id: "plan-step-1", content: "检查现状", status: "completed" },
+                    { id: "plan-step-2", content: "实施最小修改", status: "completed" },
+                  ],
+                }),
+              },
+            }],
+          },
+          "tool_calls",
+        );
       });
     });
     await new Promise<void>((resolve, reject) => {
@@ -124,6 +151,10 @@ test.describe.serial("provider-free 计划批准门", () => {
     await expect(result).toBeAttached({ timeout: 30_000 });
     await result.scrollIntoViewIfNeeded();
     await expect(result).toBeVisible();
+    const ledger = page.locator(".ledger-card");
+    await expect(ledger).toContainText("检查现状");
+    await expect(ledger).toContainText("实施最小修改");
+    await expect(ledger.getByText("已完成", { exact: true })).toHaveCount(2);
     const done = page.getByText("✓ 本轮任务已完成");
     await done.scrollIntoViewIfNeeded();
     await expect(done).toBeVisible();

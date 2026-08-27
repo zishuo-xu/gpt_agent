@@ -131,6 +131,8 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
       ledgerUnits.set(String(event.taskId), list);
     } else if (event.type === "run_started") {
       runStartedDescriptions.set(String(event.taskId), event.description);
+    } else if (event.type === "plan_proposed") {
+      runStartedDescriptions.set(`plan:${event.planId}`, event.task);
     }
   }
 

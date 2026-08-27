@@ -908,7 +908,7 @@ test("任务执行账本：/run 中 Write 触发 ledger_update（系统自动记
   // 文件确实写入
   assert.equal(await readFile(path.join(cwd, "out.txt"), "utf8"), "ledger");
 
-  // ledger_update 事件出现且单元为规范化相对路径 + done 状态
+  // ledger_update 事件出现且单元为规范化相对路径 + in_progress 状态
   const updates = events.filter(
     (event): event is Extract<AgentEvent, { type: "ledger_update" }> =>
       event.type === "ledger_update",
@@ -916,7 +916,7 @@ test("任务执行账本：/run 中 Write 触发 ledger_update（系统自动记
   assert.equal(updates.length, 1);
   assert.equal(updates[0]?.unit.id, "out.txt");
   assert.equal(updates[0]?.unit.kind, "file");
-  assert.equal(updates[0]?.unit.status, "done");
+  assert.equal(updates[0]?.unit.status, "in_progress");
   assert.match(updates[0]?.unit.note ?? "", /待验证/);
 });
 
@@ -975,13 +975,13 @@ test("账本恢复：进程重启后 restore 重放 ledger_update 事件重建�
     restoredEvents: records as unknown as RecordedEvent[],
   });
 
-  // 账本从事件流投影重建：单元为 done（系统自动记录）
+  // 账本从事件流投影重建：单元为 in_progress（系统自动记录，待验证）
   const ledger = second.ledgerFor(taskId);
   assert.ok(ledger, "restore 后应能从事件流重建账本");
   const snapshot = ledger?.snapshot();
   assert.equal(snapshot?.units.length, 1);
   assert.equal(snapshot?.units[0]?.id, "src/one.ts");
-  assert.equal(snapshot?.units[0]?.status, "done");
+  assert.equal(snapshot?.units[0]?.status, "in_progress");
 });
 
 test("任务期间排队的用户消息在任务结束后按复位后的会话规则处理", async () => {

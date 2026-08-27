@@ -46,6 +46,8 @@ import {
   buildApprovedPlanPrompt,
   buildTaskPlanningPrompt,
   normalizePlanText,
+  extractPlanExecutionUnits,
+  taskPlanDigest,
   taskPlanFromEvents,
   taskPlanSummary,
   type PlanDecision,
@@ -62,6 +64,7 @@ import type {
   PermissionRule,
   RecordedEvent,
   SessionBranch,
+  PlanExecutionUnit,
 } from "./types.js";
 
 import type {
@@ -137,6 +140,8 @@ export class AgentSession {
   #taskHardStopped = false;
   /** 任务执行账本（按 taskId 索引；事件流投影 + 运行期记账双入口，保留至会话结束供续跑取用） */
   readonly #ledgerByTask = new Map<string, TaskLedger>();
+  /** 当前执行上下文的账本，供 TodoWrite 状态回灌；空闲时不串接其他任务。 */
+  #activeLedgerTaskId: string | undefined;
   /** /run 任务期审批超时（--approve-timeout；任务期覆盖会话级配置，结束恢复） */
   #taskApprovalTimeoutMs: number | undefined;
   /** /run 任务期间模型重试+fallback 全部耗尽（sendInput 捕获后置位；
@@ -679,6 +684,8 @@ export class AgentSession {
     this.#bus.emit({
       type: "plan_decision",
       planId: plan.planId,
+      revision: plan.revision,
+      ...(plan.digest ? { digest: plan.digest } : {}),
       decision,
       ...(trimmedFeedback ? { feedback: trimmedFeedback } : {}),
     });
@@ -696,10 +703,32 @@ export class AgentSession {
       return;
     }
 
+    const units = plan.units ?? extractPlanExecutionUnits(plan.content);
     if (plan.task.startsWith("/run")) {
-      this.startRunTask(parseRunCommand(plan.task), plan.content);
+      this.startRunTask(parseRunCommand(plan.task), plan.content, units);
       return;
     }
+    const planTaskId = `plan:${plan.planId}`;
+    const ledger =
+      this.#ledgerByTask.get(planTaskId) ?? new TaskLedger(planTaskId);
+    this.#ledgerByTask.set(planTaskId, ledger);
+    for (const unit of ledger.initializeTaskUnits(units)) {
+      this.#bus.emit({ type: "ledger_update", taskId: planTaskId, unit });
+    }
+    this.#activeLedgerTaskId = planTaskId;
+    if (units.length > 0) {
+      const todos = units.map((unit, index) => ({
+        id: unit.id,
+        content: unit.content,
+        status: index === 0 ? ("in_progress" as const) : ("pending" as const),
+      }));
+      this.#tools.todos.replace(todos);
+      this.#bus.emit({ type: "todo_update", todos });
+    }
+    this.#tools.setFileWrittenListener(async (absPath) => {
+      const unit = ledger.markFileWritten(normalizeLedgerPath(this.#cwd, absPath));
+      if (unit) this.#bus.emit({ type: "ledger_update", taskId: planTaskId, unit });
+    });
     void this.sendInput(
       buildApprovedPlanPrompt(plan.task, plan.content),
       plan.task,
@@ -709,6 +738,9 @@ export class AgentSession {
         message:
           error instanceof Error ? error.message : "批准后的任务启动失败",
       });
+    }).finally(() => {
+      this.#tools.setFileWrittenListener(undefined);
+      this.#activeLedgerTaskId = undefined;
     });
   }
 
@@ -819,6 +851,8 @@ export class AgentSession {
         task: options.task,
         revision: options.revision,
         content,
+        digest: taskPlanDigest(options.revision, content),
+        units: extractPlanExecutionUnits(content),
       });
     } catch (error) {
       const interrupted =
@@ -953,6 +987,12 @@ export class AgentSession {
               ...review,
               attempts: this.#reviewAttempts,
             });
+            if (review.passed && this.#activeLedgerTaskId) {
+              const ledger = this.#ledgerByTask.get(this.#activeLedgerTaskId);
+              for (const unit of ledger?.markVerified("完成审查通过") ?? []) {
+                this.#bus.emit({ type: "ledger_update", taskId: ledger!.taskId, unit });
+              }
+            }
             if (!review.passed && this.#reviewAttempts < 2) {
               // 打回：审查结论注入主循环继续修，本轮完成后再审
               this.#model.addUserMessage(
@@ -1016,6 +1056,7 @@ export class AgentSession {
     options: RunTaskOptions,
     resumeTaskId?: string,
     approvedPlan?: string,
+    approvedPlanUnits?: readonly PlanExecutionUnit[],
   ): Promise<void> {
     if (this.#runtimeUnavailableReason) {
       throw new Error(this.#runtimeUnavailableReason);
@@ -1047,7 +1088,24 @@ export class AgentSession {
     const ledger =
       this.#ledgerByTask.get(taskBox.id) ?? new TaskLedger(taskBox.id);
     this.#ledgerByTask.set(taskBox.id, ledger);
-    // 系统自动记账通道：Edit/MultiEdit/Write 实际写入后标记 done（事件流增量记录）
+    const planUnits = approvedPlanUnits ?? [];
+    for (const unit of ledger.initializeTaskUnits(planUnits)) {
+      this.#bus.emit({ type: "ledger_update", taskId: taskBox.id, unit });
+    }
+    const firstPlanUnit = ledger.markNextPendingInProgress();
+    if (firstPlanUnit) {
+      this.#bus.emit({ type: "ledger_update", taskId: taskBox.id, unit: firstPlanUnit });
+    }
+    if (planUnits.length > 0) {
+      const todos = planUnits.map((unit, index) => ({
+        id: unit.id,
+        content: unit.content,
+        status: index === 0 ? ("in_progress" as const) : ("pending" as const),
+      }));
+      this.#tools.todos.replace(todos);
+      this.#bus.emit({ type: "todo_update", todos });
+    }
+    // 系统自动记账通道：Edit/MultiEdit/Write 实际写入后标记 in_progress（等待验证）
     this.#tools.setFileWrittenListener(async (absPath) => {
       const unit = ledger.markFileWritten(
         normalizeLedgerPath(this.#cwd, absPath),
@@ -1060,6 +1118,7 @@ export class AgentSession {
         });
       }
     });
+    this.#activeLedgerTaskId = taskBox.id;
     this.#taskStopReason = undefined;
     this.#taskHardStopped = false;
     this.#taskModelFailed = false;
@@ -1167,6 +1226,19 @@ export class AgentSession {
             }
           }
         }
+        if (
+          accepted &&
+          !this.#taskStopReason &&
+          (checks.length > 0 ||
+            this.#taskAcceptance?.review?.passed === true) &&
+          (!this.#taskAcceptance?.review ||
+            this.#taskAcceptance.review.passed)
+        ) {
+          const evidence = checks.length > 0 ? `验收通过：${checks.join("；")}` : "完成审查通过";
+          for (const unit of ledger.markVerified(evidence)) {
+            this.#bus.emit({ type: "ledger_update", taskId: ledger.taskId, unit });
+          }
+        }
       }
       if (checks.length > 0 && !accepted) {
         status = "failed";
@@ -1236,6 +1308,7 @@ export class AgentSession {
       });
       this.#taskBox = undefined;
       this.#tools.setFileWrittenListener(undefined);
+      this.#activeLedgerTaskId = undefined;
       this.#bus.emit({
         type: "run_finished",
         taskId: taskBox.id,
@@ -1265,8 +1338,12 @@ export class AgentSession {
     });
   }
 
-  startRunTask(options: RunTaskOptions, approvedPlan?: string): void {
-    void this.runTask(options, undefined, approvedPlan).catch((error) => {
+  startRunTask(
+    options: RunTaskOptions,
+    approvedPlan?: string,
+    approvedPlanUnits?: readonly PlanExecutionUnit[],
+  ): void {
+    void this.runTask(options, undefined, approvedPlan, approvedPlanUnits).catch((error) => {
       this.#bus.emit({
         type: "error",
         message:
@@ -1502,6 +1579,25 @@ export class AgentSession {
     if (event.type === "ledger_update") {
       // 账本投影：恢复重放 + 运行期记账共用同一入口（事件流是唯一事实源）
       this.#applyLedgerEvent(event);
+    }
+    if (event.type === "todo_update" && this.#activeLedgerTaskId) {
+      const ledger = this.#ledgerByTask.get(this.#activeLedgerTaskId);
+      if (ledger) {
+        for (const todo of event.todos) {
+          const unit = ledger.applyTodoStatus(todo.id, todo.status);
+          // #record is itself a bus subscriber; defer the derived event so the
+          // outer todo_update record is delivered to session subscribers first.
+          if (unit) {
+            queueMicrotask(() =>
+              this.#bus.emit({
+                type: "ledger_update",
+                taskId: ledger.taskId,
+                unit,
+              }),
+            );
+          }
+        }
+      }
     }
     this.#state.apply(event, this.#stateDeps);
   }

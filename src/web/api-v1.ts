@@ -433,6 +433,7 @@ function mapV1Event(
           label: event.unit.label,
           status: event.unit.status,
           ...(event.unit.note ? { note: event.unit.note } : {}),
+          ...(event.unit.evidence ? { evidence: event.unit.evidence } : {}),
         },
       };
     case "error":

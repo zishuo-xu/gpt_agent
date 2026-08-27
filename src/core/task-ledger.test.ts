@@ -23,33 +23,58 @@ test("markFileWritten：未登记文件自动补集（计划漂移不丢信息�
   const changed = ledger.markFileWritten("src/new-file.ts");
   assert.ok(changed);
   assert.equal(changed.kind, "file");
-  assert.equal(changed.status, "done");
+  assert.equal(changed.status, "in_progress");
   assert.match(changed.note ?? "", /待验证/);
   const snapshot = ledger.snapshot();
   assert.equal(snapshot.units.length, 1);
   assert.equal(snapshot.units[0]?.id, "src/new-file.ts");
 });
 
-test("markFileWritten：已登记单元（pending）置 done，保留原字段", () => {
+test("markFileWritten：已登记单元（pending）置 in_progress，保留原字段", () => {
   const ledger = new TaskLedger("t1", [unit({ id: "src/a.ts", status: "pending" })]);
   const changed = ledger.markFileWritten("src/a.ts");
   assert.ok(changed);
-  assert.equal(changed.status, "done");
+  assert.equal(changed.status, "in_progress");
   assert.equal(changed.kind, "file");
 });
 
-test("markFileWritten：幂等——已 done 的单元重复命中返回 undefined（不重复记账）", () => {
-  const ledger = new TaskLedger("t1", [unit({ id: "src/a.ts", status: "done" })]);
+test("markFileWritten：幂等——已 in_progress 的单元重复命中返回 undefined（不重复记账）", () => {
+  const ledger = new TaskLedger("t1", [unit({ id: "src/a.ts", status: "in_progress" })]);
   const changed = ledger.markFileWritten("src/a.ts");
   assert.equal(changed, undefined);
   assert.equal(ledger.snapshot().units.length, 1);
 });
 
-test("markFileWritten：verified 单元再次修改回退为 done（文件被动过需重新验证）", () => {
+test("markFileWritten：verified 单元再次修改回退为 in_progress（需重新验证）", () => {
   const ledger = new TaskLedger("t1", [unit({ id: "src/a.ts", status: "verified" })]);
   const changed = ledger.markFileWritten("src/a.ts");
   assert.ok(changed);
-  assert.equal(changed.status, "done");
+  assert.equal(changed.status, "in_progress");
+});
+
+test("计划单元初始化、启动和验证保持稳定 id", () => {
+  const ledger = new TaskLedger("t1");
+  const units = ledger.initializeTaskUnits([
+    { id: "plan-step-1", content: "实现功能" },
+    { id: "plan-step-2", content: "运行测试" },
+  ]);
+  assert.deepEqual(units.map((item) => item.status), ["pending", "pending"]);
+  assert.equal(ledger.markNextPendingInProgress()?.id, "plan-step-1");
+  assert.equal(ledger.applyTodoStatus("plan-step-1", "completed")?.status, "done");
+  assert.deepEqual(ledger.markVerified("测试通过").map((item) => item.status), ["verified"]);
+});
+
+test("markVerified：不得把尚未完成的任务步骤误标为已验证", () => {
+  const ledger = new TaskLedger("t1");
+  ledger.initializeTaskUnits([
+    { id: "plan-step-1", content: "实现功能" },
+    { id: "plan-step-2", content: "运行测试" },
+  ]);
+  ledger.markNextPendingInProgress();
+  ledger.markFileWritten("src/a.ts");
+  const verified = ledger.markVerified("测试通过");
+  assert.deepEqual(verified.map((item) => item.id), ["src/a.ts"]);
+  assert.equal(ledger.snapshot().units.find((item) => item.id === "plan-step-1")?.status, "in_progress");
 });
 
 test("applyUpdate：恢复投影——逐条应用 ledger_update 重建账本", () => {
