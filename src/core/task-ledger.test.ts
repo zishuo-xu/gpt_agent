@@ -77,6 +77,24 @@ test("markVerified：不得把尚未完成的任务步骤误标为已验证", ()
   assert.equal(ledger.snapshot().units.find((item) => item.id === "plan-step-1")?.status, "in_progress");
 });
 
+test("markCompletedWithoutVerification：成功收尾将未决单元归并为 done 且幂等", () => {
+  const ledger = new TaskLedger("t1", [
+    unit({ id: "pending.ts", status: "pending", evidence: "已有线索" }),
+    unit({ id: "progress.ts", status: "in_progress" }),
+    unit({ id: "done.ts", status: "done" }),
+    unit({ id: "verified.ts", status: "verified", evidence: "test passed" }),
+    unit({ id: "blocked.ts", status: "blocked", note: "需要用户决定" }),
+  ]);
+  const changed = ledger.markCompletedWithoutVerification();
+  assert.deepEqual(changed.map((item) => item.id), ["pending.ts", "progress.ts"]);
+  assert.equal(ledger.snapshot().units.find((item) => item.id === "pending.ts")?.status, "done");
+  assert.equal(ledger.snapshot().units.find((item) => item.id === "pending.ts")?.evidence, "已有线索");
+  assert.match(ledger.snapshot().units.find((item) => item.id === "pending.ts")?.note ?? "", /未配置机器验收/);
+  assert.equal(ledger.snapshot().units.find((item) => item.id === "verified.ts")?.status, "verified");
+  assert.equal(ledger.snapshot().units.find((item) => item.id === "blocked.ts")?.status, "blocked");
+  assert.deepEqual(ledger.markCompletedWithoutVerification(), []);
+});
+
 test("applyUpdate：恢复投影——逐条应用 ledger_update 重建账本", () => {
   const ledger = new TaskLedger("t1");
   ledger.applyUpdate(unit({ id: "src/one.ts", status: "done" }));

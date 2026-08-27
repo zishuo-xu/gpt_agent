@@ -128,6 +128,32 @@ export class TaskLedger {
     return changed;
   }
 
+  /**
+   * 成功收尾但没有机器验收证据时的保守归并：把仍在 pending/in_progress
+   * 的单元记为 Agent 已完成（done），但不伪造 verified。blocked 与已有
+   * done/verified 保持不变；重复调用没有新变更，便于 finally 幂等执行。
+   */
+  markCompletedWithoutVerification(): LedgerUnit[] {
+    const changed: LedgerUnit[] = [];
+    for (const current of this.#units.values()) {
+      if (
+        current.status === "blocked" ||
+        current.status === "done" ||
+        current.status === "verified"
+      ) continue;
+      const unit: LedgerUnit = {
+        ...current,
+        status: "done",
+        note: "Agent 成功结束任务，但未配置机器验收证据",
+        updatedAt: new Date().toISOString(),
+      };
+      this.#units.set(unit.id, unit);
+      changed.push(unit);
+    }
+    if (changed.length > 0) this.#updatedAt = changed.at(-1)!.updatedAt;
+    return changed;
+  }
+
   /** 恢复投影：应用一条 ledger_update 增量事件 */
   applyUpdate(unit: LedgerUnit): void {
     this.#units.set(unit.id, { ...unit });

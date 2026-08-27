@@ -1309,6 +1309,13 @@ export class AgentSession {
       this.#taskBox = undefined;
       this.#tools.setFileWrittenListener(undefined);
       this.#activeLedgerTaskId = undefined;
+      // 无机器验收/完成审查证据时，成功终态只能归并为 done，不能伪造 verified；
+      // failed/interrupted/deadline/budget 路径保留 pending/in_progress 供恢复和排查。
+      if (status === "completed" && reason === "done") {
+        for (const unit of ledger.markCompletedWithoutVerification()) {
+          this.#bus.emit({ type: "ledger_update", taskId: ledger.taskId, unit });
+        }
+      }
       this.#bus.emit({
         type: "run_finished",
         taskId: taskBox.id,
