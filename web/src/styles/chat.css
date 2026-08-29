@@ -2654,6 +2654,17 @@
   font-size: 12px;
 }
 
+.delivery-workbench { margin: 1rem 0; padding: 1rem; border: 1px solid var(--border, #334155); border-radius: 12px; background: var(--panel, #111827); }
+.delivery-workbench header, .delivery-workbench footer { display: flex; align-items: center; gap: .75rem; justify-content: space-between; flex-wrap: wrap; }
+.delivery-workbench h2, .delivery-workbench h3 { margin: 0 0 .5rem; }
+.delivery-sections { display: grid; gap: .75rem; }
+.delivery-sections section { min-width: 0; }
+.delivery-workbench ul { margin: .25rem 0; padding-left: 1.25rem; }
+.delivery-workbench pre { max-height: 14rem; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.delivery-workbench code { overflow-wrap: anywhere; }
+.delivery-workbench aside { color: #fbbf24; margin: .5rem 0; }
+@media (min-width: 700px) { .delivery-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); } .delivery-sections section:nth-child(3) { grid-column: 1 / -1; } }
+
 .workspace-banner {
   display: flex;
   flex-wrap: wrap;

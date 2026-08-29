@@ -8,6 +8,8 @@ import type { WebRouteDeps } from "./routes-context.js";
 import { redactTrace } from "../core/trace-redaction.js";
 import { observeTurn } from "../core/turn-observation.js";
 import type { RunWorkspaceMode } from "../core/run-workspace.js";
+import { projectDelivery } from "../core/delivery.js";
+import { captureWorkspaceFingerprint } from "../core/workspace-fingerprint.js";
 
 /** 会话路由：集合创建 / 详情操作（输入/审批/导出/中断/续跑/分支/书签）/ SSE 事件流 */
 export function registerSessionRoutes(
@@ -84,6 +86,28 @@ export function registerSessionRoutes(
     const id = context.req.param("id");
     if (!sessionManager.get(id)) return context.json({ error: "会话不存在" }, 404);
     return context.json({ workspace: (await sessionManager.workspaceInfo(id)) ?? null });
+  });
+
+  app.get("/api/sessions/:id/delivery", async (context) => {
+    const target = await resolveProject(context);
+    const sessionManager = target.sessionManager;
+    if (!sessionManager) return context.json({ error: "会话服务未启用" }, 503);
+    const session = sessionManager.get(context.req.param("id"));
+    if (!session) return context.json({ error: "会话不存在" }, 404);
+    const delivery = projectDelivery(session.events());
+    const isolated = await sessionManager.workspaceInfo(session.id);
+    if (!isolated) return context.json({ delivery, workspace: { mode: "project" } });
+    const current = isolated.exists ? await captureWorkspaceFingerprint(isolated.path) : undefined;
+    const warnings = [...isolated.warnings];
+    if (!isolated.exists) warnings.push("隔离工作区路径不存在");
+    const changedSinceCreated = Boolean(current && isolated.fingerprint && (current.head !== isolated.fingerprint.head || current.dirty !== isolated.fingerprint.dirty));
+    if (changedSinceCreated) warnings.push("工作区自创建后已发生变化");
+    return context.json({ delivery, workspace: {
+      mode: "isolated", source: isolated.sourceCwd, path: isolated.path,
+      baseHead: isolated.head, exists: isolated.exists, warnings,
+      ...(isolated.fingerprint ? { createdFingerprint: isolated.fingerprint } : {}),
+      ...(current ? { currentHead: current.head, changedSinceCreated } : {}),
+    } });
   });
 
   app.post("/api/run/preview", async (context) => {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readdir, unlink, readFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { WorkspaceFingerprint } from "./workspace-fingerprint.js";
 import { atomicWriteFile, readJsonl } from "../utils/fs.js";
 import type { ConfigService } from "../config/service.js";
 import type { ModelRole } from "../config/schema.js";
@@ -253,6 +254,7 @@ export class AgentSessionManager {
     sourceCwd: string;
     path: string;
     head: string;
+    fingerprint?: WorkspaceFingerprint;
     warnings: string[];
     exists: boolean;
   } | undefined> {
@@ -264,6 +266,7 @@ export class AgentSessionManager {
       sourceCwd: state.sourceCwd,
       path: state.snapshot.cwd,
       head: state.snapshot.head,
+      ...(state.snapshot.fingerprint ? { fingerprint: state.snapshot.fingerprint } : {}),
       warnings: [...state.snapshot.warnings],
       exists,
     };

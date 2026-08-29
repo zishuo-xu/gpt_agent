@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
 import { ItemCard, type ApprovalScope } from "./session-render";
 import type { DisplayItem } from "./session-display";
+import { DeliveryWorkbench, type DeliveryWorkbenchData } from "./DeliveryWorkbench";
 
 /**
  * 消息流：来源筛选 chips + 事件卡片序列。
@@ -9,7 +10,11 @@ import type { DisplayItem } from "./session-display";
 export function SessionStream(props: {
   displayItems: DisplayItem[];
   /** 交付摘要（简洁版）：改动文件 + 验证结果；会话完成且有写操作时由父组件传入 */
-  delivery?: { files: string[]; verification?: string } | undefined;
+  delivery?: DeliveryWorkbenchData | undefined;
+  workspace?: { mode: "project" | "isolated"; path?: string; baseHead?: string; currentHead?: string; exists?: boolean; warnings?: string[] };
+  onContinue?: () => void;
+  onCopyPath?: () => void;
+  onExport?: () => void;
   totalEvents: number;
   sourceFilter: string;
   streamRef: RefObject<HTMLDivElement | null>;
@@ -132,32 +137,7 @@ export function SessionStream(props: {
             </div>
           );
         })()}
-        {props.delivery && (
-          <div className="delivery-summary">
-            <div className="delivery-head">
-              <strong>✓ 完成</strong>
-              <span>改动 {props.delivery.files.length} 个文件</span>
-              {props.delivery.verification && (
-                <span className="delivery-verification">
-                  验证：{props.delivery.verification.slice(0, 48)}
-                  {props.delivery.verification.length > 48 ? "…" : ""}
-                </span>
-              )}
-            </div>
-            {props.delivery.files.length > 0 && (
-              <ul className="delivery-files">
-                {props.delivery.files.slice(0, 6).map((file) => (
-                  <li key={file}>{file}</li>
-                ))}
-                {props.delivery.files.length > 6 && (
-                  <li className="delivery-more">
-                    +{props.delivery.files.length - 6} 个文件
-                  </li>
-                )}
-              </ul>
-            )}
-          </div>
-        )}
+        {props.delivery && <DeliveryWorkbench delivery={props.delivery} workspace={props.workspace} onContinue={props.onContinue} onCopyPath={props.onCopyPath} onExport={props.onExport} />}
       </div>
     </>
   );

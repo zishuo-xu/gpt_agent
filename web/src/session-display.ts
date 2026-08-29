@@ -378,9 +378,7 @@ export function buildDeliverySummary(events: SessionEvent[]): {
         if (target) files.add(target);
       }
     }
-    if (event.type === "tool_result" && typeof event.summary === "string") {
-      lastBashResult = event.summary;
-    }
+    if (event.type === "tool_result" && typeof event.summary === "string") lastBashResult = event.summary;
   }
   return {
     files: [...files],
