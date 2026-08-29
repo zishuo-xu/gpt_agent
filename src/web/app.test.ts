@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import test from "node:test";
 import { ConfigService } from "../config/service.js";
+import { captureWorkspaceFingerprint } from "../core/workspace-fingerprint.js";
 import { createWebApp } from "./app.js";
 import type { PublicModelProviderConfig } from "../config/schema.js";
 import type { WebSessionManager } from "./sessions.js";
+
+const execFileAsync = promisify(execFile);
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "myagent-api-"));
@@ -113,6 +118,103 @@ test("隔离执行 API 严格校验、透传工作区信息并处理大厅拒绝
   });
   assert.equal(rejected.status, 400);
   assert.match((await rejected.json()).error, /大厅.*隔离/);
+});
+
+test("交付 API：project、404 与隔离工作区变化/缺失均返回可信状态", async () => {
+  const { service } = await fixture();
+  const records = [
+    {
+      seq: 1,
+      ts: "2026-08-30T00:00:00.000Z",
+      event: {
+        type: "run_started",
+        taskId: "task-1",
+        description: "修复交付链",
+        permissionMode: "normal",
+        hardRules: [],
+      },
+    },
+    {
+      seq: 2,
+      ts: "2026-08-30T00:00:01.000Z",
+      event: {
+        type: "tool_call",
+        call: { id: "write-1", tool: "Write", target: "result.txt", args: {} },
+      },
+    },
+    {
+      seq: 3,
+      ts: "2026-08-30T00:00:02.000Z",
+      event: { type: "tool_result", callId: "write-1", summary: "已写入" },
+    },
+    {
+      seq: 4,
+      ts: "2026-08-30T00:00:03.000Z",
+      event: { type: "run_finished", taskId: "task-1", status: "completed" },
+    },
+  ];
+  const session = {
+    id: "delivery-1",
+    summary: () => ({ title: "交付任务", status: "done" }),
+    events: () => records,
+  };
+  let workspace: Awaited<ReturnType<WebSessionManager["workspaceInfo"]>>;
+  const manager = {
+    get: (id: string) => id === session.id ? session : undefined,
+    workspaceInfo: async () => workspace,
+  } as unknown as WebSessionManager;
+  const app = createWebApp(service, manager);
+
+  const projectResponse = await app.request(`/api/sessions/${session.id}/delivery`);
+  assert.equal(projectResponse.status, 200);
+  const projectPayload = await projectResponse.json();
+  assert.equal(projectPayload.workspace.mode, "project");
+  assert.equal(projectPayload.delivery.outcome, "completed");
+  assert.equal(projectPayload.delivery.verification, "not_run");
+  assert.deepEqual(projectPayload.delivery.files, ["result.txt"]);
+
+  assert.equal((await app.request("/api/sessions/missing/delivery")).status, 404);
+
+  const repo = await mkdtemp(path.join(os.tmpdir(), "myagent-delivery-api-"));
+  await execFileAsync("git", ["init", "-q"], { cwd: repo });
+  await execFileAsync("git", ["config", "user.email", "test@example.com"], { cwd: repo });
+  await execFileAsync("git", ["config", "user.name", "Test"], { cwd: repo });
+  await writeFile(path.join(repo, "result.txt"), "before\n");
+  await execFileAsync("git", ["add", "."], { cwd: repo });
+  await execFileAsync("git", ["commit", "-qm", "initial"], { cwd: repo });
+  const created = await captureWorkspaceFingerprint(repo);
+  assert.ok(created);
+  await writeFile(path.join(repo, "result.txt"), "after\n");
+  workspace = {
+    mode: "isolated",
+    sourceCwd: service.cwd,
+    path: repo,
+    head: created.head,
+    fingerprint: created,
+    warnings: ["依赖目录未复制"],
+    exists: true,
+  } as never;
+
+  const changedResponse = await app.request(`/api/sessions/${session.id}/delivery`);
+  const changedPayload = await changedResponse.json();
+  assert.equal(changedPayload.workspace.changedSinceCreated, true);
+  assert.equal(changedPayload.workspace.currentHead, created.head);
+  assert.equal("createdFingerprint" in changedPayload.workspace, false);
+  assert.equal("dirty" in changedPayload.workspace, false);
+  assert.match(changedPayload.workspace.warnings.join("；"), /工作区自创建后已发生变化/);
+
+  workspace = {
+    mode: "isolated",
+    sourceCwd: service.cwd,
+    path: path.join(repo, "missing"),
+    head: created.head,
+    warnings: [],
+    exists: false,
+  } as never;
+  const missingWorkspaceResponse = await app.request(`/api/sessions/${session.id}/delivery`);
+  const missingWorkspacePayload = await missingWorkspaceResponse.json();
+  assert.equal(missingWorkspacePayload.workspace.exists, false);
+  assert.match(missingWorkspacePayload.workspace.warnings.join("；"), /路径不存在/);
 });
 
 test("Web API 保存 OpenAI-compatible 第三方渠道", async () => {

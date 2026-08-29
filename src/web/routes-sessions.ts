@@ -101,13 +101,25 @@ export function registerSessionRoutes(
     const current = isolated.exists ? await captureWorkspaceFingerprint(isolated.path) : undefined;
     const warnings = [...isolated.warnings];
     if (!isolated.exists) warnings.push("隔离工作区路径不存在");
-    const changedSinceCreated = Boolean(current && isolated.fingerprint && (current.head !== isolated.fingerprint.head || current.dirty !== isolated.fingerprint.dirty));
+    const changedSinceCreated = Boolean(
+      current &&
+      isolated.fingerprint &&
+      (current.head !== isolated.fingerprint.head ||
+        current.dirty !== isolated.fingerprint.dirty),
+    );
     if (changedSinceCreated) warnings.push("工作区自创建后已发生变化");
-    return context.json({ delivery, workspace: {
-      mode: "isolated", source: isolated.sourceCwd, path: isolated.path,
-      baseHead: isolated.head, exists: isolated.exists, warnings,
-      ...(current ? { currentHead: current.head, changedSinceCreated } : {}),
-    } });
+    return context.json({
+      delivery,
+      workspace: {
+        mode: "isolated",
+        sourceCwd: isolated.sourceCwd,
+        path: isolated.path,
+        baseHead: isolated.head,
+        exists: isolated.exists,
+        warnings,
+        ...(current ? { currentHead: current.head, changedSinceCreated } : {}),
+      },
+    });
   });
 
   app.post("/api/run/preview", async (context) => {

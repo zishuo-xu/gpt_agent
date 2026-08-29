@@ -85,6 +85,40 @@ export interface WorkspaceInfo {
   changedSinceCreated?: boolean;
 }
 
+export type DeliveryOutcome =
+  | "running"
+  | "completed"
+  | "failed"
+  | "interrupted";
+export type DeliveryVerification = "passed" | "failed" | "not_run";
+export type DeliveryReview = "passed" | "failed" | "not_run";
+
+export interface DeliveryCheck {
+  command: string;
+  status: "passed" | "failed" | "timed_out";
+  exitCode?: number;
+  durationMs: number;
+  output?: string;
+}
+
+/** Stable API shape rebuilt from persisted session events. */
+export interface DeliveryProjection {
+  title: string;
+  goal?: string;
+  outcome: DeliveryOutcome;
+  verification: DeliveryVerification;
+  review: DeliveryReview;
+  files: string[];
+  checks: DeliveryCheck[];
+  reviewResult?: {
+    passed: boolean;
+    issues: string[];
+    summary: string;
+  };
+  warnings: string[];
+  unconfirmed: string[];
+}
+
 export type MemoryDocumentId =
   | "preferences"
   | "conventions"

@@ -449,14 +449,23 @@ export function SessionApp(props: { initialSessionId?: string }) {
         if (!cancelled) setWorkspaceInfo(null);
       }
     })();
-    void (async () => {
+    const refreshDelivery = async () => {
       try {
         const response = await fetch(projectUrl(`/api/sessions/${selectedId}/delivery`));
-        if (!response.ok) { if (!cancelled) setDelivery(undefined); return; }
+        if (!response.ok) {
+          if (!cancelled) setDelivery(undefined);
+          return;
+        }
         const payload = await response.json() as { delivery?: DeliveryWorkbenchData; workspace?: WorkspaceInfo };
-        if (!cancelled) { setDelivery(payload.delivery); if (payload.workspace) setWorkspaceInfo(payload.workspace); }
-      } catch { if (!cancelled) setDelivery(undefined); }
-    })();
+        if (!cancelled) {
+          setDelivery(payload.delivery);
+          if (payload.workspace) setWorkspaceInfo(payload.workspace);
+        }
+      } catch {
+        if (!cancelled) setDelivery(undefined);
+      }
+    };
+    void refreshDelivery();
     setEvents([]);
     setResolvedPermissions(new Set());
     seenSeqs.current = new Set();
@@ -473,7 +482,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
       seenSeqs.current.add(record.seq);
       setEvents((current) => [...current, record]);
       if (["run_finished", "done", "error", "interrupted", "acceptance_result", "review_result"].includes(record.event.type)) {
-        void fetch(projectUrl(`/api/sessions/${selectedId}/delivery`)).then(async (response) => response.ok ? (await response.json() as { delivery?: DeliveryWorkbenchData }).delivery : undefined).then((value) => { if (value) setDelivery(value); }).catch(() => undefined);
+        void refreshDelivery();
       }
       // 分支切换事件实时刷新分支树（含跨端切换：CLI /branch 或 /goto）
       if (record.event.type === "branch_switch") {
@@ -814,7 +823,13 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   onCopyPath={() => {
                     const path = workspaceInfo?.path;
                     if (!path) return;
-                    void navigator.clipboard?.writeText(path).catch(() => setError("复制隔离路径失败，请手动复制"));
+                    if (!navigator.clipboard) {
+                      setError("浏览器不支持复制，请手动选择隔离路径");
+                      return;
+                    }
+                    void navigator.clipboard.writeText(path).catch(() =>
+                      setError("复制隔离路径失败，请手动复制"),
+                    );
                   }}
                   onExport={() => exportSession(selected.id)}
                 />

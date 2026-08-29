@@ -135,5 +135,12 @@ test.describe.serial("隔离执行真实用户入口", () => {
     await expect(page.getByText("隔离工作区写入完成。")).toBeVisible({ timeout: 30_000 });
     await expect.poll(async () => readFile(`${workspacePath}/isolated-e2e-marker.txt`, "utf8")).toBe("written-in-worktree\n");
     await expect.poll(async () => access(SOURCE_MARKER).then(() => true).catch(() => false)).toBe(false);
+
+    const delivery = page.getByRole("region", { name: "交付验收" });
+    await expect(delivery).toBeVisible({ timeout: 30_000 });
+    await expect(delivery).toContainText("已完成但未机器验收");
+    await expect(delivery).toContainText("isolated-e2e-marker.txt");
+    await expect(delivery).toContainText("工作区自创建后已发生变化");
+    await expect(delivery).toContainText("改动尚未自动合并");
   });
 });

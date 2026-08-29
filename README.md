@@ -105,6 +105,12 @@ Core 只产生结构化事件，前端、持久化、统计和通知订阅事件
 - **设置页**：供应商 / 角色模型 / 权限规则 / 行为参数 / 服务器（监听地址与访问密码），Schema 驱动自动生成，全局 / 项目双作用域
 - **远程审批**：监听非 localhost + 访问密码，手机浏览器可审批（E2E 验证）
 
+### 交付验收工作台
+
+- Web 会话终态区分任务结果、机器验收和 Review，逐条展示最新一轮验收命令、输出、完整成功文件清单及隔离工作区状态
+- 交付信息由持久化事件流重建并通过 `/api/sessions/:id/delivery` 提供；服务重启后仍可恢复
+- 隔离任务不会自动合并、commit 或 push；文件清单来自成功的 Write/Edit/MultiEdit 调用，不等同于完整 Git diff，Bash 等间接修改可能不在清单内
+
 ### 插件扩展（.myagent/tools/）
 
 - **插件通道**：`.myagent/tools/*.ts`（项目）或 `~/.myagent/tools/`（全局，项目覆盖）写一个 `definePluginTool` 即接入——注册、模型可见、执行分发、权限审批、UI 渲染全走通用通道，与内置工具无差别；normal 档首次调用审批后同会话通配放行
@@ -175,6 +181,3 @@ push 到 main / PR 时 GitHub Actions 自动跑两个 job：
 ## 项目约定（记忆）
 
 - 依赖管理用 `pnpm`（勿用 `npm`）；测试命令 `pnpm test`
-# 交付验收
-
-Web 会话终态提供交付验收工作台：展示任务状态、最新机器验收、Review、完整成功文件清单及隔离工作区状态。交付信息由事件流重建并通过 `/api/sessions/:id/delivery` 提供。隔离任务不会自动合并、commit 或 push；文件清单也不等同于完整 Git diff，详情中的 diff 可能缺失。
