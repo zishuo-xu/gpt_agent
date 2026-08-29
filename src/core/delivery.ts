@@ -1,4 +1,5 @@
 import type { AgentEvent, RecordedEvent } from "./types.js";
+import type { SessionStatus } from "../shared/types.js";
 
 export type DeliveryOutcome = "running" | "completed" | "failed" | "interrupted";
 export type DeliveryVerification = "passed" | "failed" | "not_run";
@@ -26,7 +27,7 @@ export interface DeliveryProjection {
 }
 
 /** Rebuilds the user-facing delivery package solely from the persisted event stream. */
-export function projectDelivery(records: RecordedEvent[], options: { title?: string; status?: string } = {}): DeliveryProjection {
+export function projectDelivery(records: RecordedEvent[], options: { title?: string; status?: SessionStatus } = {}): DeliveryProjection {
   let start = -1;
   let taskId: string | undefined;
   let title = "";
@@ -55,11 +56,13 @@ export function projectDelivery(records: RecordedEvent[], options: { title?: str
       if (target) files.add(target);
     }
   }
-  const acceptance = from.filter((r) => r.event.type === "acceptance_result").map((r) => r.event as Extract<AgentEvent, {type:"acceptance_result"}>);
+  const acceptance = from
+    .filter((r): r is RecordedEvent & { event: Extract<AgentEvent, { type: "acceptance_result" }> } => r.event.type === "acceptance_result" && (!taskId || r.event.taskId === taskId))
+    .map((r) => r.event);
   const latestAttempt = acceptance.reduce((max, item) => Math.max(max, item.attempt), 0);
   const checks = acceptance.filter((item) => item.attempt === latestAttempt).map(({ command, status, exitCode, durationMs, output }) => ({ command, status, ...(exitCode === undefined ? {} : { exitCode }), durationMs, ...(output === undefined ? {} : { output }) }));
   const reviewEvent = [...from].reverse().map((r) => r.event).find((e) => e.type === "review_result");
-  const outcome: DeliveryOutcome = finish?.status ?? (start >= 0 ? "running" : options.status === "failed" || from.some((r) => r.event.type === "error") ? "failed" : options.status === "interrupted" || from.some((r) => r.event.type === "interrupted") ? "interrupted" : options.status === "running" ? "running" : "completed");
+  const outcome = projectOutcome(records, finish, options.status);
   const verification: DeliveryVerification = checks.length === 0 ? "not_run" : checks.every((c) => c.status === "passed") ? "passed" : "failed";
   const review: DeliveryReview = reviewEvent?.type !== "review_result" ? "not_run" : reviewEvent.passed ? "passed" : "failed";
   const warnings: string[] = [];
@@ -68,4 +71,23 @@ export function projectDelivery(records: RecordedEvent[], options: { title?: str
   if (files.size > 0) unconfirmed.push("文件清单来自成功的 Write/Edit/MultiEdit 调用，可能没有完整最终 diff");
   if (!title) title = options.title || (records.find((r) => r.event.type === "user")?.event.type === "user" ? (records.find((r) => r.event.type === "user")!.event as Extract<AgentEvent,{type:"user"}>).text : "未命名会话");
   return { title, ...(goal ? { goal } : {}), outcome, verification, review, files: [...files], checks, ...(reviewEvent?.type === "review_result" ? { reviewResult: { passed: reviewEvent.passed, issues: [...reviewEvent.issues], summary: reviewEvent.summary } } : {}), warnings, unconfirmed };
+}
+
+function projectOutcome(
+  records: RecordedEvent[],
+  finish: Extract<AgentEvent, { type: "run_finished" }> | undefined,
+  status: SessionStatus | undefined,
+): DeliveryOutcome {
+  if (records.some((record) => record.event.type === "interrupted")) return "interrupted";
+  if (finish) return finish.status;
+  switch (status) {
+    case "done": return "completed";
+    case "error": return "failed";
+    case "interrupted": return "interrupted";
+    case "idle":
+    case "running":
+    case "waiting_permission":
+    case "waiting_plan":
+    default: return "running";
+  }
 }

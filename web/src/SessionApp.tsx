@@ -10,6 +10,7 @@ import type {
   SessionBranch,
   SessionStatus,
   SessionSummary,
+  WorkspaceInfo,
 } from "@shared/types.js";
 import { useProjectPicker, type OpenedProject } from "./use-project-picker";
 import { buildDisplayItems } from "./session-display";
@@ -36,16 +37,6 @@ import { NewTaskOverlay } from "./session-new-task";
 import { ProjectPicker } from "./ProjectPicker";
 import { FlightRecorder } from "./flight-recorder";
 
-type WorkspaceInfo = {
-  mode: "project" | "isolated";
-  sourceCwd: string;
-  path: string;
-  head: string;
-  warnings: string[];
-  exists: boolean;
-  baseHead?: string;
-  currentHead?: string;
-};
 import {
   PlanDecisionOverlay,
   type TaskPlanDetail,
@@ -127,6 +118,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [planFeedback, setPlanFeedback] = useState("");
   const [planSubmitting, setPlanSubmitting] = useState(false);
   const chatStreamRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const previousStatuses = useRef<Record<string, SessionStatus>>({});
   const appliedInitialSessionId = useRef<string | undefined>(undefined);
   const seenSeqs = useRef<Set<number>>(new Set());
@@ -817,7 +809,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   delivery={delivery}
                   workspace={workspaceInfo ?? undefined}
                   onContinue={() => {
-                    document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                    composerRef.current?.focus();
                   }}
                   onCopyPath={() => {
                     const path = workspaceInfo?.path;
@@ -836,6 +828,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
                     />
                   )}
                   <Composer
+                      textareaRef={composerRef}
                       message={message}
                       setMessage={updateMessage}
                       busy={busy}
@@ -954,10 +947,10 @@ export function WorkspaceBanner({ workspace }: { workspace: WorkspaceInfo }) {
       <span>
         原项目未自动修改 · 独立 worktree：<code>{workspace.path}</code>
       </span>
-      <span>HEAD <code>{workspace.head.slice(0, 12)}</code></span>
+      {workspace.head && <span>HEAD <code>{workspace.head.slice(0, 12)}</code></span>}
       {!workspace.exists && <span>风险：隔离路径已不存在，无法继续或复现。</span>}
-      {workspace.warnings.length > 0 && (
-        <span>快照提示：{workspace.warnings.join("；")}</span>
+      {(workspace.warnings ?? []).length > 0 && (
+        <span>快照提示：{(workspace.warnings ?? []).join("；")}</span>
       )}
       <small>不会自动合并、commit 或 push。</small>
     </section>

@@ -106,7 +106,6 @@ export function registerSessionRoutes(
     return context.json({ delivery, workspace: {
       mode: "isolated", source: isolated.sourceCwd, path: isolated.path,
       baseHead: isolated.head, exists: isolated.exists, warnings,
-      ...(isolated.fingerprint ? { createdFingerprint: isolated.fingerprint } : {}),
       ...(current ? { currentHead: current.head, changedSinceCreated } : {}),
     } });
   });

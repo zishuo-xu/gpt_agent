@@ -72,6 +72,19 @@ export interface SessionSummary {
   };
 }
 
+/** User-facing workspace metadata; project mode has no filesystem snapshot fields. */
+export interface WorkspaceInfo {
+  mode: "project" | "isolated";
+  sourceCwd?: string;
+  path?: string;
+  head?: string;
+  baseHead?: string;
+  currentHead?: string;
+  exists?: boolean;
+  warnings?: string[];
+  changedSinceCreated?: boolean;
+}
+
 export type MemoryDocumentId =
   | "preferences"
   | "conventions"

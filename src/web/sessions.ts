@@ -9,19 +9,13 @@ import {
   type AgentSessionSummary,
 } from "../core/session.js";
 import type { PermissionMode, PermissionRule } from "../core/types.js";
+import type { WorkspaceInfo } from "../shared/types.js";
 import { READONLY_DENY_RULES } from "../core/permissions.js";
 import { parseRunCommand } from "../core/run-task.js";
 import type { AtomicFileTools } from "../tools/atomic-file.js";
 import type { RunWorkspaceMode } from "../core/run-workspace.js";
 
-export interface WebWorkspaceInfo {
-  mode: "isolated";
-  sourceCwd: string;
-  path: string;
-  head: string;
-  warnings: string[];
-  exists: boolean;
-}
+export type WebWorkspaceInfo = WorkspaceInfo;
 
 export type WebSessionEvent = AgentSessionEvent;
 export type WebSessionStatus = AgentSessionStatus;

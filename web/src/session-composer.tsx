@@ -49,6 +49,7 @@ export function TaskScopeTemplates(props: {
 }
 
 export function Composer(props: {
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
   message: string;
   setMessage: (message: string) => void;
   busy: boolean;
@@ -68,6 +69,7 @@ export function Composer(props: {
   return (
     <div className="web-composer">
       <textarea
+        ref={props.textareaRef}
         value={props.message}
         onChange={(event) =>
           props.setMessage(event.target.value)
@@ -209,3 +211,4 @@ export function RunBoundsConfirmation(props: {
     </section>
   );
 }
+import type { RefObject } from "react";
