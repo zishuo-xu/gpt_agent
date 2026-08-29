@@ -7,6 +7,7 @@ import type { WebSessionEvent } from "./sessions.js";
 import type { WebRouteDeps } from "./routes-context.js";
 import { redactTrace } from "../core/trace-redaction.js";
 import { observeTurn } from "../core/turn-observation.js";
+import type { RunWorkspaceMode } from "../core/run-workspace.js";
 
 /** 会话路由：集合创建 / 详情操作（输入/审批/导出/中断/续跑/分支/书签）/ SSE 事件流 */
 export function registerSessionRoutes(
@@ -33,9 +34,14 @@ export function registerSessionRoutes(
         permissionMode?: "strict" | "normal" | "trust";
         confirmBounds?: boolean;
         planMode?: boolean;
+        workspaceMode?: unknown;
       };
       const task = body.task?.trim();
       if (!task) return context.json({ error: "task is required" }, 400);
+      if (body.workspaceMode !== undefined && body.workspaceMode !== "project" && body.workspaceMode !== "isolated") {
+        return context.json({ error: "workspaceMode 必须是 project 或 isolated" }, 400);
+      }
+      const workspaceMode = body.workspaceMode as RunWorkspaceMode | undefined;
       const run = task.startsWith("/run")
         ? parseRunCommand(task)
         : undefined;
@@ -57,9 +63,10 @@ export function registerSessionRoutes(
       const session = await sessionManager.create(
         task,
         body.permissionMode ?? "normal",
-        body.planMode === true ? { planMode: true } : undefined,
+        { ...(body.planMode === true ? { planMode: true } : {}), ...(workspaceMode ? { workspaceMode } : {}) },
       );
-      return context.json({ session: session.summary() }, 201);
+      const workspace = await sessionManager.workspaceInfo(session.id);
+      return context.json({ session: session.summary(), ...(workspace ? { workspace } : {}) }, 201);
     } catch (error) {
       return context.json(
         {
@@ -68,6 +75,15 @@ export function registerSessionRoutes(
         400,
       );
     }
+  });
+
+  app.get("/api/sessions/:id/workspace", async (context) => {
+    const target = await resolveProject(context);
+    const sessionManager = target.sessionManager;
+    if (!sessionManager) return context.json({ error: "会话服务未启用" }, 503);
+    const id = context.req.param("id");
+    if (!sessionManager.get(id)) return context.json({ error: "会话不存在" }, 404);
+    return context.json({ workspace: (await sessionManager.workspaceInfo(id)) ?? null });
   });
 
   app.post("/api/run/preview", async (context) => {

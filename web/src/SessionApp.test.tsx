@@ -899,6 +899,41 @@ describe("Composer（无人值守任务模式开关）", () => {
   });
 });
 
+describe("隔离工作区入口与结果提示", () => {
+  it("隔离执行复选框可切换且工作区缺失时显示风险", async () => {
+    const [{ act }, { createRoot }, { NewTaskOverlay }, { WorkspaceBanner }] = await Promise.all([
+      import("react"), import("react-dom/client"), import("./session-new-task"), import("./SessionApp"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    let mode = "project";
+    await act(async () => {
+      root.render(<NewTaskOverlay
+        newTaskEnv="project" newTaskProject="p" projects={[]} permissionMode="normal"
+        runBoundsPreview={null} submitting={false} message="" runMode={true}
+        workspaceMode={mode as "project" | "isolated"}
+        onWorkspaceModeChange={(next) => { mode = next; }}
+        onRunModeChange={() => undefined} planMode={false} onPlanModeChange={() => undefined}
+        onEnvChange={() => undefined} onProjectChange={() => undefined} onPermissionMode={() => undefined}
+        onMessage={() => undefined} onPickTemplate={() => undefined} onSubmit={async () => undefined}
+        onOpenProjectPicker={() => undefined} onClose={() => undefined} onCancelBounds={() => undefined}
+      />);
+    });
+    const checkbox = container.querySelector('input[aria-label="隔离执行"]') as HTMLInputElement;
+    assert.ok(checkbox);
+    checkbox.click();
+    assert.equal(mode, "isolated");
+    await act(async () => {
+      root.render(<WorkspaceBanner workspace={{ mode: "isolated", sourceCwd: "/repo", path: "/tmp/wt", head: "abcdef123456", warnings: ["依赖目录未复制"], exists: false }} />);
+    });
+    assert.match(container.textContent ?? "", /原项目未自动修改/);
+    assert.match(container.textContent ?? "", /隔离路径已不存在/);
+    assert.match(container.textContent ?? "", /依赖目录未复制/);
+    await act(async () => root.unmount());
+  });
+});
+
 describe("ItemCard（subtask 卡片）", () => {
   before(() => {
     try {

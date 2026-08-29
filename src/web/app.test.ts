@@ -54,6 +54,67 @@ test("Web API 暴露 Schema 和脱敏配置", async () => {
   assert.equal(payload.config.providers[0].apiKey, "");
 });
 
+test("隔离执行 API 严格校验、透传工作区信息并处理大厅拒绝", async () => {
+  const { service } = await fixture();
+  const calls: unknown[] = [];
+  const session = {
+    id: "isolated-1",
+    summary: () => ({ id: "isolated-1", title: "隔离任务" }),
+  };
+  const workspace = {
+    mode: "isolated",
+    sourceCwd: service.cwd,
+    path: "/tmp/myagent-worktree",
+    head: "abcdef1234567890",
+    warnings: ["依赖目录未复制"],
+    exists: true,
+  };
+  const manager = {
+    get: (id: string) => id === session.id ? session : undefined,
+    create: async (_task: string, _mode: string, options: unknown) => {
+      calls.push(options);
+      return session;
+    },
+    workspaceInfo: async (id: string) => id === session.id ? workspace : undefined,
+  } as unknown as WebSessionManager;
+  const app = createWebApp(service, manager);
+
+  const invalid = await app.request("/api/sessions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ task: "隔离", workspaceMode: "sandbox" }),
+  });
+  assert.equal(invalid.status, 400);
+
+  const created = await app.request("/api/sessions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ task: "隔离", workspaceMode: "isolated" }),
+  });
+  assert.equal(created.status, 201);
+  assert.deepEqual(calls[0], { workspaceMode: "isolated" });
+  assert.equal((await created.json()).workspace.path, workspace.path);
+
+  const info = await app.request(`/api/sessions/${session.id}/workspace`);
+  assert.equal(info.status, 200);
+  assert.equal((await info.json()).workspace.exists, true);
+  const missing = await app.request("/api/sessions/missing/workspace");
+  assert.equal(missing.status, 404);
+
+  const lobby = {
+    ...manager,
+    create: async () => { throw new Error("大厅没有 Git 工作区，不能使用隔离执行"); },
+  } as unknown as WebSessionManager;
+  const lobbyApp = createWebApp(service, lobby);
+  const rejected = await lobbyApp.request("/api/sessions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ task: "隔离", workspaceMode: "isolated" }),
+  });
+  assert.equal(rejected.status, 400);
+  assert.match((await rejected.json()).error, /大厅.*隔离/);
+});
+
 test("Web API 保存 OpenAI-compatible 第三方渠道", async () => {
   const { app, service } = await fixture();
   const config = await service.readPublic("global");
@@ -332,6 +393,7 @@ test("新建会话的 planMode 透传给会话管理器", async () => {
       created.push(args);
       return fakeSession;
     },
+    workspaceInfo: async () => undefined,
   } as unknown as WebSessionManager;
   const app = createWebApp(service, fakeManager);
 

@@ -513,6 +513,26 @@
   white-space: nowrap;
 }
 
+.isolated-mode-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+  color: #d8e6fb;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.isolated-mode-toggle input {
+  margin-top: 2px;
+}
+
+.isolated-mode-toggle small {
+  display: block;
+  color: #8fa4c1;
+}
+
 .tag-dot {
   width: 6px;
   height: 6px;
@@ -2632,6 +2652,41 @@
   border-radius: 9px;
   background: #14241a;
   font-size: 12px;
+}
+
+.workspace-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 10px 4px;
+  padding: 9px 12px;
+  border: 1px solid #315d82;
+  border-radius: 8px;
+  background: #101f2d;
+  color: #b8d7f2;
+  font-size: 12px;
+}
+.workspace-banner strong {
+  color: #8fc3ff;
+}
+
+.workspace-banner span {
+  overflow-wrap: anywhere;
+}
+
+.workspace-banner small {
+  flex-basis: 100%;
+  color: #849db3;
+}
+
+.workspace-banner-missing {
+  border-color: #8a5e35;
+  background: #261b12;
+  color: #f0c894;
+}
+
+.workspace-banner-missing strong {
+  color: #f0b46b;
 }
 
 .delivery-head {

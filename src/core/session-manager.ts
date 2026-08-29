@@ -61,6 +61,15 @@ import { conversationFromAt } from "./branch.js";
 import { computeExperimentDiff } from "./experiment-diff.js";
 import { parseRunCommand } from "./run-task.js";
 import { extractRunSummary } from "./run-summary.js";
+import {
+  deleteRunWorkspaceState,
+  readRunWorkspaceState,
+  writeRunWorkspaceState,
+  type RunWorkspaceMode,
+  type RunWorkspaceState,
+} from "./run-workspace.js";
+
+export type { RunWorkspaceMode, RunWorkspaceState } from "./run-workspace.js";
 
 export { buildRoleClientChain } from "./model-factory.js";
 
@@ -231,7 +240,33 @@ export class AgentSessionManager {
       );
     }
     await this.#deleteExperimentSidecar(id);
+    const runWorkspace = await readRunWorkspaceState(this.#sessionsDir, id);
+    if (runWorkspace) {
+      await this.#workspace.removeSnapshot(runWorkspace.snapshot);
+    }
+    await deleteRunWorkspaceState(this.#sessionsDir, id);
     return true;
+  }
+
+  async workspaceInfo(id: string): Promise<{
+    mode: "isolated";
+    sourceCwd: string;
+    path: string;
+    head: string;
+    warnings: string[];
+    exists: boolean;
+  } | undefined> {
+    const state = await readRunWorkspaceState(this.#sessionsDir, id);
+    if (!state) return undefined;
+    const exists = await stat(state.snapshot.cwd).then((value) => value.isDirectory()).catch(() => false);
+    return {
+      mode: state.mode,
+      sourceCwd: state.sourceCwd,
+      path: state.snapshot.cwd,
+      head: state.snapshot.head,
+      warnings: [...state.snapshot.warnings],
+      exists,
+    };
   }
 
   async listExperimentForks(parentSessionId: string): Promise<ExperimentSessionSummary[]> {
@@ -470,6 +505,10 @@ export class AgentSessionManager {
         );
         continue;
       }
+      const runWorkspace = await readRunWorkspaceState(
+        this.#sessionsDir,
+        id,
+      );
       const firstUser = records.find(
         (record) => record.event.type === "user",
       );
@@ -478,26 +517,33 @@ export class AgentSessionManager {
       );
       if (
         (!firstUser || firstUser.event.type !== "user") &&
-        (!firstPlan || firstPlan.event.type !== "plan_started")
+        (!firstPlan || firstPlan.event.type !== "plan_started") &&
+        !runWorkspace
       ) continue;
       const firstText =
         firstUser?.event.type === "user"
           ? firstUser.event.text
-          : firstPlan!.event.type === "plan_started"
-            ? firstPlan!.event.task
-            : "新会话";
+          : firstPlan?.event.type === "plan_started"
+            ? firstPlan.event.task
+            : sessionInfoTitle(records) ?? "新会话";
       const compactModelClient =
         await this.#createRoleClient("cheap");
       const exploreModelClient =
         await this.#createRoleClient("explore");
       const branches = branchesFromEvents(records);
       const branchId = currentBranchIdFrom(records);
+      const workspaceExists = runWorkspace
+        ? await stat(runWorkspace.snapshot.cwd).then((value) => value.isDirectory()).catch(() => false)
+        : true;
+      const sessionCwd = runWorkspace && workspaceExists ? runWorkspace.snapshot.cwd : this.#cwd;
       const session = new AgentSession({
         id,
         title:
           sessionInfoTitle(records) ??
           titleFrom(firstText),
-        cwd: this.#cwd,
+        cwd: sessionCwd,
+        storageDir: this.#sessionsDir,
+        ...(runWorkspace && !workspaceExists ? { runtimeUnavailableReason: "隔离工作区已缺失，只能查看历史，不能继续执行" } : {}),
         mode:
           lastPermissionMode(records) ??
           runtimeConfig.permissions.mode,
@@ -507,6 +553,7 @@ export class AgentSessionManager {
           conversationFrom(records, branches, branchId),
           runtimeConfig.behavior?.crossProjectMemory !== false,
           runtimeConfig.behavior?.maxOutputTokens,
+          ...(runWorkspace && workspaceExists ? [{ cwd: sessionCwd }] : []),
         ),
         stateDir: this.#stateDir,
         restoredEvents: records,
@@ -569,27 +616,55 @@ export class AgentSessionManager {
     initialMessage?: string;
     /** 追加到默认+配置规则之上的权限规则（如大厅模式禁用文件写入） */
     extraPermissionRules?: PermissionRule[];
+    workspaceMode?: RunWorkspaceMode;
   } = {}): Promise<AgentSession> {
     await this.#acquireLock();
     await this.#ensureProjectMetadata();
     const message = options.initialMessage?.trim();
     const runtimeConfig = await this.#configService.readEffective();
+    const sessionId = randomUUID().slice(0, 8);
+    let runWorkspace: RunWorkspaceState | undefined;
+    if (options.workspaceMode === "isolated") {
+      try {
+        const snapshot = await this.#workspace.createSnapshot(sessionId, this.#cwd);
+        runWorkspace = {
+          version: 1,
+          mode: "isolated",
+          sourceCwd: this.#cwd,
+          snapshot,
+          createdAt: new Date().toISOString(),
+        };
+        await writeRunWorkspaceState(this.#sessionsDir, sessionId, runWorkspace);
+      } catch (error) {
+        if (runWorkspace) {
+          await this.#workspace.removeSnapshot(runWorkspace.snapshot).catch(() => undefined);
+          await deleteRunWorkspaceState(this.#sessionsDir, sessionId);
+        }
+        await this.releaseLock();
+        throw error;
+      }
+    }
+    const sessionCwd = runWorkspace?.snapshot.cwd ?? this.#cwd;
+    let session: AgentSession | undefined;
+    try {
     const compactModelClient =
       await this.#createRoleClient("cheap");
     const exploreModelClient =
       await this.#createRoleClient("explore");
-    const session = new AgentSession({
-      id: randomUUID().slice(0, 8),
+    session = new AgentSession({
+      id: sessionId,
       title:
         options.title?.trim() ||
         (message ? titleFrom(message) : "新会话"),
-      cwd: this.#cwd,
+      cwd: sessionCwd,
+      storageDir: this.#sessionsDir,
       mode: options.mode ?? runtimeConfig.permissions.mode,
       ...(this.#files ? { files: this.#files } : {}),
       model: await this.#createModel(
         [],
         runtimeConfig.behavior?.crossProjectMemory !== false,
         runtimeConfig.behavior?.maxOutputTokens,
+        ...(runWorkspace ? [{ cwd: sessionCwd }] : []),
       ),
       stateDir: this.#stateDir,
       permissionRules: [
@@ -613,36 +688,37 @@ export class AgentSessionManager {
         : { subagentTimeoutMs: runtimeConfig.behavior.subagentTimeoutMs }),
       pricing: rolePricing(runtimeConfig.models),
     });
-    this.#register(session);
+    const activeSession = session;
+    this.#register(activeSession);
     if (options.title?.trim()) {
       // 显式标题写入事件流（恢复的唯一来源；默认「新会话」/消息推导标题可在恢复时重算）
-      session.setTitle(options.title.trim());
+      activeSession.setTitle(options.title.trim());
     }
     // 外部推送（配置了 notify.* 时）：任务完成/出错/审批超时
     // webhook 推送到外部网关；desktop 弹 macOS 通知中心
     if (runtimeConfig.notify.webhook) {
       new WebhookNotifier(
         (listener) =>
-          session.subscribe((record) => listener(record.event)),
+          activeSession.subscribe((record) => listener(record.event)),
         {
           webhookUrl: runtimeConfig.notify.webhook,
-          sessionTitle: session.title,
-          getSummary: () => session.summary(),
+          sessionTitle: activeSession.title,
+          getSummary: () => activeSession.summary(),
         },
       );
     }
     if (runtimeConfig.notify.desktop === true) {
       new DesktopNotifier(
         (listener) =>
-          session.subscribe((record) => listener(record.event)),
+          activeSession.subscribe((record) => listener(record.event)),
         {
           enabled: true,
-          sessionTitle: session.title,
+          sessionTitle: activeSession.title,
         },
       );
     }
     if (message) {
-      void session.sendInput(message).catch((error) => {
+      void activeSession.sendInput(message).catch((error) => {
         // 兜底：sendInput 内部已把 loop/flush 错误转为会话 error 事件，
         // 此处防未来其他 reject 源造成 unhandled rejection 崩进程
         if (error instanceof Error) {
@@ -652,7 +728,21 @@ export class AgentSessionManager {
         }
       });
     }
-    return session;
+    return activeSession;
+    } catch (error) {
+      if (session) {
+        session.markClosed();
+        this.#sessions.delete(sessionId);
+        for (const suffix of [".jsonl", ".trace.jsonl"]) {
+          await unlink(path.join(this.#sessionsDir, `${sessionId}${suffix}`)).catch(() => undefined);
+        }
+      }
+      if (runWorkspace) {
+        await this.#workspace.removeSnapshot(runWorkspace.snapshot).catch(() => undefined);
+        await deleteRunWorkspaceState(this.#sessionsDir, sessionId);
+      }
+      throw error;
+    }
   }
 
   async flush(): Promise<void> {
@@ -667,31 +757,31 @@ export class AgentSessionManager {
     messages: ConversationMessage[],
     crossProjectMemory = true,
     maxOutputTokens?: number,
-    experiment?: { cwd: string; pinnedModel: { providerId: string; model: string }; systemPromptOverlay?: string },
+    modelOptions?: { cwd?: string; pinnedModel?: { providerId: string; model: string }; systemPromptOverlay?: string },
   ): Promise<ConversationAgentModel> {
     if (this.#modelFactory) {
-      return await this.#modelFactory(messages, experiment);
+      return await this.#modelFactory(messages, modelOptions);
     }
     // 插件注册表在首个模型就绪前填充一次（进程级；会话内工具集保持固定，
     // 新增插件需重启 server 生效）
     await this.#ensurePlugins();
-    const client = experiment
-      ? buildPinnedModelClient(experiment.pinnedModel, await this.#configService.readEffective())
+    const client = modelOptions?.pinnedModel
+      ? buildPinnedModelClient(modelOptions.pinnedModel, await this.#configService.readEffective())
       : await this.#createRoleClient("main");
     if (!client) throw new Error("main 角色模型不可用");
     return new ConversationAgentModel(
       client,
       messages,
       new ContextManager({
-        cwd: experiment?.cwd ?? this.#cwd,
+        cwd: modelOptions?.cwd ?? this.#cwd,
         homeDir: this.#homeDir,
         stateDir: this.#stateDir,
         crossProjectMemory,
       }),
       {
         ...(maxOutputTokens === undefined ? {} : { maxTokens: maxOutputTokens }),
-        ...(experiment?.systemPromptOverlay ? { systemPromptOverlay: experiment.systemPromptOverlay } : {}),
-        ...(experiment?.pinnedModel ? { identity: experiment.pinnedModel } : {}),
+        ...(modelOptions?.systemPromptOverlay ? { systemPromptOverlay: modelOptions.systemPromptOverlay } : {}),
+        ...(modelOptions?.pinnedModel ? { identity: modelOptions.pinnedModel } : {}),
       },
     );
   }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -18,6 +18,8 @@ import {
   buildRoleClientChain,
 } from "./session-manager.js";
 import { AgentSession } from "./session.js";
+import { ExperimentWorkspaceManager } from "./experiment-workspace.js";
+import type { RunTaskOptions } from "./run-task.js";
 
 class ScriptedClient implements ModelClient {
   readonly requests: CompletionRequest[] = [];
@@ -94,6 +96,147 @@ test("deleteSession 删除会话并清除磁盘文件", async () => {
   // 重复删除返回 false
   assert.equal(await manager.deleteSession(session.id), false);
 });
+
+test("隔离会话使用 worktree，源项目不变，删除会安全清理", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-isolated-cwd-"));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "myagent-isolated-state-"));
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "myagent-isolated-home-"));
+  await writeFile(path.join(cwd, "tracked.txt"), "source\n");
+  execFileSync("git", ["init", "-q"], { cwd });
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"], { cwd });
+  const client = new ScriptedClient([
+    {
+      text: "",
+      toolCalls: [
+        {
+          id: "read-isolated",
+          tool: "Read",
+          target: "tracked.txt",
+          args: { file_path: "tracked.txt" },
+        },
+      ],
+      usage: { input: 10, output: 2, cached: 0 },
+    },
+    {
+      text: "",
+      toolCalls: [
+        {
+          id: "write-isolated",
+          tool: "Write",
+          target: "tracked.txt",
+          args: { file_path: "tracked.txt", content: "isolated\n" },
+        },
+      ],
+      usage: { input: 10, output: 2, cached: 0 },
+    },
+    response("完成"),
+  ]);
+  const manager = new AgentSessionManager({
+    cwd, stateDir, homeDir, configService: new ConfigService({ cwd, homeDir }),
+    modelFactory: (messages) => new ConversationAgentModel(client, messages),
+  });
+  const session = await manager.createSession({ title: "隔离", mode: "trust", workspaceMode: "isolated" });
+  const info = await manager.workspaceInfo(session.id);
+  assert.ok(info);
+  assert.notEqual(info?.path, cwd);
+  await session.sendInput("修改 tracked.txt");
+  assert.equal(await readFile(path.join(info!.path, "tracked.txt"), "utf8"), "isolated\n");
+  assert.equal(await readFile(path.join(cwd, "tracked.txt"), "utf8"), "source\n");
+  assert.equal(String(execFileSync("git", ["status", "--porcelain"], { cwd })), "");
+  await manager.deleteSession(session.id);
+  assert.equal(await infoExists(info!.path), false);
+});
+
+test("隔离 sidecar 恢复使用 worktree cwd，缺失时禁止回退源项目", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-restore-isolated-cwd-"));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "myagent-restore-isolated-state-"));
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "myagent-restore-isolated-home-"));
+  await writeFile(path.join(cwd, "tracked.txt"), "source\n");
+  execFileSync("git", ["init", "-q"], { cwd });
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"], { cwd });
+  const configService = new ConfigService({ cwd, homeDir });
+  let restoredCwd = "";
+  const factory = (messages: ConversationMessage[], options?: { cwd?: string }) => {
+    restoredCwd = options?.cwd ?? cwd;
+    return new ConversationAgentModel(new ScriptedClient([response("完成")]), messages);
+  };
+  const first = new AgentSessionManager({ cwd, stateDir, homeDir, configService, modelFactory: factory });
+  const session = await first.createSession({ title: "恢复隔离", workspaceMode: "isolated" });
+  // 模拟创建 sidecar 与 session_info 后、首条用户事件写入前进程退出。
+  await first.flush();
+  const expected = (await first.workspaceInfo(session.id))!.path;
+  await first.releaseLock();
+  const restored = new AgentSessionManager({ cwd, stateDir, homeDir, configService, modelFactory: factory });
+  await restored.restore();
+  assert.equal(restoredCwd, expected);
+  assert.ok(restored.get(session.id));
+});
+
+test("隔离 worktree 缺失时恢复只读历史且拒绝继续执行", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-missing-workspace-cwd-"));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "myagent-missing-workspace-state-"));
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "myagent-missing-workspace-home-"));
+  await writeFile(path.join(cwd, "tracked.txt"), "source\n");
+  execFileSync("git", ["init", "-q"], { cwd });
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"], { cwd });
+  const workspace = new ExperimentWorkspaceManager({ experimentsRoot: path.join(stateDir, "managed-experiments") });
+  const configService = new ConfigService({ cwd, homeDir });
+  const factory = (messages: ConversationMessage[]) => new ConversationAgentModel(new ScriptedClient([response("完成")]), messages);
+  const first = new AgentSessionManager({ cwd, stateDir, homeDir, configService, experimentWorkspaceManager: workspace, modelFactory: factory });
+  const session = await first.createSession({ title: "缺失工作区", workspaceMode: "isolated" });
+  await session.sendInput("记录一个可恢复的历史");
+  await first.flush();
+  const info = await first.workspaceInfo(session.id);
+  assert.ok(info);
+  const sidecar = path.join(stateDir, "projects", Buffer.from(cwd).toString("base64url"), "sessions", `${session.id}.workspace.json`);
+  await workspace.removeSnapshot({ worktreePath: info!.path, gitRoot: cwd });
+  assert.equal((await first.workspaceInfo(session.id))?.exists, false);
+  await first.releaseLock();
+  const restored = new AgentSessionManager({ cwd, stateDir, homeDir, configService, experimentWorkspaceManager: workspace, modelFactory: factory });
+  await restored.restore();
+  assert.equal((await restored.workspaceInfo(session.id))?.exists, false);
+  const restoredSession = restored.get(session.id);
+  assert.ok(restoredSession);
+  await assert.rejects(() => restoredSession!.sendInput("不要写源项目"), /隔离工作区已缺失/);
+  const runTaskOptions: RunTaskOptions = {
+    description: "不要写源项目",
+    hardRules: [],
+    semanticBounds: [],
+  };
+  await assert.rejects(() => restoredSession!.runTask(runTaskOptions), /隔离工作区已缺失/);
+  assert.equal(await readFile(path.join(cwd, "tracked.txt"), "utf8"), "source\n");
+  assert.equal(String(execFileSync("git", ["status", "--porcelain"], { cwd })), "");
+  await readFile(sidecar, "utf8");
+});
+
+test("隔离 session 创建失败时不注册幽灵会话且清理 worktree/sidecar", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-create-failure-cwd-"));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "myagent-create-failure-state-"));
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "myagent-create-failure-home-"));
+  await writeFile(path.join(cwd, "tracked.txt"), "source\n");
+  execFileSync("git", ["init", "-q"], { cwd });
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"], { cwd });
+  const configService = new ConfigService({ cwd, homeDir });
+  const manager = new AgentSessionManager({
+    cwd, stateDir, homeDir, configService,
+    modelFactory: () => { throw new Error("model construction failed"); },
+  });
+  await assert.rejects(() => manager.createSession({ title: "失败", workspaceMode: "isolated" }), /model construction failed/);
+  assert.equal(manager.list().length, 0);
+  const sessionsDir = path.join(stateDir, "projects", Buffer.from(cwd).toString("base64url"), "sessions");
+  const entries = await readdir(sessionsDir).catch(() => [] as string[]);
+  assert.deepEqual(entries.filter((entry) => entry.endsWith(".workspace.json") || entry.endsWith(".jsonl")), []);
+  const experimentsDir = path.join(stateDir, "projects", Buffer.from(cwd).toString("base64url"), "experiments");
+  assert.deepEqual(await readdir(experimentsDir).catch(() => [] as string[]), []);
+});
+
+async function infoExists(filePath: string): Promise<boolean> {
+  return await stat(filePath).then(() => true).catch(() => false);
+}
 
 test("AgentSessionManager 通过事件流恢复会话并继续上下文", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "myagent-manager-cwd-"));

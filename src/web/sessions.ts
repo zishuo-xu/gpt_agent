@@ -12,6 +12,16 @@ import type { PermissionMode, PermissionRule } from "../core/types.js";
 import { READONLY_DENY_RULES } from "../core/permissions.js";
 import { parseRunCommand } from "../core/run-task.js";
 import type { AtomicFileTools } from "../tools/atomic-file.js";
+import type { RunWorkspaceMode } from "../core/run-workspace.js";
+
+export interface WebWorkspaceInfo {
+  mode: "isolated";
+  sourceCwd: string;
+  path: string;
+  head: string;
+  warnings: string[];
+  exists: boolean;
+}
 
 export type WebSessionEvent = AgentSessionEvent;
 export type WebSessionStatus = AgentSessionStatus;
@@ -55,8 +65,11 @@ export class WebSessionManager extends AgentSessionManager {
   async create(
     message: string,
     mode: PermissionMode = "normal",
-    options: { planMode?: boolean } = {},
+    options: { planMode?: boolean; workspaceMode?: RunWorkspaceMode } = {},
   ): Promise<AgentSession> {
+    if (this.#lobby && options.workspaceMode === "isolated") {
+      throw new Error("大厅没有 Git 工作区，不能使用隔离执行");
+    }
     const extraPermissionRules = this.#lobby
       ? LOBBY_PERMISSION_RULES
       : undefined;
@@ -65,6 +78,7 @@ export class WebSessionManager extends AgentSessionManager {
         title: message.trim().slice(0, 40),
         mode,
         ...(extraPermissionRules ? { extraPermissionRules } : {}),
+        ...(options.workspaceMode ? { workspaceMode: options.workspaceMode } : {}),
       });
       await session.startPlan(message);
       return session;
@@ -75,6 +89,7 @@ export class WebSessionManager extends AgentSessionManager {
         title: task.description,
         mode,
         ...(extraPermissionRules ? { extraPermissionRules } : {}),
+        ...(options.workspaceMode ? { workspaceMode: options.workspaceMode } : {}),
       });
       session.startRunTask(task);
       return session;
@@ -83,6 +98,7 @@ export class WebSessionManager extends AgentSessionManager {
       initialMessage: message,
       mode,
       ...(extraPermissionRules ? { extraPermissionRules } : {}),
+      ...(options.workspaceMode ? { workspaceMode: options.workspaceMode } : {}),
     });
   }
 }

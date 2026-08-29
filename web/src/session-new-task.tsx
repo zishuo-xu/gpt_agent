@@ -18,6 +18,8 @@ export function NewTaskOverlay(props: {
   submitting: boolean;
   message: string;
   runMode: boolean;
+  workspaceMode: "project" | "isolated";
+  onWorkspaceModeChange: (mode: "project" | "isolated") => void;
   onRunModeChange: (runMode: boolean) => void;
   planMode: boolean;
   onPlanModeChange: (planMode: boolean) => void;
@@ -100,6 +102,27 @@ export function NewTaskOverlay(props: {
               >
                 打开其他项目…
               </button>
+            </span>
+          )}
+          {props.newTaskEnv === "project" && (
+            <span className="isolated-mode-toggle">
+              <input
+                aria-label="隔离执行"
+                type="checkbox"
+                checked={props.workspaceMode === "isolated"}
+                onChange={(event) =>
+                  props.onWorkspaceModeChange(
+                    event.target.checked ? "isolated" : "project",
+                  )
+                }
+              />
+              <span>
+                <strong>隔离执行</strong>{" "}
+                <small>
+                  Agent 只修改独立 Git worktree，结果不会自动合并
+                  {props.runMode ? " · 无人值守推荐" : ""}
+                </small>
+              </span>
             </span>
           )}
         </label>

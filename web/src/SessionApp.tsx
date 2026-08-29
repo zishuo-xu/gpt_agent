@@ -34,6 +34,15 @@ import { SessionStream } from "./session-stream";
 import { NewTaskOverlay } from "./session-new-task";
 import { ProjectPicker } from "./ProjectPicker";
 import { FlightRecorder } from "./flight-recorder";
+
+type WorkspaceInfo = {
+  mode: "isolated";
+  sourceCwd: string;
+  path: string;
+  head: string;
+  warnings: string[];
+  exists: boolean;
+};
 import {
   PlanDecisionOverlay,
   type TaskPlanDetail,
@@ -106,6 +115,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
     useState<RunBoundsPreview | null>(null);
   /** 无人值守任务模式：提交自动加 /run 前缀（任务边界确认链路） */
   const [runMode, setRunMode] = useState(false);
+  const [workspaceMode, setWorkspaceMode] = useState<"project" | "isolated">("project");
+  const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(null);
   /** 可选的人在闭环规划门：关闭时保留原有直接执行语义。 */
   const [planMode, setPlanMode] = useState(false);
   const [planDetail, setPlanDetail] = useState<TaskPlanDetail | null>(null);
@@ -375,6 +386,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
     if (showNewTask) {
       setNewTaskEnv(key === "lobby" ? "lobby" : "project");
       setNewTaskProject(key === "lobby" ? "" : key);
+      if (key === "lobby") setWorkspaceMode("project");
     }
   }
 
@@ -383,6 +395,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
     setSelectedId("");
     setNewTaskEnv(currentProject === "lobby" ? "lobby" : "project");
     setNewTaskProject(currentProject === "lobby" ? "" : currentProject);
+    setWorkspaceMode("project");
     setShowNewTask(true);
   }
 
@@ -422,8 +435,27 @@ export function SessionApp(props: { initialSessionId?: string }) {
   useEffect(() => {
     if (!selectedId) {
       setEvents([]);
+      setWorkspaceInfo(null);
       return;
     }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(
+          projectUrl(`/api/sessions/${selectedId}/workspace`),
+        );
+        if (!response.ok) {
+          if (!cancelled) setWorkspaceInfo(null);
+          return;
+        }
+        const payload = await response.json() as {
+          workspace?: WorkspaceInfo | null;
+        };
+        if (!cancelled) setWorkspaceInfo(payload.workspace ?? null);
+      } catch {
+        if (!cancelled) setWorkspaceInfo(null);
+      }
+    })();
     setEvents([]);
     setResolvedPermissions(new Set());
     seenSeqs.current = new Set();
@@ -453,7 +485,10 @@ export function SessionApp(props: { initialSessionId?: string }) {
         setError("实时事件连接已关闭，请刷新页面重试。");
       }
     };
-    return () => source.close();
+    return () => {
+      cancelled = true;
+      source.close();
+    };
   }, [selectedId]);
 
   useEffect(() => {
@@ -536,6 +571,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   permissionMode,
                   confirmBounds,
                   ...(planMode ? { planMode: true } : {}),
+                  workspaceMode,
                 },
           ),
         },
@@ -750,6 +786,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
               conversation={
               <div className="session-workspace with-rail">
               <section className="chat-column">
+                {workspaceInfo && <WorkspaceBanner workspace={workspaceInfo} />}
                 <SessionStream
                   displayItems={filteredDisplayItems}
                   totalEvents={events.length}
@@ -844,10 +881,15 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   submitting={submitting}
                   message={message}
                   runMode={runMode}
+                  workspaceMode={workspaceMode}
+                  onWorkspaceModeChange={setWorkspaceMode}
                   onRunModeChange={setRunMode}
                   planMode={planMode}
                   onPlanModeChange={setPlanMode}
-                  onEnvChange={setNewTaskEnv}
+                  onEnvChange={(env) => {
+                    setNewTaskEnv(env);
+                    if (env === "lobby") setWorkspaceMode("project");
+                  }}
                   onProjectChange={setNewTaskProject}
                   onPermissionMode={setPermissionMode}
                   onMessage={updateMessage}
@@ -882,6 +924,26 @@ export function SessionApp(props: { initialSessionId?: string }) {
             )}
       </main>
     </div>
+  );
+}
+
+export function WorkspaceBanner({ workspace }: { workspace: WorkspaceInfo }) {
+  return (
+    <section
+      className={`workspace-banner${workspace.exists ? "" : " workspace-banner-missing"}`}
+      aria-label="隔离工作区"
+    >
+      <strong>{workspace.exists ? "隔离工作区" : "隔离工作区不可用"}</strong>
+      <span>
+        原项目未自动修改 · 独立 worktree：<code>{workspace.path}</code>
+      </span>
+      <span>HEAD <code>{workspace.head.slice(0, 12)}</code></span>
+      {!workspace.exists && <span>风险：隔离路径已不存在，无法继续或复现。</span>}
+      {workspace.warnings.length > 0 && (
+        <span>快照提示：{workspace.warnings.join("；")}</span>
+      )}
+      <small>不会自动合并、commit 或 push。</small>
+    </section>
   );
 }
 
