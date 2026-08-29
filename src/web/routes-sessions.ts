@@ -94,7 +94,8 @@ export function registerSessionRoutes(
     if (!sessionManager) return context.json({ error: "会话服务未启用" }, 503);
     const session = sessionManager.get(context.req.param("id"));
     if (!session) return context.json({ error: "会话不存在" }, 404);
-    const delivery = projectDelivery(session.events());
+    const sessionSummary = session.summary();
+    const delivery = projectDelivery(session.events(), { title: sessionSummary.title, status: sessionSummary.status });
     const isolated = await sessionManager.workspaceInfo(session.id);
     if (!isolated) return context.json({ delivery, workspace: { mode: "project" } });
     const current = isolated.exists ? await captureWorkspaceFingerprint(isolated.path) : undefined;

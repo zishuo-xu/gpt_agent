@@ -12,7 +12,8 @@ import type {
   SessionSummary,
 } from "@shared/types.js";
 import { useProjectPicker, type OpenedProject } from "./use-project-picker";
-import { buildDisplayItems, buildDeliverySummary } from "./session-display";
+import { buildDisplayItems } from "./session-display";
+import type { DeliveryWorkbenchData } from "./DeliveryWorkbench";
 import type { ApprovalScope } from "./session-render";
 import {
   Composer,
@@ -36,12 +37,14 @@ import { ProjectPicker } from "./ProjectPicker";
 import { FlightRecorder } from "./flight-recorder";
 
 type WorkspaceInfo = {
-  mode: "isolated";
+  mode: "project" | "isolated";
   sourceCwd: string;
   path: string;
   head: string;
   warnings: string[];
   exists: boolean;
+  baseHead?: string;
+  currentHead?: string;
 };
 import {
   PlanDecisionOverlay,
@@ -117,6 +120,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [runMode, setRunMode] = useState(false);
   const [workspaceMode, setWorkspaceMode] = useState<"project" | "isolated">("project");
   const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(null);
+  const [delivery, setDelivery] = useState<DeliveryWorkbenchData | undefined>();
   /** 可选的人在闭环规划门：关闭时保留原有直接执行语义。 */
   const [planMode, setPlanMode] = useState(false);
   const [planDetail, setPlanDetail] = useState<TaskPlanDetail | null>(null);
@@ -141,17 +145,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
     () => buildDisplayItems(visibleEvents),
     [visibleEvents],
   );
-  // 交付摘要（简洁版）：会话完成且有写操作时，从事件流推导改动文件与验证结果
-  const delivery = useMemo(() => {
-    if (selected?.status !== "done" || !selected || selected.toolCallCount === 0) {
-      return undefined;
-    }
-    const summary = buildDeliverySummary(visibleEvents);
-    return summary.files.length > 0 || summary.verification
-      ? summary
-      : undefined;
-  }, [selected, visibleEvents]);
-
   // Trajectory 来源筛选：只保留目标来源的事件（消息始终保留作上下文）
   const filteredDisplayItems = useMemo(() => {
     if (sourceFilter === "all") return displayItems;
@@ -345,6 +338,13 @@ export function SessionApp(props: { initialSessionId?: string }) {
     return `${path}${joiner}project=${encodeURIComponent(key ?? currentProject)}`;
   }
 
+  function exportSession(sessionId: string) {
+    const anchor = document.createElement("a");
+    anchor.href = projectUrl(`/api/sessions/${sessionId}/export`);
+    anchor.download = `myagent-${sessionId}.html`;
+    anchor.click();
+  }
+
   useEffect(() => {
     void refreshSessions();
     const timer = window.setInterval(
@@ -436,6 +436,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
     if (!selectedId) {
       setEvents([]);
       setWorkspaceInfo(null);
+      setDelivery(undefined);
       return;
     }
     let cancelled = false;
@@ -456,6 +457,14 @@ export function SessionApp(props: { initialSessionId?: string }) {
         if (!cancelled) setWorkspaceInfo(null);
       }
     })();
+    void (async () => {
+      try {
+        const response = await fetch(projectUrl(`/api/sessions/${selectedId}/delivery`));
+        if (!response.ok) { if (!cancelled) setDelivery(undefined); return; }
+        const payload = await response.json() as { delivery?: DeliveryWorkbenchData; workspace?: WorkspaceInfo };
+        if (!cancelled) { setDelivery(payload.delivery); if (payload.workspace) setWorkspaceInfo(payload.workspace); }
+      } catch { if (!cancelled) setDelivery(undefined); }
+    })();
     setEvents([]);
     setResolvedPermissions(new Set());
     seenSeqs.current = new Set();
@@ -471,6 +480,9 @@ export function SessionApp(props: { initialSessionId?: string }) {
       if (seenSeqs.current.has(record.seq)) return;
       seenSeqs.current.add(record.seq);
       setEvents((current) => [...current, record]);
+      if (["run_finished", "done", "error", "interrupted", "acceptance_result", "review_result"].includes(record.event.type)) {
+        void fetch(projectUrl(`/api/sessions/${selectedId}/delivery`)).then(async (response) => response.ok ? (await response.json() as { delivery?: DeliveryWorkbenchData }).delivery : undefined).then((value) => { if (value) setDelivery(value); }).catch(() => undefined);
+      }
       // 分支切换事件实时刷新分支树（含跨端切换：CLI /branch 或 /goto）
       if (record.event.type === "branch_switch") {
         void refreshBranches();
@@ -753,12 +765,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
               onResume={() => void resumeInterrupted()}
               onNew={startNewSession}
               onExport={() => {
-                const anchor = document.createElement("a");
-                anchor.href = projectUrl(
-                  `/api/sessions/${selected.id}/export`,
-                );
-                anchor.download = `myagent-${selected.id}.html`;
-                anchor.click();
+                exportSession(selected.id);
               }}
               onDelete={() => {
                 if (
@@ -808,6 +815,16 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   sourceFilter={sourceFilter}
                   onSourceFilter={setSourceFilter}
                   delivery={delivery}
+                  workspace={workspaceInfo ?? undefined}
+                  onContinue={() => {
+                    document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                  }}
+                  onCopyPath={() => {
+                    const path = workspaceInfo?.path;
+                    if (!path) return;
+                    void navigator.clipboard?.writeText(path).catch(() => setError("复制隔离路径失败，请手动复制"));
+                  }}
+                  onExport={() => exportSession(selected.id)}
                 />
                 <>
                   {runBoundsPreview && (

@@ -175,3 +175,6 @@ push 到 main / PR 时 GitHub Actions 自动跑两个 job：
 ## 项目约定（记忆）
 
 - 依赖管理用 `pnpm`（勿用 `npm`）；测试命令 `pnpm test`
+# 交付验收
+
+Web 会话终态提供交付验收工作台：展示任务状态、最新机器验收、Review、完整成功文件清单及隔离工作区状态。交付信息由事件流重建并通过 `/api/sessions/:id/delivery` 提供。隔离任务不会自动合并、commit 或 push；文件清单也不等同于完整 Git diff，详情中的 diff 可能缺失。
