@@ -74,7 +74,7 @@ test.describe.serial("provider-free 计划批准门", () => {
           writeSse(
             response,
             {
-              content: `## 目标\n${revised ? "在不修改公开 API 的前提下完成" : "完成计划门演示"}\n## 执行步骤\n1. 检查现状\n2. 实施最小修改\n## 预计修改文件\n- 无（演示任务）\n## 验证方式\n- 检查最终回复\n## 风险与待确认\n- 无`,
+              content: `## 目标\n${revised ? "在不修改公开 API 的前提下完成" : "完成计划门演示"}\n## 执行步骤\n1. 检查现状\n2. 实施最小修改\n## 预计修改文件\n- 无（演示任务）\n## 验证方式\n- \`true\`\n## 风险与待确认\n- 无`,
             },
           );
           return;
@@ -125,11 +125,11 @@ test.describe.serial("provider-free 计划批准门", () => {
   test("只读规划 → 反馈修订 → 弹窗批准 → 同会话执行", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("main").getByRole("button", { name: "＋ 新会话" }).click();
-    await page.getByText("先规划再执行", { exact: true }).click();
     await page.getByPlaceholder("例如：检查这个项目，修复当前失败的测试").fill("完成计划门演示");
-    await page.getByRole("button", { name: "生成计划" }).click();
+    await expect(page.locator(".new-task-panel .plan-mode-toggle input")).toBeChecked();
+    await page.locator(".new-task-panel button.save-button").click();
 
-    let dialog = page.getByRole("dialog", { name: "计划已就绪，请选择下一步" });
+    let dialog = page.getByRole("dialog", { name: "任务契约已就绪，请选择下一步" });
     await expect(dialog).toBeVisible({ timeout: 30_000 });
     await expect(dialog.getByText("完成计划门演示", { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 375, height: 812 });
@@ -140,7 +140,7 @@ test.describe.serial("provider-free 计划批准门", () => {
     await dialog.getByPlaceholder(/公开 API/).fill("不要修改公开 API");
     await dialog.getByRole("button", { name: "修改计划" }).click();
 
-    dialog = page.getByRole("dialog", { name: "计划已就绪，请选择下一步" });
+    dialog = page.getByRole("dialog", { name: "任务契约已就绪，请选择下一步" });
     await expect(dialog).toBeVisible({ timeout: 30_000 });
     await expect(dialog.getByText(/在不修改公开 API 的前提下完成/)).toBeVisible();
     await dialog.getByRole("button", { name: "批准并开始执行" }).click();
@@ -149,6 +149,7 @@ test.describe.serial("provider-free 计划批准门", () => {
     await expect(page.getByText("计划已批准，开始执行")).toBeVisible({ timeout: 30_000 });
     const result = page.getByText("已按批准计划执行。");
     await expect(result).toBeAttached({ timeout: 30_000 });
+    await expect(page.getByText(/验收通过/).first()).toBeAttached({ timeout: 30_000 });
     await result.scrollIntoViewIfNeeded();
     await expect(result).toBeVisible();
     const ledger = page.locator(".ledger-card");

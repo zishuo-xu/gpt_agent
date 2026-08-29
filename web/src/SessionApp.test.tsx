@@ -879,17 +879,17 @@ describe("Composer（无人值守任务模式开关）", () => {
     await on.act(async () => on.root.unmount());
   });
 
-  it("规划模式可切换，开启后主按钮显示生成计划", async () => {
+  it("规划模式可切换，开启后主按钮提示理解任务", async () => {
     const rendered = await renderComposer(false, true);
     const toggle = rendered.container.querySelector(
       ".plan-mode-toggle input",
     ) as HTMLInputElement | null;
     assert.ok(toggle);
     assert.equal(toggle!.checked, true);
-    assert.match(rendered.container.textContent ?? "", /先规划再执行/);
+    assert.match(rendered.container.textContent ?? "", /智能启动（推荐）/);
     assert.match(
       Array.from(rendered.container.querySelectorAll("button.save-button")).at(-1)?.textContent ?? "",
-      /生成计划/,
+      /让 MyAgent 理解任务/,
     );
     await rendered.act(async () => {
       toggle!.dispatchEvent(new MouseEvent("click", { bubbles: true }));

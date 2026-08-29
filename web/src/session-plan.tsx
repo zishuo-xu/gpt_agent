@@ -1,4 +1,5 @@
 import { RichText } from "./session-rich-text";
+import type { TaskContract } from "@shared/types.js";
 
 export interface TaskPlanDetail {
   planId: string;
@@ -8,6 +9,7 @@ export interface TaskPlanDetail {
   content?: string;
   feedback?: string;
   error?: string;
+  contract?: TaskContract;
 }
 
 /** 人在闭环中的计划决策弹窗：计划本身只读，三种出口均显式。 */
@@ -32,13 +34,28 @@ export function PlanDecisionOverlay(props: {
         <header className="plan-decision-header">
           <div>
             <span className="plan-decision-kicker">只读规划 · 第 {props.plan.revision} 版</span>
-            <h2 id="plan-decision-title">计划已就绪，请选择下一步</h2>
+            <h2 id="plan-decision-title">任务契约已就绪，请选择下一步</h2>
             <p>规划阶段仅使用 Read、Grep、Glob，没有修改当前工作区。</p>
           </div>
           <span className="plan-readonly-badge">只读</span>
         </header>
 
         <div className="plan-task">原始任务：{props.plan.task}</div>
+        <section
+          className="plan-contract-summary"
+          aria-label="任务契约"
+        >
+          <strong>批准后自动执行的机器验收</strong>
+          {props.plan.contract?.checks?.length ? (
+            props.plan.contract.checks.map((check) => (
+              <code key={check}>{check}</code>
+            ))
+          ) : (
+            <span>
+              未配置安全、可识别的机器验收；完成状态不会冒充验收通过。
+            </span>
+          )}
+        </section>
         <div className="plan-content">
           <RichText text={props.plan.content ?? "计划正文暂不可用。"} />
         </div>

@@ -59,7 +59,7 @@ export function NewTaskOverlay(props: {
         <div>
           <h2>今天想让 MyAgent 做什么？</h2>
           <p>
-            先选择执行环境；项目下可读写文件，大厅只读不修改任何文件。
+            先告诉 MyAgent 你想完成什么；它会先理解任务，再请你确认执行方案。
           </p>
         </div>
       </div>

@@ -264,6 +264,17 @@ test("批准计划初始化首个 Todo/Ledger，并将 TodoWrite 状态同步到
   }
 });
 
+test("批准带显式验收命令的自然语言计划进入验收链", async () => {
+  const plan = "## 目标\n完成任务\n## 执行步骤\n1. 实施修改\n## 预计修改文件\n- 无\n## 验证方式\n- `true`\n## 风险与待确认\n- 无";
+  const { session, collector } = await setup([response(plan), response("完成")]);
+  await session.startPlan("完成一个自然语言任务");
+  const proposed = await collector.waitFor("plan_proposed");
+  assert.equal(proposed.event.type === "plan_proposed" ? proposed.event.contract?.checks[0] : undefined, "true");
+  await session.decidePlan("approved");
+  await collector.waitFor("run_finished");
+  assert.ok(collector.eventsOf("acceptance_result").some((record) => record.event.type === "acceptance_result" && record.event.status === "passed"));
+});
+
 test("计划可按反馈修订，也可选择仅分析后结束", async () => {
   const { session, collector, client } = await setup([
     response(structuredPlan("第一版")),

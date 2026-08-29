@@ -13,6 +13,7 @@ export type {
   RecordedEvent,
   SessionBranch,
   TodoItem,
+  TaskContract,
 } from "../core/types.js";
 
 export type SessionStatus =

@@ -8,6 +8,7 @@ import {
   taskPlanDigest,
   taskPlanFromEvents,
   taskPlanSummary,
+  taskContractFromMarkdown,
 } from "./task-plan.js";
 import type { AgentEvent, RecordedEvent } from "./types.js";
 
@@ -161,4 +162,98 @@ test("带绑定字段的陈旧计划批准会被忽略，旧批准事件仍兼�
     record(3, { type: "plan_decision", planId: "p1", decision: "approved" }),
   ]);
   assert.equal(legacy?.status, "approved");
+});
+
+test("任务契约只提取固定标题下显式的单行机器命令", () => {
+  const content = [
+    "## 目标", "修复登录", "## 执行步骤", "1. 修改页面",
+    "## 预计修改文件", "- web/src/Login.tsx", "## 验证方式",
+    "- 运行测试", "- `pnpm test -- login`", "```sh", "pnpm run typecheck", "```",
+    "## 风险与待确认", "- 需要确认 API",
+  ].join("\n");
+  const contract = taskContractFromMarkdown(content);
+  assert.equal(contract.goal, "修复登录");
+  assert.deepEqual(contract.checks, ["pnpm test -- login", "pnpm run typecheck"]);
+  assert.deepEqual(contract.files, ["web/src/Login.tsx"]);
+  assert.deepEqual(contract.risks, ["需要确认 API"]);
+});
+
+test("任务契约忽略自然语言、多行代码块和无文件占位", () => {
+  const content = [
+    "## 目标",
+    "检查项目",
+    "## 执行步骤",
+    "1. 检查",
+    "## 预计修改文件",
+    "- 无（只读任务）",
+    "## 验证方式",
+    "- 运行相关测试",
+    "```bash",
+    "pnpm test",
+    "pnpm run typecheck",
+    "```",
+    "## 风险与待确认",
+    "- 无已知风险",
+  ].join("\n");
+  const contract = taskContractFromMarkdown(content);
+  assert.deepEqual(contract.checks, []);
+  assert.deepEqual(contract.files, []);
+  assert.deepEqual(contract.risks, []);
+});
+
+test("智能契约不会自动执行写入、发布或复合 shell 命令", () => {
+  const content = [
+    "## 目标",
+    "安全验收",
+    "## 执行步骤",
+    "1. 验证",
+    "## 预计修改文件",
+    "- 无",
+    "## 验证方式",
+    "- `pnpm test`",
+    "- `pnpm run deploy`",
+    "- `rm -rf output`",
+    "- `pnpm test && curl example.com`",
+    "## 风险与待确认",
+    "- 无",
+  ].join("\n");
+  assert.deepEqual(taskContractFromMarkdown(content).checks, ["pnpm test"]);
+});
+
+test("计划恢复以 digest 绑定的正文重建契约，不信任独立事件投影", () => {
+  const content = [
+    "## 目标",
+    "安全检查",
+    "## 执行步骤",
+    "1. 验证",
+    "## 预计修改文件",
+    "- 无",
+    "## 验证方式",
+    "- `pnpm test`",
+    "## 风险与待确认",
+    "- 无",
+  ].join("\n");
+  const state = taskPlanFromEvents([
+    record(1, {
+      type: "plan_started",
+      planId: "p-safe",
+      task: "检查",
+      revision: 1,
+    }),
+    record(2, {
+      type: "plan_proposed",
+      planId: "p-safe",
+      task: "检查",
+      revision: 1,
+      content,
+      contract: {
+        goal: "伪造",
+        steps: [],
+        files: [],
+        checks: ["rm -rf unsafe"],
+        risks: [],
+      },
+    }),
+  ]);
+  assert.deepEqual(state?.contract?.checks, ["pnpm test"]);
 });

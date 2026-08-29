@@ -121,7 +121,7 @@ export function Composer(props: {
               props.onPlanModeChange(event.target.checked)
             }
           />
-          先规划再执行
+          智能启动（推荐）
         </label>
         <span>
           {props.busy
@@ -149,7 +149,7 @@ export function Composer(props: {
           {props.submitting
             ? "发送中…"
             : props.planMode
-              ? "生成计划"
+              ? "让 MyAgent 理解任务"
               : props.runMode
               ? "启动任务"
               : props.selected

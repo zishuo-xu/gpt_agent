@@ -31,6 +31,13 @@ describe("PlanDecisionOverlay（人在闭环计划决策）", () => {
           revision: 2,
           status: "awaiting_approval",
           content: "## 目标\n完成登录\n## 验证方式\n- pnpm test",
+          contract: {
+            goal: "完成登录",
+            steps: [],
+            files: [],
+            checks: ["pnpm test"],
+            risks: [],
+          },
         }}
         feedback={feedback}
         submitting={false}
@@ -48,6 +55,8 @@ describe("PlanDecisionOverlay（人在闭环计划决策）", () => {
     assert.equal(container.querySelector("[role=dialog]")?.getAttribute("aria-modal"), "true");
     assert.match(container.textContent ?? "", /只读规划 · 第 2 版/);
     assert.match(container.textContent ?? "", /Read、Grep、Glob/);
+    assert.match(container.textContent ?? "", /批准后自动执行的机器验收/);
+    assert.match(container.textContent ?? "", /pnpm test/);
     assert.ok(container.querySelector("h2"), "Markdown 目标标题应渲染");
     const buttons = Array.from(container.querySelectorAll("button"));
     const revise = buttons.find((button) => button.textContent?.includes("修改计划"));
@@ -78,6 +87,45 @@ describe("PlanDecisionOverlay（人在闭环计划决策）", () => {
       "analysis_only",
       "approved",
     ]);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("无可靠检查时明确说明不会冒充机器验收", async () => {
+    const [{ act }, { createRoot }, { PlanDecisionOverlay }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./session-plan"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <PlanDecisionOverlay
+          plan={{
+            planId: "p2",
+            task: "只读分析",
+            revision: 1,
+            status: "awaiting_approval",
+            content: "## 目标\n只读分析",
+            contract: {
+              goal: "只读分析",
+              steps: [],
+              files: [],
+              checks: [],
+              risks: [],
+            },
+          }}
+          feedback=""
+          submitting={false}
+          onFeedback={() => undefined}
+          onDecision={async () => undefined}
+        />,
+      );
+    });
+    assert.match(container.textContent ?? "", /未配置安全、可识别的机器验收/);
+    assert.match(container.textContent ?? "", /不会冒充验收通过/);
     await act(async () => root.unmount());
     container.remove();
   });

@@ -18,6 +18,15 @@ export interface PlanExecutionUnit {
   content: string;
 }
 
+/** 用户批准后执行的最小任务契约；旧计划事件可不带此字段。 */
+export interface TaskContract {
+  goal: string;
+  steps: PlanExecutionUnit[];
+  files: string[];
+  checks: string[];
+  risks: string[];
+}
+
 /** 任务执行账本单元状态（系统自动记账 + 模型显式确认双通道合并） */
 export type LedgerStatus =
   | "pending"
@@ -136,6 +145,7 @@ export type AgentEvent =
       content: string;
       digest?: string;
       units?: PlanExecutionUnit[];
+      contract?: TaskContract;
     }
   | {
       type: "plan_decision";

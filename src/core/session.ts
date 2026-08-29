@@ -47,6 +47,7 @@ import {
   buildTaskPlanningPrompt,
   normalizePlanText,
   extractPlanExecutionUnits,
+  taskContractFromMarkdown,
   taskPlanDigest,
   taskPlanFromEvents,
   taskPlanSummary,
@@ -703,9 +704,23 @@ export class AgentSession {
       return;
     }
 
-    const units = plan.units ?? extractPlanExecutionUnits(plan.content);
+    // 用户批准的是 digest 绑定的 Markdown；执行数据必须现场从同一正文重建，
+    // 不能让独立持久化的 contract 字段成为命令注入通道。
+    const contract = taskContractFromMarkdown(plan.content);
+    const units = plan.units ?? contract.steps;
     if (plan.task.startsWith("/run")) {
       this.startRunTask(parseRunCommand(plan.task), plan.content, units);
+      return;
+    }
+    if (contract.checks.length > 0) {
+      this.startRunTask({
+        description: plan.task,
+        ...(contract.goal ? { goal: contract.goal } : {}),
+        checks: contract.checks,
+        hardRules: [],
+        semanticBounds: [],
+        permission: this.#permissions.mode,
+      }, plan.content, units);
       return;
     }
     const planTaskId = `plan:${plan.planId}`;
@@ -853,6 +868,7 @@ export class AgentSession {
         content,
         digest: taskPlanDigest(options.revision, content),
         units: extractPlanExecutionUnits(content),
+        contract: taskContractFromMarkdown(content),
       });
     } catch (error) {
       const interrupted =
