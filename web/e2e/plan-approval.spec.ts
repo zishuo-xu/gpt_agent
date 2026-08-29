@@ -126,7 +126,9 @@ test.describe.serial("provider-free 计划批准门", () => {
     await page.goto("/");
     await page.getByRole("main").getByRole("button", { name: "＋ 新会话" }).click();
     await page.getByPlaceholder("例如：检查这个项目，修复当前失败的测试").fill("完成计划门演示");
-    await expect(page.locator(".new-task-panel .plan-mode-toggle input")).toBeChecked();
+    const smartStart = page.locator(".new-task-panel .plan-mode-toggle input");
+    await expect(smartStart).not.toBeChecked();
+    await smartStart.check();
     await page.locator(".new-task-panel button.save-button").click();
 
     let dialog = page.getByRole("dialog", { name: "任务契约已就绪，请选择下一步" });

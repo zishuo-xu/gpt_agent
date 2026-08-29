@@ -59,7 +59,7 @@ export function NewTaskOverlay(props: {
         <div>
           <h2>今天想让 MyAgent 做什么？</h2>
           <p>
-            先告诉 MyAgent 你想完成什么；它会先理解任务，再请你确认执行方案。
+            选择适合你的执行方式，再告诉 MyAgent 想完成什么。
           </p>
         </div>
       </div>

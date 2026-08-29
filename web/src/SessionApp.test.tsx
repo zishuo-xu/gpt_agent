@@ -886,7 +886,7 @@ describe("Composer（无人值守任务模式开关）", () => {
     ) as HTMLInputElement | null;
     assert.ok(toggle);
     assert.equal(toggle!.checked, true);
-    assert.match(rendered.container.textContent ?? "", /智能启动（推荐）/);
+    assert.match(rendered.container.textContent ?? "", /先理解再执行/);
     assert.match(
       Array.from(rendered.container.querySelectorAll("button.save-button")).at(-1)?.textContent ?? "",
       /让 MyAgent 理解任务/,

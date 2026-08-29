@@ -121,7 +121,7 @@ export function Composer(props: {
               props.onPlanModeChange(event.target.checked)
             }
           />
-          智能启动（推荐）
+          先理解再执行
         </label>
         <span>
           {props.busy

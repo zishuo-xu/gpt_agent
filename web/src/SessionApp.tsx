@@ -113,18 +113,13 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(null);
   const [delivery, setDelivery] = useState<DeliveryWorkbenchData | undefined>();
   /** 可选的人在闭环规划门：关闭时保留原有直接执行语义。 */
-  const [planMode, setPlanMode] = useState(true);
+  const [planMode, setPlanMode] = useState(false);
   const [planDetail, setPlanDetail] = useState<TaskPlanDetail | null>(null);
   const [planFeedback, setPlanFeedback] = useState("");
   const [planSubmitting, setPlanSubmitting] = useState(false);
   const chatStreamRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
-  // 智能启动只作为新会话默认值；进入已有会话后恢复普通对话语义。
-  useEffect(() => {
-    if (showNewTask && !selectedId) setPlanMode(true);
-    else if (selectedId) setPlanMode(false);
-  }, [selectedId, showNewTask]);
   const previousStatuses = useRef<Record<string, SessionStatus>>({});
   const appliedInitialSessionId = useRef<string | undefined>(undefined);
   const seenSeqs = useRef<Set<number>>(new Set());
@@ -394,7 +389,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
     setNewTaskEnv(currentProject === "lobby" ? "lobby" : "project");
     setNewTaskProject(currentProject === "lobby" ? "" : currentProject);
     setWorkspaceMode("project");
-    setPlanMode(true);
     setShowNewTask(true);
   }
 
