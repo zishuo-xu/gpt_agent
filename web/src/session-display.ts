@@ -31,6 +31,13 @@ export type DisplayItem =
       deniedReason?: string;
     }
   | {
+      kind: "clarification";
+      seq: number;
+      ts: string;
+      event: Extract<RecordedEvent["event"], { type: "need_user" }>;
+      resolvedAnswer?: string;
+    }
+  | {
       kind: "subtask";
       seq: number;
       start: Record<string, any>;
@@ -108,6 +115,7 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
   // 任务执行账本：taskId → 单元累积（同 taskId 的 ledger_update 合并为一张卡）
   const ledgerUnits = new Map<string, LedgerUnit[]>();
   const runStartedDescriptions = new Map<string, string>();
+  const clarificationAnswers = new Map<string, string>();
   for (const { event } of events) {
     if (event.type === "tool_result") {
       toolResults.set(String(event.callId), event);
@@ -131,6 +139,8 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
       ledgerUnits.set(String(event.taskId), list);
     } else if (event.type === "run_started") {
       runStartedDescriptions.set(String(event.taskId), event.description);
+    } else if (event.type === "user" && event.answerTo) {
+      clarificationAnswers.set(event.answerTo, event.text);
     } else if (event.type === "plan_proposed") {
       runStartedDescriptions.set(`plan:${event.planId}`, event.task);
     }
@@ -329,7 +339,19 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
         );
         break;
       case "need_user":
-        system(seq, `需要你的决定：${event.question}`, "warning");
+        if (event.questionId && event.options?.length) {
+          items.push({
+            kind: "clarification",
+            seq,
+            ts,
+            event,
+            ...(clarificationAnswers.has(event.questionId)
+              ? { resolvedAnswer: clarificationAnswers.get(event.questionId)! }
+              : {}),
+          });
+        } else {
+          system(seq, `需要你的决定：${event.question}`, "warning");
+        }
         break;
       case "done":
         system(seq, "✓ 本轮任务已完成", "done");

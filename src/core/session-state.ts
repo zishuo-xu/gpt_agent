@@ -133,7 +133,7 @@ export class SessionStateMachine {
       }
     }
     if (event.type === "done") this.#status = "done";
-    if (event.type === "need_user") this.#status = "done";
+    if (event.type === "need_user") this.#status = "waiting_user";
     if (event.type === "error") this.#status = "error";
     if (event.type === "interrupted") this.#status = "interrupted";
     if (event.type === "branch_switch") {

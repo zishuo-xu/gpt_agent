@@ -21,6 +21,7 @@ export type SessionStatus =
   | "running"
   | "waiting_permission"
   | "waiting_plan"
+  | "waiting_user"
   | "done"
   | "error"
   | "interrupted";

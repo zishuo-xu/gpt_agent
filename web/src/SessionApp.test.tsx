@@ -410,6 +410,27 @@ describe("buildDisplayItems（会话回放事件流转换）", () => {
   it("空事件流返回空列表", () => {
     assert.deepEqual(buildDisplayItems([]), []);
   });
+
+  it("结构化 need_user 生成澄清卡，后续 answerTo 将卡片标为已回答", () => {
+    const items = buildDisplayItems([
+      ev(1, {
+        type: "need_user",
+        questionId: "q1",
+        question: "选择兼容策略",
+        options: [
+          { id: "keep", label: "保留兼容" },
+          { id: "break", label: "直接升级" },
+        ],
+        recommendedOptionId: "keep",
+      }),
+      ev(2, { type: "user", text: "保留兼容", answerTo: "q1" }),
+    ]);
+    assert.equal(items[0]?.kind, "clarification");
+    if (items[0]?.kind === "clarification") {
+      assert.equal(items[0].event.recommendedOptionId, "keep");
+      assert.equal(items[0].resolvedAnswer, "保留兼容");
+    }
+  });
 });
 
 describe("SessionListSidebar（会话列表交互）", () => {

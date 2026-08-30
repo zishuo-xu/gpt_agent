@@ -48,7 +48,7 @@ test("状态切换：user/ask/done/need_user/error/interrupted 驱动 status", (
   assert.equal(machine.status, "done");
   machine.apply({ type: "user", text: "again" }, deps);
   machine.apply({ type: "need_user", question: "q" }, deps);
-  assert.equal(machine.status, "done", "need_user 视作完成（可继续）");
+  assert.equal(machine.status, "waiting_user", "need_user 进入等待用户回答");
   machine.apply({ type: "error", message: "e" }, deps);
   assert.equal(machine.status, "error");
   machine.apply({ type: "interrupted", scope: "loop" }, deps);

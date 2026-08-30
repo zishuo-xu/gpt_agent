@@ -161,6 +161,19 @@ export function registerSessionRoutes(
       // 前端对"已有会话发消息"使用 message 字段，对"新建会话"使用 task；此处统一兼容
       const task = (body.task ?? body.message)?.trim();
       if (!task) return context.json({ error: "消息不能为空" }, 400);
+      if (
+        typeof (session as { summary?: unknown }).summary === "function" &&
+        session.summary().status === "waiting_user"
+      ) {
+        const questionId = session.pendingQuestionId();
+        if (questionId && session.answerQuestion(questionId, task)) {
+          return context.json({
+            accepted: true,
+            queued: false,
+            answerTo: questionId,
+          });
+        }
+      }
       if (body.planMode === true) {
         await session.startPlan(task);
         return context.json({ accepted: true, queued: false });
@@ -212,6 +225,43 @@ export function registerSessionRoutes(
       return context.json(
         { error: error instanceof Error ? error.message : "发送失败" },
         409,
+      );
+    }
+  });
+
+  // 结构化澄清的明确入口；答案仍通过同一会话消息链继续模型历史。
+  app.post("/api/sessions/:id/answer", async (context) => {
+    const target = await resolveProject(context);
+    const session = target.sessionManager?.get(context.req.param("id"));
+    if (!session) return context.json({ error: "会话不存在" }, 404);
+    try {
+      const body = (await context.req.json()) as {
+        questionId?: unknown;
+        answer?: unknown;
+        optionId?: unknown;
+      };
+      const answer = typeof body.answer === "string" ? body.answer.trim() : "";
+      const optionId =
+        typeof body.optionId === "string" ? body.optionId.trim() : "";
+      const text = answer || optionId;
+      if (!text) return context.json({ error: "答案不能为空" }, 400);
+      const questionId =
+        typeof body.questionId === "string"
+          ? body.questionId
+          : session.pendingQuestionId();
+      if (session.summary().status !== "waiting_user" || !questionId) {
+        return context.json({ error: "当前没有等待回答的问题" }, 409);
+      }
+      if (!session.answerQuestion(questionId, text)) {
+        return context.json({ error: "问题已回答或答案无效" }, 409);
+      }
+      return context.json({ accepted: true, answer: text, answerTo: questionId });
+    } catch (error) {
+      return context.json(
+        {
+          error: error instanceof Error ? error.message : "提交答案失败",
+        },
+        400,
       );
     }
   });

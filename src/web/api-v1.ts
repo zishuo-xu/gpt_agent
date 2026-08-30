@@ -202,6 +202,19 @@ export function createApiV1(options: ApiV1Options): Hono {
         400,
       );
     }
+    if (session.summary().status === "waiting_user") {
+      const questionId = session.pendingQuestionId();
+      if (!questionId || !session.answerQuestion(questionId, message)) {
+        return context.json(
+          { ok: false, error: "当前问题已回答或不可用", code: "conflict" },
+          409,
+        );
+      }
+      return context.json({
+        ok: true,
+        data: { accepted: true, queued: false, answerTo: questionId },
+      });
+    }
     const queued = session.isProcessing();
     void session.sendInput(
       message,
@@ -209,6 +222,31 @@ export function createApiV1(options: ApiV1Options): Hono {
       body.steer === true ? { steer: true } : undefined,
     );
     return context.json({ ok: true, data: { accepted: true, queued } });
+  });
+
+  app.post("/sessions/:id/questions/:questionId/answer", async (context) => {
+    const { sessionManager } = await resolveV1Project(context);
+    const session = sessionManager?.get(context.req.param("id"));
+    if (!session) {
+      return context.json({ ok: false, error: "会话不存在", code: "not_found" }, 404);
+    }
+    let body: { answer?: unknown };
+    try {
+      body = (await context.req.json()) as typeof body;
+    } catch {
+      return context.json({ ok: false, error: "请求体需为 JSON", code: "invalid" }, 400);
+    }
+    const answer = typeof body.answer === "string" ? body.answer.trim() : "";
+    if (!answer) {
+      return context.json({ ok: false, error: "答案不能为空", code: "invalid" }, 400);
+    }
+    if (!session.answerQuestion(context.req.param("questionId"), answer)) {
+      return context.json(
+        { ok: false, error: "当前问题已回答或不可用", code: "conflict" },
+        409,
+      );
+    }
+    return context.json({ ok: true, data: { accepted: true } });
   });
 
   app.post("/sessions/:id/approvals/:callId", async (context) => {
@@ -285,6 +323,16 @@ export type V1Event =
   | { seq: number; ts: string; type: "tool.call"; tool: string; target?: string; args: unknown }
   | { seq: number; ts: string; type: "tool.result"; tool: string; summary: string; isError: boolean }
   | { seq: number; ts: string; type: "approval.request"; callId: string; tool: string; risk: string }
+  | {
+      seq: number;
+      ts: string;
+      type: "interaction.question";
+      question: string;
+      questionId?: string;
+      options?: Array<{ id: string; label: string; description?: string }>;
+      recommendedOptionId?: string;
+      context?: string;
+    }
   | { seq: number; ts: string; type: "run.started"; description: string }
   | { seq: number; ts: string; type: "run.finished"; status: string; reason?: string }
   | {
@@ -375,6 +423,18 @@ function mapV1Event(
         tool: event.call.tool,
         risk: event.risk,
         ...(event.purpose ? { purpose: event.purpose } : {}),
+      };
+    case "need_user":
+      return {
+        ...base,
+        type: "interaction.question",
+        question: event.question,
+        ...(event.questionId ? { questionId: event.questionId } : {}),
+        ...(event.options ? { options: event.options } : {}),
+        ...(event.recommendedOptionId
+          ? { recommendedOptionId: event.recommendedOptionId }
+          : {}),
+        ...(event.context ? { context: event.context } : {}),
       };
     case "run_started":
       return { ...base, type: "run.started", description: event.description };

@@ -551,6 +551,84 @@ test("restore：恢复事件流 + 检测崩溃残留的中断任务", async () =
   assert.equal(interrupted?.description, "崩溃任务");
 });
 
+test("restore：waiting_user 回答后沿用原 taskId 续跑", async () => {
+  const ts = "2026-08-30T00:00:00.000Z";
+  const questionCall = toolCall("restored-question", "AskUser", "兼容策略", {
+    question: "是否保留旧接口？",
+    options: [
+      { id: "keep", label: "保留" },
+      { id: "remove", label: "移除" },
+    ],
+  });
+  const restoredEvents: AgentSessionEvent[] = [
+    { seq: 1, ts, event: { type: "user", text: "/run 恢复任务" } },
+    {
+      seq: 2,
+      ts,
+      event: {
+        type: "run_started",
+        taskId: "task-restored-question",
+        description: "恢复后继续",
+        permissionMode: "trust",
+        hardRules: [],
+        taskOptions: {
+          description: "恢复后继续",
+          permission: "trust",
+          hardRules: [],
+          semanticBounds: [],
+        },
+      },
+    },
+    { seq: 3, ts, event: { type: "tool_call", call: questionCall } },
+    {
+      seq: 4,
+      ts,
+      event: {
+        type: "tool_result",
+        callId: questionCall.id,
+        summary: "等待用户回答",
+      },
+    },
+    {
+      seq: 5,
+      ts,
+      event: {
+        type: "need_user",
+        questionId: questionCall.id,
+        question: "是否保留旧接口？",
+        options: [
+          { id: "keep", label: "保留" },
+          { id: "remove", label: "移除" },
+        ],
+      },
+    },
+  ];
+  const { session, collector } = await setup([response("恢复后完成。")], {
+    restoredEvents,
+  });
+
+  assert.equal(session.summary().status, "waiting_user");
+  assert.equal(session.answerQuestion("restored-question", "保留旧接口"), true);
+  await collector.waitFor("run_finished");
+
+  const finished = collector.eventsOf("run_finished")[0]?.event;
+  assert.equal(finished?.type, "run_finished");
+  if (finished?.type === "run_finished") {
+    assert.equal(finished.taskId, "task-restored-question");
+    assert.equal(finished.status, "completed");
+  }
+  assert.equal(session.summary().interruptedTask, undefined);
+  const answered = session.events().find(
+    (record) =>
+      record.event.type === "user" &&
+      record.event.answerTo === "restored-question",
+  );
+  assert.equal(
+    answered?.event.type === "user" ? answered.event.text : "",
+    "保留旧接口",
+  );
+});
+
 test("/run 任务：run_started → 完成 → run_finished + 权限档恢复", async () => {
   const { session, collector } = await setup(
     [response("任务完成。")],
@@ -578,6 +656,62 @@ test("/run 任务：run_started → 完成 → run_finished + 权限档恢复", 
   assert.equal(finishedEvent.reason, "done");
   // 权限档任务期 trust → 结束后恢复 normal
   assert.equal(session.summary().permissionMode, "normal");
+});
+
+test("/run 遇到 AskUser 时暂停验收，回答后沿用同一 taskId 完成", async () => {
+  const { session, collector } = await setup(
+    [
+      response("需要关键选择。", {
+        toolCalls: [
+          toolCall("question-run", "AskUser", "兼容策略", {
+            question: "是否保留旧接口？",
+            options: [
+              { id: "keep", label: "保留" },
+              { id: "remove", label: "移除" },
+            ],
+            recommended_option_id: "keep",
+          }),
+        ],
+      }),
+      response("已按回答完成。"),
+    ],
+    { mode: "trust" },
+  );
+  const running = session.runTask({
+    description: "带澄清的任务",
+    checks: ["true"],
+    permission: "trust",
+    hardRules: [],
+    semanticBounds: [],
+  });
+
+  const question = await collector.waitFor("need_user");
+  assert.equal(session.summary().status, "waiting_user");
+  assert.equal(collector.eventsOf("acceptance_started").length, 0);
+  assert.equal(collector.eventsOf("run_finished").length, 0);
+  const taskId = (
+    collector.eventsOf("run_started")[0]!.event as { taskId: string }
+  ).taskId;
+  assert.equal(
+    session.answerQuestion(
+      question.event.type === "need_user" ? question.event.questionId! : "",
+      "保留旧接口",
+    ),
+    true,
+  );
+  await running;
+
+  assert.equal(collector.eventsOf("acceptance_started").length, 1);
+  const finished = collector.eventsOf("run_finished")[0]?.event;
+  assert.equal(finished?.type, "run_finished");
+  if (finished?.type === "run_finished") {
+    assert.equal(finished.taskId, taskId);
+    assert.equal(finished.status, "completed");
+  }
+  const answer = collector.eventsOf("user").find(
+    (record) => record.event.type === "user" && record.event.answerTo === "question-run",
+  );
+  assert.equal(answer?.event.type === "user" ? answer.event.text : "", "保留旧接口");
 });
 
 test("checks 首轮失败后修复，完整 checks 重跑并可信完成", async () => {

@@ -456,7 +456,7 @@ export class AgentSessionManager {
 
   /**
    * 保留策略：清理超过 days 天未更新的历史会话（保留策略守卫，
-   * 运行中/等待审批的会话跳过）。返回清理数量。
+   * 运行中/等待用户决定的会话跳过）。返回清理数量。
    */
   async purgeOldSessions(days: number): Promise<number> {
     if (!Number.isFinite(days) || days <= 0) return 0;
@@ -465,7 +465,9 @@ export class AgentSessionManager {
     for (const summary of this.list()) {
       if (
         summary.status === "running" ||
-        summary.status === "waiting_permission"
+        summary.status === "waiting_permission" ||
+        summary.status === "waiting_plan" ||
+        summary.status === "waiting_user"
       ) {
         continue;
       }

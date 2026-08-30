@@ -53,6 +53,7 @@ const STATUS_LABEL: Record<string, string> = {
   running: "运行中",
   waiting_permission: "等待审批",
   waiting_plan: "等待计划确认",
+  waiting_user: "等待你的回答",
   done: "已完成",
   error: "失败",
   interrupted: "中断",

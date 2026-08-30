@@ -5,6 +5,7 @@ import { formatTime, formatTokens } from "./session-format";
 import { RichText } from "./session-rich-text";
 import {
   ApprovalCard,
+  ClarificationCard,
   LedgerCard,
   SubtaskCard,
   ToolCard,
@@ -31,6 +32,12 @@ export function ItemCard(props: {
     granted: boolean,
     scope?: ApprovalScope,
     feedback?: string,
+  ) => Promise<void>;
+  pendingClarificationId?: string | null;
+  onClarification?: (
+    questionId: string,
+    answer: string,
+    optionId?: string,
   ) => Promise<void>;
 }) {
   const { item, showCacheMissNotices } = props;
@@ -72,6 +79,16 @@ export function ItemCard(props: {
         feedback={props.feedback}
         onFeedback={props.onFeedback}
         onPermission={props.onPermission}
+      />
+    );
+  }
+
+  if (item.kind === "clarification") {
+    return (
+      <ClarificationCard
+        item={item}
+        submitting={props.pendingClarificationId === item.event.questionId}
+        onAnswer={props.onClarification ?? (async () => undefined)}
       />
     );
   }
@@ -163,6 +180,7 @@ export const statusMeta: Record<
   running: { label: "运行中", tone: "running" },
   waiting_permission: { label: "等待审批", tone: "waiting" },
   waiting_plan: { label: "等待计划确认", tone: "waiting" },
+  waiting_user: { label: "等待你的回答", tone: "waiting" },
   done: { label: "已完成", tone: "done" },
   error: { label: "出错", tone: "error" },
   interrupted: { label: "已中止", tone: "neutral" },

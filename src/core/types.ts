@@ -84,6 +84,7 @@ export type AgentEvent =
       text: string;
       modelText?: string;
       queueId?: string;
+      answerTo?: string;
     }
   | {
       type: "user_queued";
@@ -278,7 +279,14 @@ export type AgentEvent =
       missedCostCny?: number;
     }
   | { type: "done" }
-  | { type: "need_user"; question: string }
+  | {
+      type: "need_user";
+      question: string;
+      questionId?: string;
+      options?: Array<{ id: string; label: string; description?: string }>;
+      recommendedOptionId?: string;
+      context?: string;
+    }
   | { type: "error"; message: string }
   | { type: "notify"; level: "info" | "warn" | "error"; message: string }
   | { type: "interrupted"; scope: "model" | "tool" | "loop" }
@@ -354,6 +362,13 @@ export interface ToolExecutionResult {
   fileOps?: FileOps;
   /** 批次终止语义（P0-4）：批次内全部已执行工具 terminate 时结束循环（子代理收尾协议化） */
   terminate?: boolean;
+  needUser?: {
+    questionId: string;
+    question: string;
+    options?: Array<{ id: string; label: string; description?: string }>;
+    recommendedOptionId?: string;
+    context?: string;
+  };
 }
 
 export interface ApprovalAnswer {

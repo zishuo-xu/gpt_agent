@@ -22,6 +22,7 @@ export const SEQUENTIAL_TOOL_NAMES: ReadonlySet<ToolName> = new Set([
   "MultiEdit",
   "Write",
   "Bash",
+  "AskUser",
 ]);
 
 /** 全量工具 = 内置 + 插件注册表（进程启动时由 loader 填充）。
@@ -53,6 +54,36 @@ export function toolDefinitionsFor(
 }
 
 export const CODING_TOOL_DEFINITIONS: ToolDefinition[] = [
+  {
+    name: "AskUser",
+    description:
+      "Pause the task and ask the user one consequential product or implementation decision. Use only after repository exploration when the answer materially changes API, data model, security boundary, irreversible behavior, or key UX. Ask exactly one question with 2-3 mutually exclusive options; the user may provide a custom answer. Never use for routine engineering choices or facts available from the repository.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: { type: "string", minLength: 1 },
+        options: {
+          type: "array",
+          minItems: 2,
+          maxItems: 3,
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", minLength: 1 },
+              label: { type: "string", minLength: 1 },
+              description: { type: "string" },
+            },
+            required: ["id", "label"],
+            additionalProperties: false,
+          },
+        },
+        recommended_option_id: { type: "string" },
+        context: { type: "string" },
+      },
+      required: ["question", "options"],
+      additionalProperties: false,
+    },
+  },
   {
     name: "Read",
     description:

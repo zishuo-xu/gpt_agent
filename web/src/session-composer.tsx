@@ -53,6 +53,7 @@ export function Composer(props: {
   message: string;
   setMessage: (message: string) => void;
   busy: boolean;
+  waitingUser?: boolean;
   submitting: boolean;
   selected: boolean;
   /** 无人值守任务模式：提交时自动加 /run 前缀（走任务边界确认链路） */
@@ -89,7 +90,9 @@ export function Composer(props: {
         }}
         placeholder={
           props.selected
-            ? props.busy
+            ? props.waitingUser
+              ? "回答上方问题，或在这里输入你自己的选择"
+              : props.busy
               ? "发消息给 MyAgent…（自动排队，⌘⇧Enter 插队打断，Esc 硬打断）"
               : "继续发消息给 MyAgent…"
             : "例如：检查这个项目，修复当前失败的测试"
@@ -104,6 +107,7 @@ export function Composer(props: {
           <input
             type="checkbox"
             checked={props.runMode}
+            disabled={props.waitingUser}
             onChange={(event) =>
               props.onRunModeChange(event.target.checked)
             }
@@ -117,6 +121,7 @@ export function Composer(props: {
           <input
             type="checkbox"
             checked={props.planMode}
+            disabled={props.waitingUser}
             onChange={(event) =>
               props.onPlanModeChange(event.target.checked)
             }
@@ -124,11 +129,13 @@ export function Composer(props: {
           先理解再执行
         </label>
         <span>
-          {props.busy
+          {props.waitingUser
+            ? "等待你的明确回答，不会自动选择"
+            : props.busy
             ? "排队发送 · 插队打断会中断剩余工具调用"
             : "⌘/Ctrl + Enter 发送"}
         </span>
-        {props.busy && (
+        {props.busy && !props.waitingUser && (
           <button
             className="save-button"
             onClick={() => void props.onSubmit(false, true)}
@@ -148,6 +155,8 @@ export function Composer(props: {
         >
           {props.submitting
             ? "发送中…"
+            : props.waitingUser
+              ? "回答并继续"
             : props.planMode
               ? "让 MyAgent 理解任务"
               : props.runMode

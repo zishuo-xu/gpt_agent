@@ -1768,6 +1768,138 @@
   border-top: 1px solid #3c395d;
 }
 
+/* ========== 会话页：关键澄清卡 ========== */
+
+.clarification-card {
+  margin: 12px 0;
+  padding: 16px;
+  border: 1px solid #5c57a5;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #201f36, #191a27);
+  box-shadow: var(--card-inset), 0 0 24px rgba(126, 116, 255, 0.13);
+}
+
+.clarification-card.resolved {
+  border-color: #3d4147;
+  background: #1b1d20;
+  box-shadow: none;
+}
+
+.clarification-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #c7c2ff;
+  font-size: 12px;
+}
+
+.clarification-resolved {
+  color: #79c997;
+  font: 10px var(--mono);
+}
+
+.clarification-context,
+.clarification-question,
+.clarification-answer {
+  margin: 9px 0 0;
+  line-height: 1.55;
+}
+
+.clarification-context {
+  color: #8f8aa9;
+  font-size: 11px;
+}
+
+.clarification-question {
+  color: #efedf8;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.clarification-answer {
+  color: #a6d9b9;
+  font-size: 11px;
+}
+
+.clarification-options {
+  display: grid;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.clarification-options button {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid #444260;
+  border-radius: 7px;
+  background: #242338;
+  color: #e4e1f3;
+  text-align: left;
+  cursor: pointer;
+}
+
+.clarification-options button.recommended {
+  border-color: #7770d5;
+  background: #2a2848;
+}
+
+.clarification-options button:disabled,
+.clarification-custom button:disabled,
+.clarification-custom input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.clarification-options span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.clarification-options em {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #7770d5;
+  color: #11101c;
+  font: normal 9px var(--mono);
+}
+
+.clarification-options small {
+  max-width: 58%;
+  color: #9691ae;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.clarification-custom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.clarification-custom input {
+  min-width: 0;
+  height: 36px;
+}
+
+.clarification-custom button {
+  padding: 0 12px;
+  border: 1px solid #7770d5;
+  border-radius: 6px;
+  background: #7770d5;
+  color: #11101c;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 /* ========== 会话页：审批卡 ========== */
 
 .web-approval-card {
@@ -2217,7 +2349,21 @@
     padding: 16px 12px 12px;
   }
   .sessions-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
     padding-bottom: 10px;
+  }
+  .sessions-header > div:first-child {
+    width: 100%;
+  }
+  .sessions-header .header-actions {
+    width: 100%;
+    align-self: stretch;
+  }
+  .sessions-header .header-actions select {
+    min-width: 132px;
+    flex: 1 1 132px;
   }
   .session-workspace.with-rail {
     grid-template-columns: minmax(0, 1fr);
@@ -2237,6 +2383,13 @@
   }
   .web-approval-card .approval-actions button {
     min-height: 44px;
+  }
+  .clarification-options button,
+  .clarification-custom button {
+    min-height: 44px;
+  }
+  .clarification-custom {
+    grid-template-columns: 1fr;
   }
   .composer-footer {
     flex-wrap: wrap;

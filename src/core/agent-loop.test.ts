@@ -164,6 +164,61 @@ test("deny 直接回灌错误且不调用审批", async () => {
   assert.ok(events.some((event) => event.type === "permission_denied"));
 });
 
+test("AskUser 暂停并回答后进入下一模型回合，同批后续工具不执行", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-ask-user-"));
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribe((event) => events.push(event));
+  const model = new ScriptedModel([
+    {
+      toolCalls: [
+        toolCall("question-1", "AskUser", "选择兼容策略", {
+          question: "旧 API 应该如何处理？",
+          options: [
+            { id: "keep", label: "保持兼容" },
+            { id: "break", label: "直接升级" },
+          ],
+          recommended_option_id: "keep",
+        }),
+        toolCall("write-after-question", "Write", "unsafe.txt", {
+          file_path: "unsafe.txt",
+          content: "不应执行",
+        }),
+      ],
+    },
+    { text: "已按用户选择继续。", done: true },
+  ]);
+  const loop = new AgentLoop({
+    bus,
+    model,
+    permissions: new PermissionEngine("normal"),
+    tools: new ToolExecutor(directory),
+    approve: async () => ({ granted: false }),
+    askUser: async (interaction) => {
+      assert.equal(interaction.questionId, "question-1");
+      return "保持兼容";
+    },
+  });
+
+  await loop.run();
+
+  assert.equal(events.filter((event) => event.type === "need_user").length, 1);
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === "permission_denied" &&
+        event.call.id === "write-after-question",
+    ),
+    true,
+  );
+  await assert.rejects(
+    readFile(path.join(directory, "unsafe.txt"), "utf8"),
+    /ENOENT/,
+  );
+  assert.match(model.userMessages[0] ?? "", /保持兼容/);
+  assert.equal(events.at(-1)?.type, "done");
+});
+
 test("TodoWrite 通过 AgentLoop 发布全量 todo_update 事件", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "myagent-loop-todo-"));
   const bus = new AgentEventBus();
@@ -1541,5 +1596,4 @@ test("purpose 超长时保留开头加省略号（不从中段截断）", async 
   );
   assert.ok((ask.purpose ?? "").endsWith("…"));
 });
-
 

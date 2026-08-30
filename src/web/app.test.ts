@@ -420,6 +420,58 @@ test("已有会话发消息兼容 message 字段（与 task 一致）", async ()
   assert.equal(empty.status, 400);
 });
 
+test("等待用户回答时，普通消息与明确 answer 接口都只恢复当前问题", async () => {
+  const { service } = await fixture();
+  const answers: Array<{ questionId: string; answer: string }> = [];
+  const fakeSession = {
+    id: "sess-question",
+    summary: () => ({ status: "waiting_user" }),
+    pendingQuestionId: () => "question-1",
+    answerQuestion: (questionId: string, answer: string) => {
+      answers.push({ questionId, answer });
+      return questionId === "question-1";
+    },
+    isProcessing: () => true,
+    taskPlan: () => undefined,
+  } as never;
+  const fakeManager = {
+    get: (id: string) => (id === "sess-question" ? fakeSession : undefined),
+  } as unknown as WebSessionManager;
+  const app = createWebApp(service, fakeManager);
+
+  const messageResponse = await app.request(
+    "/api/sessions/sess-question/input",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "保留兼容性" }),
+    },
+  );
+  assert.equal(messageResponse.status, 200);
+  assert.deepEqual(await messageResponse.json(), {
+    accepted: true,
+    queued: false,
+    answerTo: "question-1",
+  });
+
+  const answerResponse = await app.request(
+    "/api/sessions/sess-question/answer",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        questionId: "question-1",
+        answer: "使用新版接口",
+      }),
+    },
+  );
+  assert.equal(answerResponse.status, 200);
+  assert.deepEqual(answers, [
+    { questionId: "question-1", answer: "保留兼容性" },
+    { questionId: "question-1", answer: "使用新版接口" },
+  ]);
+});
+
 test("规划 API：启动只读规划、读取计划并提交三态决策", async () => {
   const { service } = await fixture();
   const calls: Array<{ kind: string; value?: unknown }> = [];

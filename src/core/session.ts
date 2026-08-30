@@ -31,6 +31,7 @@ import { buildReviewPrompt, parseReviewResult } from "./review-runner.js";
 import { runAcceptanceChecks, type AcceptanceCheckResult } from "./acceptance-runner.js";
 import { BranchCoordinator } from "./session-branch.js";
 import { PermissionWaiter } from "./session-approval.js";
+import { ClarificationWaiter } from "./clarification-waiter.js";
 import {
   SessionStateMachine,
   type SessionStateDeps,
@@ -82,6 +83,7 @@ interface QueuedInput {
   id: string;
   text: string;
   displayText?: string;
+  answerTo?: string;
   /** Steer 插队消息：打断当前工具批次后优先处理 */
   steer?: boolean;
 }
@@ -97,6 +99,7 @@ export class AgentSession {
   readonly #permissions: PermissionEngine;
   /** 审批等待（超时/abort/scope 记忆/steer 解锁） */
   readonly #approvalWaiter: PermissionWaiter;
+  readonly #clarificationWaiter: ClarificationWaiter;
   /** 分支树协调（fork/switch/被放弃路径摘要） */
   readonly #branchOps: BranchCoordinator;
   readonly #tools: ToolExecutor;
@@ -160,7 +163,7 @@ export class AgentSession {
     review?: { passed: boolean; issues: string[]; summary: string };
   };
   /** 恢复时检测到的中断任务（run_started 无配对 run_finished；进程崩溃残留） */
-  readonly #interruptedTask:
+  #interruptedTask:
     | {
         taskId: string;
         description: string;
@@ -236,6 +239,9 @@ export class AgentSession {
       setStatus: (status) => {
         this.#state.setStatus(status);
       },
+    });
+    this.#clarificationWaiter = new ClarificationWaiter({
+      setStatus: (status) => this.#state.setStatus(status),
     });
     this.#branchOps = new BranchCoordinator({
       bus: this.#bus,
@@ -900,7 +906,12 @@ export class AgentSession {
   async sendInput(
     message: string,
     displayText?: string,
-    options?: { steer?: boolean; taskMode?: boolean; checksMode?: boolean },
+    options?: {
+      steer?: boolean;
+      taskMode?: boolean;
+      checksMode?: boolean;
+      answerTo?: string;
+    },
   ): Promise<void> {
     if (this.#runtimeUnavailableReason) {
       throw new Error(this.#runtimeUnavailableReason);
@@ -921,6 +932,7 @@ export class AgentSession {
       const queued: QueuedInput = {
         id: randomUUID(),
         text,
+        ...(options?.answerTo ? { answerTo: options.answerTo } : {}),
         ...(steer ? { steer: true } : {}),
       };
       if (steer) {
@@ -950,6 +962,7 @@ export class AgentSession {
       id: "",
       text,
       ...(displayText ? { displayText } : {}),
+      ...(options?.answerTo ? { answerTo: options.answerTo } : {}),
     };
     try {
       while (current !== undefined) {
@@ -961,6 +974,7 @@ export class AgentSession {
             ? { modelText: current.text }
             : {}),
           ...(current.id ? { queueId: current.id } : {}),
+          ...(current.answerTo ? { answerTo: current.answerTo } : {}),
         });
         this.#state.setStatus("running");
         this.#updatedAt = new Date().toISOString();
@@ -976,6 +990,12 @@ export class AgentSession {
               signal,
               this.#taskApprovalTimeoutMs,
             ),
+          askUser: async (interaction, signal) => {
+            // 先注册 waiter 再 flush，避免 SSE 刚显示问题、用户立即点击时尚无 pending 的竞态。
+            const waiting = this.#clarificationWaiter.wait(interaction, signal);
+            await this.flush();
+            return await waiting;
+          },
           initialTotalTokens:
             this.#state.tokens(),
           getTotalTokens: () =>
@@ -1066,6 +1086,44 @@ export class AgentSession {
     } finally {
       this.#processing = false;
     }
+  }
+
+  /** 最近一个尚未被用户回答的结构化问题；普通文本输入也可完成回答。 */
+  pendingQuestionId(): string | undefined {
+    const pending = [...this.#events]
+      .reverse()
+      .find(
+        (record) =>
+          record.event.type === "need_user" && record.event.questionId,
+      );
+    if (
+      !pending ||
+      pending.event.type !== "need_user" ||
+      !pending.event.questionId
+    ) {
+      return undefined;
+    }
+    const questionId = pending.event.questionId;
+    const answered = this.#events.some(
+      (record) =>
+        record.seq > pending.seq &&
+        record.event.type === "user" &&
+        record.event.answerTo === questionId,
+    );
+    return answered ? undefined : questionId;
+  }
+
+  pendingQuestion(): Extract<AgentEvent, { type: "need_user" }> | undefined {
+    const questionId = this.pendingQuestionId();
+    if (!questionId) return undefined;
+    const record = [...this.#events]
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.event.type === "need_user" &&
+          candidate.event.questionId === questionId,
+      );
+    return record?.event.type === "need_user" ? structuredClone(record.event) : undefined;
   }
 
   async runTask(
@@ -1338,6 +1396,9 @@ export class AgentSession {
         status,
         reason,
       });
+      if (resumeTaskId && this.#interruptedTask?.taskId === taskBox.id) {
+        this.#interruptedTask = undefined;
+      }
       await this.flush();
       // 任务期排队的用户消息：权限/任务盒已复位，按普通消息消费——
       // 避免悬置到用户下次发送才被拾起，也保证其不在任务约束下执行
@@ -1558,9 +1619,52 @@ export class AgentSession {
     return this.#approvalWaiter.resolve(callId, answer);
   }
 
+  answerQuestion(questionId: string, answer: string): boolean {
+    const trimmed = answer.trim();
+    const pending = this.pendingQuestion();
+    if (
+      this.#state.status !== "waiting_user" ||
+      !trimmed ||
+      pending?.questionId !== questionId
+    ) {
+      return false;
+    }
+    if (this.#clarificationWaiter.resolve(questionId, trimmed)) return true;
+
+    // 进程重启后没有内存 waiter：先把回答写回原会话，再恢复同一任务或普通对话。
+    const modelText = `用户对问题「${pending.question}」的回答：${trimmed}`;
+    if (this.#interruptedTask) {
+      this.#model.addUserMessage(modelText);
+      this.#bus.emit({
+        type: "user",
+        text: trimmed,
+        modelText,
+        answerTo: questionId,
+      });
+      this.#state.setStatus("running");
+      void this.resumeTask().catch((error) => {
+        this.#bus.emit({
+          type: "error",
+          message: error instanceof Error ? error.message : "恢复任务失败",
+        });
+      });
+      return true;
+    }
+    void this.sendInput(modelText, trimmed, { answerTo: questionId }).catch(
+      (error) => {
+        this.#bus.emit({
+          type: "error",
+          message: error instanceof Error ? error.message : "继续会话失败",
+        });
+      },
+    );
+    return true;
+  }
+
   interrupt(): boolean {
     if (!this.#activeLoop) return false;
     this.#activeLoop.interrupt();
+    this.#clarificationWaiter.cancelAll();
     this.#state.setStatus("interrupted");
     return true;
   }

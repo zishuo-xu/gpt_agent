@@ -21,6 +21,7 @@ export function SessionStream(props: {
   showCacheMissNotices: boolean;
   resolvedPermissions: ReadonlySet<string>;
   pendingPermissionCallId: string | null;
+  pendingClarificationId?: string | null;
   permissionFeedback: Record<string, string>;
   onFeedback: (callId: string, value: string) => void;
   onBookmark: (seq: number, name: string) => void;
@@ -29,6 +30,11 @@ export function SessionStream(props: {
     granted: boolean,
     scope?: ApprovalScope,
     feedback?: string,
+  ) => Promise<void>;
+  onClarification?: (
+    questionId: string,
+    answer: string,
+    optionId?: string,
   ) => Promise<void>;
   onSourceFilter: (value: string) => void;
 }) {
@@ -70,6 +76,7 @@ export function SessionStream(props: {
           <div
             className="stream-item"
             data-seq={item.seq}
+            data-display-kind={item.kind}
             key={item.seq}
           >
             {item.kind === "message" &&
@@ -96,6 +103,7 @@ export function SessionStream(props: {
               showCacheMissNotices={props.showCacheMissNotices}
               locallyResolved={props.resolvedPermissions}
               pendingPermissionCallId={props.pendingPermissionCallId}
+              pendingClarificationId={props.pendingClarificationId}
               feedback={
                 item.kind === "approval"
                   ? (props.permissionFeedback[
@@ -105,6 +113,7 @@ export function SessionStream(props: {
               }
               onFeedback={props.onFeedback}
               onPermission={props.onPermission}
+              onClarification={props.onClarification}
             />
           </div>
         ))}

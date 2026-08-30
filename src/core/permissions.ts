@@ -25,6 +25,7 @@ const NORMAL_AUTO = new Set<string>([
   "Task",
   "Edit",
   "MultiEdit",
+  "AskUser",
 ]);
 
 /** 文件工具（target 是文件路径，判定前需规范化与执行路径同构） */

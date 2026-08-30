@@ -177,6 +177,9 @@ export function createEventRenderer(options: {
     }
     if (event.type === "need_user") {
       output(`\n需要你的决定：${event.question}\n`);
+      for (const [index, option] of (event.options ?? []).entries()) {
+        output(`  ${index + 1}. ${option.label}${option.id === event.recommendedOptionId ? "（推荐）" : ""}${option.description ? `：${option.description}` : ""}\n`);
+      }
     }
     if (event.type === "done") {
       output("\n✓ 本轮任务完成，可继续输入。\n");

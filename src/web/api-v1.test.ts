@@ -124,6 +124,17 @@ test("v1 事件映射：白名单类型多对一折叠", () => {
       summary: "Verdict: PASS",
       attempts: 1,
     }),
+    record(13, {
+      type: "need_user",
+      question: "公开 API 需要保持兼容吗？",
+      questionId: "question-1",
+      options: [
+        { id: "compatible", label: "保持兼容" },
+        { id: "breaking", label: "允许破坏性变更" },
+      ],
+      recommendedOptionId: "compatible",
+      context: "这个选择会影响现有调用方。",
+    }),
   ]);
   assert.deepEqual(events, [
     { seq: 1, ts: "2026-08-09T10:00:00.000Z", type: "user.text", text: "你好" },
@@ -151,6 +162,19 @@ test("v1 事件映射：白名单类型多对一折叠", () => {
     { seq: 10, ts: "2026-08-09T10:00:00.000Z", type: "system.error", message: "模型超时" },
     { seq: 11, ts: "2026-08-09T10:00:00.000Z", type: "system.info", message: "任务完成" },
     { seq: 12, ts: "2026-08-09T10:00:00.000Z", type: "review.result", passed: true, issues: [], summary: "Verdict: PASS", attempts: 1 },
+    {
+      seq: 13,
+      ts: "2026-08-09T10:00:00.000Z",
+      type: "interaction.question",
+      question: "公开 API 需要保持兼容吗？",
+      questionId: "question-1",
+      options: [
+        { id: "compatible", label: "保持兼容" },
+        { id: "breaking", label: "允许破坏性变更" },
+      ],
+      recommendedOptionId: "compatible",
+      context: "这个选择会影响现有调用方。",
+    },
   ]);
 });
 

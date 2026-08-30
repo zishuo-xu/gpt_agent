@@ -11,6 +11,7 @@ export const TOOL_NAMES = [
   "Write",
   "Bash",
   "BrowserCheck",
+  "AskUser",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];

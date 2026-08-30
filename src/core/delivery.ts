@@ -156,6 +156,7 @@ function projectOutcome(
     case "running":
     case "waiting_permission":
     case "waiting_plan":
+    case "waiting_user":
     default:
       return "running";
   }

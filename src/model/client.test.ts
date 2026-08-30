@@ -84,6 +84,7 @@ test("OpenAI-compatible 响应转换为统一工具调用", async () => {
       (item: { function: { name: string } }) => item.function.name,
     ),
     [
+      "AskUser",
       "Read",
       "Grep",
       "Glob",

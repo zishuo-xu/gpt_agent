@@ -11,6 +11,7 @@ import {
   type ToolTraceItem,
 } from "./tool-batch.js";
 import type {
+  AgentEvent,
   ApprovalHandler,
   FileOps,
   ModelPricing,
@@ -91,6 +92,10 @@ export interface AgentLoopOptions {
   permissions: PermissionEngine;
   tools: ToolExecutor;
   approve: ApprovalHandler;
+  askUser?: (
+    interaction: Extract<AgentEvent, { type: "need_user" }>,
+    signal: AbortSignal,
+  ) => Promise<string | undefined>;
   initialTotalTokens?: number;
   getTotalTokens?: () => number;
   beforeTurn?: (
@@ -129,6 +134,7 @@ export class AgentLoop {
   readonly #permissions: PermissionEngine;
   readonly #tools: ToolExecutor;
   readonly #approve: ApprovalHandler;
+  readonly #askUser: AgentLoopOptions["askUser"];
   #abortController: AbortController | undefined;
   #totalTokens = 0;
   readonly #getTotalTokens: (() => number) | undefined;
@@ -168,6 +174,7 @@ export class AgentLoop {
     this.#permissions = options.permissions;
     this.#tools = options.tools;
     this.#approve = options.approve;
+    this.#askUser = options.askUser;
     this.#totalTokens = options.initialTotalTokens ?? 0;
     this.#getTotalTokens = options.getTotalTokens;
     this.#beforeTurn = options.beforeTurn;
@@ -441,7 +448,7 @@ export class AgentLoop {
         this.#bus.emit({ type: "thinking_delta", text });
       };
       let turnCount = 0;
-      while (!signal.aborted) {
+      turnLoop: while (!signal.aborted) {
         // 每轮重置模型文本累计（ask_permission 的 purpose 只反映本轮意图）
         this.#recentModelText = "";
         if (
@@ -673,7 +680,7 @@ export class AgentLoop {
               this.#bus.emit({ type: "done" });
               return;
             }
-            continue;
+            continue turnLoop;
           }
         }
 
@@ -776,6 +783,36 @@ export class AgentLoop {
             },
           );
           this.#mergeFileOps(result);
+          if (result.needUser) {
+            // AskUser 已经产生合法 tool_result；当前回合暂停，批次剩余调用只补协议结果，绝不执行副作用。
+            const interaction = result.needUser;
+            this.#bus.emit({ type: "need_user", ...interaction });
+            for (const remaining of calls.slice(calls.indexOf(call) + 1)) {
+              const reason = "用户问题待回答，跳过本批剩余工具调用";
+              this.#bus.emit({ type: "tool_call", call: remaining });
+              emitDeniedTool(this.#bus, this.#model, traceTools, {
+                call: remaining,
+                reason,
+                permission: "waiting_user",
+                ms: 0,
+              });
+            }
+            recordTurn();
+            const answer = this.#askUser
+              ? await this.#askUser({ type: "need_user", ...interaction }, signal)
+              : undefined;
+            if (answer === undefined) return;
+            const modelText =
+              `用户对问题「${interaction.question}」的回答：${answer}`;
+            this.#model.addUserMessage?.(modelText);
+            this.#bus.emit({
+              type: "user",
+              text: answer,
+              modelText,
+              answerTo: interaction.questionId,
+            });
+            continue turnLoop;
+          }
           if (result.terminate !== true) allTerminated = false;
         }
 

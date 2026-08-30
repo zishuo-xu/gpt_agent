@@ -1,9 +1,90 @@
+import { useState } from "react";
 import { formatDuration, formatTokens } from "./session-format";
 import { DiffOrOutput, RichText } from "./session-rich-text";
 import { statusLabel, toolResultDiffText } from "./session-display";
 import type { DisplayItem } from "./session-display";
 
 export type ApprovalScope = "once" | "session" | "project" | "global";
+
+/** 任务内关键澄清：选项仅提供快捷回答，最终选择始终由用户显式提交。 */
+export function ClarificationCard(props: {
+  item: Extract<DisplayItem, { kind: "clarification" }>;
+  submitting: boolean;
+  onAnswer: (
+    questionId: string,
+    answer: string,
+    optionId?: string,
+  ) => Promise<void>;
+}) {
+  const { event, resolvedAnswer } = props.item;
+  const [customAnswer, setCustomAnswer] = useState("");
+  return (
+    <section
+      className={`clarification-card${resolvedAnswer ? " resolved" : ""}`}
+      aria-label="MyAgent 需要你的决定"
+    >
+      <div className="clarification-heading">
+        <strong>需要你的决定</strong>
+        {resolvedAnswer && <span className="clarification-resolved">已回答</span>}
+      </div>
+      {event.context && <p className="clarification-context">{event.context}</p>}
+      <p className="clarification-question">{event.question}</p>
+      {resolvedAnswer ? (
+        <p className="clarification-answer">你的回答：{resolvedAnswer}</p>
+      ) : (
+        <>
+          <div className="clarification-options">
+            {(event.options ?? []).map((option) => (
+              <button
+                type="button"
+                key={option.id}
+                disabled={props.submitting}
+                className={
+                  option.id === event.recommendedOptionId ? "recommended" : ""
+                }
+                onClick={() =>
+                  void props.onAnswer(event.questionId!, option.label, option.id)
+                }
+              >
+                <span>
+                  {option.label}
+                  {option.id === event.recommendedOptionId && <em>推荐</em>}
+                </span>
+                {option.description && <small>{option.description}</small>}
+              </button>
+            ))}
+          </div>
+          <div className="clarification-custom">
+            <input
+              value={customAnswer}
+              disabled={props.submitting}
+              placeholder="或输入你自己的答案"
+              onChange={(event) => setCustomAnswer(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && customAnswer.trim()) {
+                  event.preventDefault();
+                  void props.onAnswer(
+                    props.item.event.questionId!,
+                    customAnswer.trim(),
+                  );
+                }
+              }}
+            />
+            <button
+              type="button"
+              disabled={props.submitting || !customAnswer.trim()}
+              onClick={() =>
+                void props.onAnswer(event.questionId!, customAnswer.trim())
+              }
+            >
+              {props.submitting ? "提交中…" : "回答并继续"}
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
 
 /** 工具卡：调用详情 + 实时输出 + 结果网格 + diff（折叠展示） */
 export function ToolCard(props: {

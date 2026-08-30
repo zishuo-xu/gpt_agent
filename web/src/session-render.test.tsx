@@ -242,6 +242,43 @@ describe("ItemCard（会话展示组件全分支）", () => {
     assert.equal(resolved.querySelectorAll(".approval-actions button").length, 0);
   });
 
+  it("澄清卡显示推荐选项、支持显式回答并在回答后只读", async () => {
+    const answers: string[] = [];
+    const item = {
+      kind: "clarification",
+      seq: 30,
+      ts,
+      event: {
+        type: "need_user",
+        questionId: "q1",
+        question: "旧 API 怎么处理？",
+        context: "两种方案会影响兼容性。",
+        options: [
+          { id: "keep", label: "保持兼容", description: "保留旧入口" },
+          { id: "break", label: "直接升级" },
+        ],
+        recommendedOptionId: "keep",
+      },
+    };
+    const pending = await renderItem(item as never, {
+      onClarification: async (_questionId: string, answer: string) => {
+        answers.push(answer);
+      },
+    });
+    assert.ok(pending.querySelector(".clarification-card"));
+    assert.match(pending.textContent ?? "", /两种方案会影响兼容性/);
+    assert.match(pending.querySelector("button.recommended")?.textContent ?? "", /推荐/);
+    (pending.querySelector("button.recommended") as HTMLButtonElement).click();
+    await Promise.resolve();
+    assert.deepEqual(answers, ["保持兼容"]);
+
+    const resolved = await renderItem(
+      { ...item, resolvedAnswer: "保持兼容" } as never,
+    );
+    assert.match(resolved.textContent ?? "", /已回答/);
+    assert.equal(resolved.querySelectorAll(".clarification-options button").length, 0);
+  });
+
   it("thinking / system / cost / subtask 渲染", async () => {
     const thinking = await renderItem({
       kind: "thinking",

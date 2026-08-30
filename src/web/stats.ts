@@ -80,7 +80,7 @@ export function computeSessionStats(
       case "interrupted":
         totals.interrupted += 1;
         break;
-      // idle / waiting_permission 不进入终态计数
+      // idle / 各类 waiting 状态不进入终态计数
       default:
         break;
     }

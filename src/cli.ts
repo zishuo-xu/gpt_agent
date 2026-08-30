@@ -245,6 +245,23 @@ async function runCli(): Promise<void> {
       safePrompt();
       return;
     }
+    if (session.summary().status === "waiting_user") {
+      const question = session.pendingQuestion();
+      if (question?.questionId) {
+        const choice = Number(line);
+        const option =
+          Number.isInteger(choice) && choice > 0
+            ? question.options?.[choice - 1]
+            : undefined;
+        const answer = option
+          ? `${option.label}（${option.id}）`
+          : line;
+        if (session.answerQuestion(question.questionId, answer)) {
+          safePrompt();
+          return;
+        }
+      }
+    }
     if (pendingRun && ["y", "yes", "n", "no"].includes(line.toLowerCase())) {
       const confirmed = ["y", "yes"].includes(line.toLowerCase());
       const task = pendingRun;

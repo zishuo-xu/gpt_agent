@@ -82,6 +82,13 @@ interface BashArgs {
   background?: boolean;
 }
 
+interface AskUserArgs {
+  question: string;
+  options: Array<{ id: string; label: string; description?: string }>;
+  recommended_option_id?: string;
+  context?: string;
+}
+
 export class ToolExecutor {
   readonly files: AtomicFileTools;
   readonly todos: TodoStore;
@@ -142,6 +149,33 @@ export class ToolExecutor {
     }
     const effectiveArgs = schemaCheck.args ?? call.args;
     switch (call.tool) {
+      case "AskUser": {
+        const args = effectiveArgs as AskUserArgs;
+        const ids = args.options.map((option) => option.id);
+        if (new Set(ids).size !== ids.length) {
+          return { summary: "AskUser 选项 id 必须唯一", isError: true };
+        }
+        if (args.recommended_option_id && !ids.includes(args.recommended_option_id)) {
+          return { summary: "AskUser recommended_option_id 必须命中 options", isError: true };
+        }
+        const options = args.options.map((option) => ({
+          id: option.id,
+          label: option.label,
+          ...(option.description ? { description: option.description } : {}),
+        }));
+        return {
+          summary: "等待用户回答",
+          needUser: {
+            questionId: call.id,
+            question: args.question,
+            options,
+            ...(args.recommended_option_id
+              ? { recommendedOptionId: args.recommended_option_id }
+              : {}),
+            ...(args.context ? { context: args.context } : {}),
+          },
+        };
+      }
       case "Read": {
         const args = effectiveArgs as ReadArgs;
         const filePath = this.#resolve(args.file_path);

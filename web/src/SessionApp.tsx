@@ -97,6 +97,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
   /** 正在提交审批的 callId（按钮 loading 态） */
   const [pendingPermissionCallId, setPendingPermissionCallId] =
     useState<string | null>(null);
+  const [pendingClarificationId, setPendingClarificationId] =
+    useState<string | null>(null);
   const [permissionFeedback, setPermissionFeedback] =
     useState<Record<string, string>>({});
   const [error, setError] = useState("");
@@ -130,9 +132,11 @@ export function SessionApp(props: { initialSessionId?: string }) {
     () => sessions.find((session) => session.id === selectedId),
     [sessions, selectedId],
   );
+  const waitingUser = selected?.status === "waiting_user";
   const busy =
     selected?.status === "running" ||
-    selected?.status === "waiting_permission";
+    selected?.status === "waiting_permission" ||
+    waitingUser;
   const visibleEvents = events;
   const displayItems = useMemo(
     () => buildDisplayItems(visibleEvents),
@@ -150,6 +154,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
       if (sourceFilter === "subtask") return item.kind === "subtask";
       return (
         item.kind === "system" ||
+        item.kind === "clarification" ||
         item.kind === "cost" ||
         item.kind === "ledger"
       );
@@ -397,7 +402,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
     const waiting = sessions.filter(
       (session) =>
         session.status === "waiting_permission" ||
-        session.status === "waiting_plan",
+        session.status === "waiting_plan" ||
+        session.status === "waiting_user",
     ).length;
     for (const session of sessions) {
       const previous = previousStatuses.current[session.id];
@@ -507,8 +513,19 @@ export function SessionApp(props: { initialSessionId?: string }) {
 
   useEffect(() => {
     const stream = chatStreamRef.current;
-    if (stream) stream.scrollTop = stream.scrollHeight;
-  }, [selectedId, events.length]);
+    if (!stream) return;
+    if (waitingUser) {
+      const clarifications = stream.querySelectorAll<HTMLElement>(
+        '[data-display-kind="clarification"]',
+      );
+      const clarification = clarifications.item(clarifications.length - 1);
+      if (clarification) {
+        stream.scrollTop = Math.max(0, clarification.offsetTop - 12);
+        return;
+      }
+    }
+    stream.scrollTop = stream.scrollHeight;
+  }, [selectedId, events.length, waitingUser]);
 
   /** 对话链路跳转：平滑滚动到对应 seq 的消息 */
   function scrollToSeq(seq: number) {
@@ -527,7 +544,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
     let content = message.trim();
     if (!content) return;
     // 无人值守任务模式：自动加 /run 前缀（用户已手动输入时不再重复）
-    if (runMode && !content.startsWith("/run")) {
+    if (runMode && !waitingUser && !content.startsWith("/run")) {
       content = `/run ${content}`;
     }
     setSubmitting(true);
@@ -577,8 +594,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
               ? {
                   message: content,
                   confirmBounds,
-                  ...(planMode ? { planMode: true } : {}),
-                  ...(steer && busy ? { steer: true } : {}),
+                  ...(planMode && !waitingUser ? { planMode: true } : {}),
+                  ...(steer && busy && !waitingUser ? { steer: true } : {}),
                 }
               : {
                   task: content,
@@ -650,6 +667,37 @@ export function SessionApp(props: { initialSessionId?: string }) {
       await refreshSessions();
     } finally {
       setPendingPermissionCallId(null);
+    }
+  }
+
+  async function answerClarification(
+    questionId: string,
+    answer: string,
+    optionId?: string,
+  ) {
+    if (!selectedId || !answer.trim()) return;
+    setPendingClarificationId(questionId);
+    setError("");
+    try {
+      const response = await fetch(
+        projectUrl(`/api/sessions/${selectedId}/answer`),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            questionId,
+            answer: answer.trim(),
+            ...(optionId ? { optionId } : {}),
+          }),
+        },
+      );
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "提交答案失败");
+      await refreshSessions();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "提交答案失败");
+    } finally {
+      setPendingClarificationId(null);
     }
   }
 
@@ -803,6 +851,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   showCacheMissNotices={showCacheMissNotices}
                   resolvedPermissions={resolvedPermissions}
                   pendingPermissionCallId={pendingPermissionCallId}
+                  pendingClarificationId={pendingClarificationId}
                   permissionFeedback={permissionFeedback}
                   onFeedback={(callId, value) =>
                     setPermissionFeedback((current) => ({
@@ -814,6 +863,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
                     void toggleBookmark(seq, name)
                   }
                   onPermission={answerPermission}
+                  onClarification={answerClarification}
                   sourceFilter={sourceFilter}
                   onSourceFilter={setSourceFilter}
                   delivery={delivery}
@@ -848,6 +898,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
                       message={message}
                       setMessage={updateMessage}
                       busy={busy}
+                      waitingUser={waitingUser}
                       submitting={submitting}
                       selected
                       runMode={runMode}
