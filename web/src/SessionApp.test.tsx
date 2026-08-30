@@ -921,6 +921,35 @@ describe("Composer（无人值守任务模式开关）", () => {
 });
 
 describe("隔离工作区入口与结果提示", () => {
+  it("新建任务面板以任务输入为主，并保留可明确选择的执行位置与权限档", async () => {
+    const [{ act }, { createRoot }, { NewTaskOverlay }] = await Promise.all([
+      import("react"), import("react-dom/client"), import("./session-new-task"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    let env = "project";
+    let permission = "normal";
+    await act(async () => {
+      root.render(<NewTaskOverlay
+        newTaskEnv={env as "project" | "lobby"} newTaskProject="p" projects={[{ key: "p", name: "示例项目", cwd: "/example" }]} permissionMode={permission as "normal" | "strict" | "trust"}
+        runBoundsPreview={null} submitting={false} message="" runMode={false} workspaceMode="project"
+        onWorkspaceModeChange={() => undefined} onRunModeChange={() => undefined} planMode={false} onPlanModeChange={() => undefined}
+        onEnvChange={(next) => { env = next; }} onProjectChange={() => undefined} onPermissionMode={(next) => { permission = next; }}
+        onMessage={() => undefined} onPickTemplate={() => undefined} onSubmit={async () => undefined}
+        onOpenProjectPicker={() => undefined} onClose={() => undefined} onCancelBounds={() => undefined}
+      />);
+    });
+    assert.ok(container.querySelector("textarea"));
+    assert.ok(container.querySelector(".new-task-segmented"));
+    assert.equal(container.querySelectorAll(".permission-choices input").length, 3);
+    (container.querySelector('.new-task-segmented input[value="lobby"]') as HTMLInputElement).click();
+    assert.equal(env, "lobby");
+    (container.querySelector('.permission-choices input[value="strict"]') as HTMLInputElement).click();
+    assert.equal(permission, "strict");
+    await act(async () => root.unmount());
+  });
+
   it("隔离执行复选框可切换且工作区缺失时显示风险", async () => {
     const [{ act }, { createRoot }, { NewTaskOverlay }, { WorkspaceBanner }] = await Promise.all([
       import("react"), import("react-dom/client"), import("./session-new-task"), import("./SessionApp"),
