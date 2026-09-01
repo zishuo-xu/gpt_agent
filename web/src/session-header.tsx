@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import type { SessionSummary } from "@shared/types.js";
 import { StatusTag } from "./session-render";
-import { groupSessions } from "./session-sidebar";
 
 /** 项目切换器里的一个项目项（/api/projects 响应） */
 export interface ProjectEntry {
@@ -85,14 +84,11 @@ export function SessionHeader(props: {
   );
 }
 
-/** 未选中任务时的任务首页：主 CTA + 当前项目任务摘要。 */
+/** 未选中任务时的极简任务首页。 */
 export function SessionEmpty(props: {
   error: string;
-  sessions?: SessionSummary[];
-  onSelect?: (id: string) => void;
   newTaskComposer?: ReactNode;
 }) {
-  const groups = props.sessions ? groupSessions(props.sessions) : [];
   return (
     <>
       {props.error && (
@@ -104,16 +100,6 @@ export function SessionEmpty(props: {
           <h2>把工作交给 MyAgent</h2>
           <p>描述你想完成的工作，MyAgent 会在项目中执行、验证并汇报结果。</p>
           {props.newTaskComposer}
-          {groups.some((group) => group.sessions.length > 0) && (
-            <div className="home-task-summary" aria-label="任务摘要">
-              {groups.map((group) => group.sessions.length > 0 && (
-                <div className="home-task-group" key={group.id}>
-                  <strong>{group.label}</strong>
-                  {group.sessions.slice(0, 3).map((session) => <button key={session.id} onClick={() => props.onSelect?.(session.id)}>{session.title}</button>)}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </>

@@ -62,6 +62,7 @@ export function Composer(props: {
   /** 先只读探索生成计划，批准后才进入同会话执行。 */
   planMode: boolean;
   onPlanModeChange: (planMode: boolean) => void;
+  showModes?: boolean;
   onSubmit: (
     boundsConfirmed?: boolean,
     steer?: boolean,
@@ -100,34 +101,28 @@ export function Composer(props: {
         rows={3}
       />
       <div className="composer-footer">
-        <label
-          className="run-mode-toggle"
-          title="开启后以无人值守任务运行（自动加 /run，可设边界/预算/截止）"
-        >
-          <input
-            type="checkbox"
-            checked={props.runMode}
-            disabled={props.waitingUser}
-            onChange={(event) =>
-              props.onRunModeChange(event.target.checked)
-            }
-          />
-          无人值守任务
-        </label>
-        <label
-          className="run-mode-toggle plan-mode-toggle"
-          title="先只读探索并生成计划，再通过弹窗批准、修改或仅保留分析"
-        >
-          <input
-            type="checkbox"
-            checked={props.planMode}
-            disabled={props.waitingUser}
-            onChange={(event) =>
-              props.onPlanModeChange(event.target.checked)
-            }
-          />
-          先理解再执行
-        </label>
+        {props.showModes !== false && (
+          <>
+            <label className="run-mode-toggle" title="开启后以无人值守任务运行">
+              <input
+                type="checkbox"
+                checked={props.runMode}
+                disabled={props.waitingUser}
+                onChange={(event) => props.onRunModeChange(event.target.checked)}
+              />
+              无人值守任务
+            </label>
+            <label className="run-mode-toggle plan-mode-toggle" title="先只读探索并生成计划">
+              <input
+                type="checkbox"
+                checked={props.planMode}
+                disabled={props.waitingUser}
+                onChange={(event) => props.onPlanModeChange(event.target.checked)}
+              />
+              先理解再执行
+            </label>
+          </>
+        )}
         <span>
           {props.waitingUser
             ? "等待你的明确回答，不会自动选择"

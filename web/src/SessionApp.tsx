@@ -42,6 +42,15 @@ import {
   type TaskPlanDetail,
 } from "./session-plan";
 
+export function initialTaskContext(defaultKey: string): {
+  env: "project" | "lobby";
+  project: string;
+} {
+  return defaultKey === "lobby"
+    ? { env: "lobby", project: "" }
+    : { env: "project", project: defaultKey };
+}
+
 /** SSE 事件记录（后端 RecordedEvent 的会话内形态） */
 export type SessionEvent = RecordedEvent;
 
@@ -354,7 +363,12 @@ export function SessionApp(props: { initialSessionId?: string }) {
       if (!response.ok) return;
       const payload = await response.json();
       setProjects((payload.projects ?? []) as ProjectEntry[]);
-      setCurrentProject((current) => current || (payload.defaultKey ?? ""));
+      const defaultKey = payload.defaultKey ?? "";
+      if (!defaultKey) return;
+      const taskContext = initialTaskContext(defaultKey);
+      setCurrentProject((current) => current || defaultKey);
+      setNewTaskProject((current) => current || taskContext.project);
+      if (taskContext.env === "lobby") setNewTaskEnv("lobby");
     })();
   }, []);
 
@@ -924,8 +938,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
         ) : (
           <SessionEmpty
             error={error}
-            sessions={sessions}
-            onSelect={(id) => setSelectedId(id)}
             newTaskComposer={
               <NewTaskOverlay
                 presentation="home"
@@ -949,7 +961,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
                 onProjectChange={setNewTaskProject}
                 onPermissionMode={setPermissionMode}
                 onMessage={updateMessage}
-                onPickTemplate={setMessage}
                 onSubmit={submitMessage}
                 onOpenProjectPicker={() => void projectPicker.openProjectPicker()}
                 onClose={() => undefined}

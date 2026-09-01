@@ -635,6 +635,12 @@ describe("SessionListSidebar（会话列表交互）", () => {
 });
 
 describe("任务工作台信息层级", () => {
+  it("默认项目初始化为项目位置并填入同一个项目 key，大厅保持只读位置", async () => {
+    const { initialTaskContext } = await import("./SessionApp");
+    assert.deepEqual(initialTaskContext("project-a"), { env: "project", project: "project-a" });
+    assert.deepEqual(initialTaskContext("lobby"), { env: "lobby", project: "" });
+  });
+
   const makeTask = (id: string, status: string, title = id) => ({ id, title, status, permissionMode: "normal", createdAt: ts, updatedAt: ts, totalInputTokens: 0, totalOutputTokens: 0, totalCachedTokens: 0, totalCostCny: 0, todos: [], toolCallCount: 0, kind: "interactive" });
   it("将等待、错误和中断归入需要处理，运行中单独分组，idle 归入最近任务", async () => {
     const [{ act }, { createRoot }, { SessionListSidebar }] = await Promise.all([
@@ -675,7 +681,9 @@ describe("任务工作台信息层级", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
-    await act(async () => root.render(<SessionEmpty error="" sessions={[]} newTaskComposer={<button>新建任务</button>} />));
+    await act(async () => root.render(
+      <SessionEmpty error="" newTaskComposer={<button>新建任务</button>} />,
+    ));
     assert.match(container.textContent ?? "", /把工作交给 MyAgent/);
     assert.match(container.textContent ?? "", /新建任务/);
     assert.doesNotMatch(container.textContent ?? "", /选择一个会话|新会话/);
@@ -980,22 +988,31 @@ describe("隔离工作区入口与结果提示", () => {
     const root = createRoot(container);
     let env = "project";
     let permission = "normal";
+    let project = "";
     await act(async () => {
       root.render(<NewTaskOverlay
         newTaskEnv={env as "project" | "lobby"} newTaskProject="p" projects={[{ key: "p", name: "示例项目", cwd: "/example" }]} permissionMode={permission as "normal" | "strict" | "trust"}
         runBoundsPreview={null} submitting={false} message="" runMode={false} workspaceMode="project"
         onWorkspaceModeChange={() => undefined} onRunModeChange={() => undefined} planMode={false} onPlanModeChange={() => undefined}
-        onEnvChange={(next) => { env = next; }} onProjectChange={() => undefined} onPermissionMode={(next) => { permission = next; }}
-        onMessage={() => undefined} onPickTemplate={() => undefined} onSubmit={async () => undefined}
+        onEnvChange={(next) => { env = next; }} onProjectChange={(next) => { project = next; }} onPermissionMode={(next) => { permission = next; }}
+        onMessage={() => undefined} onSubmit={async () => undefined}
         onOpenProjectPicker={() => undefined} onClose={() => undefined} onCancelBounds={() => undefined}
       />);
     });
     assert.ok(container.querySelector("textarea"));
-    assert.ok(container.querySelector(".new-task-segmented"));
-    assert.equal(container.querySelectorAll(".permission-choices input").length, 3);
-    (container.querySelector('.new-task-segmented input[value="lobby"]') as HTMLInputElement).click();
+    assert.ok(container.querySelector(".new-task-context-row"));
+    assert.equal(container.querySelectorAll('.new-task-context-row select').length, 2);
+    const envSelect = container.querySelector('.new-task-context-row select') as HTMLSelectElement;
+    envSelect.value = "lobby";
+    envSelect.dispatchEvent(new Event("change", { bubbles: true }));
     assert.equal(env, "lobby");
-    (container.querySelector('.permission-choices input[value="strict"]') as HTMLInputElement).click();
+    envSelect.value = "p";
+    envSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    assert.equal(env, "project");
+    assert.equal(project, "p");
+    const permissionSelect = container.querySelectorAll('.new-task-context-row select').item(1) as HTMLSelectElement;
+    permissionSelect.value = "strict";
+    permissionSelect.dispatchEvent(new Event("change", { bubbles: true }));
     assert.equal(permission, "strict");
     await act(async () => root.unmount());
   });
@@ -1007,11 +1024,15 @@ describe("隔离工作区入口与结果提示", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
-    await act(async () => root.render(<NewTaskOverlay presentation="home" newTaskEnv="project" newTaskProject="p" projects={[{ key: "p", name: "示例项目", cwd: "/example" }]} permissionMode="normal" runBoundsPreview={null} submitting={false} message="" runMode={false} workspaceMode="project" onWorkspaceModeChange={() => undefined} onRunModeChange={() => undefined} planMode={false} onPlanModeChange={() => undefined} onEnvChange={() => undefined} onProjectChange={() => undefined} onPermissionMode={() => undefined} onMessage={() => undefined} onPickTemplate={() => undefined} onSubmit={async () => undefined} onOpenProjectPicker={() => undefined} onClose={() => undefined} onCancelBounds={() => undefined} />));
+    await act(async () => root.render(<NewTaskOverlay presentation="home" newTaskEnv="project" newTaskProject="p" projects={[{ key: "p", name: "示例项目", cwd: "/example" }]} permissionMode="normal" runBoundsPreview={null} submitting={false} message="" runMode={false} workspaceMode="project" onWorkspaceModeChange={() => undefined} onRunModeChange={() => undefined} planMode={false} onPlanModeChange={() => undefined} onEnvChange={() => undefined} onProjectChange={() => undefined} onPermissionMode={() => undefined} onMessage={() => undefined} onSubmit={async () => undefined} onOpenProjectPicker={() => undefined} onClose={() => undefined} onCancelBounds={() => undefined} />));
     assert.notEqual(document.activeElement, container.querySelector("textarea"));
-    assert.ok(container.querySelector(".new-task-segmented"));
-    assert.equal(container.querySelectorAll(".permission-choices input").length, 3);
+    assert.ok(container.querySelector(".new-task-context-row"));
+    assert.equal(container.querySelectorAll('.new-task-context-row select').length, 2);
     assert.equal(container.querySelector(".new-task-close"), null);
+    const options = container.querySelector(".new-task-options") as HTMLDetailsElement;
+    assert.ok(options);
+    options.open = true;
+    assert.ok(options.querySelector("input[type=checkbox]"));
     await act(async () => root.unmount());
     container.remove();
   });
@@ -1032,7 +1053,7 @@ describe("隔离工作区入口与结果提示", () => {
         onWorkspaceModeChange={(next) => { mode = next; }}
         onRunModeChange={() => undefined} planMode={false} onPlanModeChange={() => undefined}
         onEnvChange={() => undefined} onProjectChange={() => undefined} onPermissionMode={() => undefined}
-        onMessage={() => undefined} onPickTemplate={() => undefined} onSubmit={async () => undefined}
+        onMessage={() => undefined} onSubmit={async () => undefined}
         onOpenProjectPicker={() => undefined} onClose={() => undefined} onCancelBounds={() => undefined}
       />);
     });

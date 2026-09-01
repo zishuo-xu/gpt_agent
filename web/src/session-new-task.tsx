@@ -3,7 +3,6 @@ import type { PermissionMode } from "@shared/types.js";
 import {
   Composer,
   RunBoundsConfirmation,
-  TaskScopeTemplates,
   type RunBoundsPreview,
 } from "./session-composer";
 import type { ProjectEntry } from "./session-header";
@@ -28,8 +27,6 @@ export function NewTaskOverlay(props: {
   onProjectChange: (key: string) => void;
   onPermissionMode: (mode: PermissionMode) => void;
   onMessage: (text: string) => void;
-  /** 模板填入：仅替换输入（不清除边界确认卡） */
-  onPickTemplate: (text: string) => void;
   onSubmit: (
     boundsConfirmed?: boolean,
     steer?: boolean,
@@ -47,15 +44,20 @@ export function NewTaskOverlay(props: {
   }, [props.presentation]);
 
   return (
-    <section className={`new-task-panel${props.presentation === "home" ? " new-task-panel-home" : ""}`} ref={panelRef}>
-      {props.presentation !== "home" && <button
-        type="button"
-        className="new-task-close"
-        aria-label="关闭"
-        onClick={props.onClose}
-      >
-        ×
-      </button>}
+    <section
+      className={`new-task-panel${props.presentation === "home" ? " new-task-panel-home" : ""}`}
+      ref={panelRef}
+    >
+      {props.presentation !== "home" && (
+        <button
+          type="button"
+          className="new-task-close"
+          aria-label="关闭"
+          onClick={props.onClose}
+        >
+          ×
+        </button>
+      )}
       <div className="new-task-heading">
         <span className="new-session-mark">◆</span>
         <div>
@@ -76,56 +78,97 @@ export function NewTaskOverlay(props: {
         onRunModeChange={props.onRunModeChange}
         planMode={props.planMode}
         onPlanModeChange={props.onPlanModeChange}
+        showModes={props.presentation !== "home"}
         onSubmit={props.onSubmit}
       />
-      <TaskScopeTemplates onPick={props.onPickTemplate} />
-      <div className="new-task-options">
-        <div className="new-task-section">
-          <span className="new-task-section-label">执行位置</span>
-          <div className="new-task-segmented" role="radiogroup" aria-label="执行位置">
-            <label className={props.newTaskEnv === "project" ? "is-active" : ""}>
-              <input type="radio" name="new-task-env" value="project" checked={props.newTaskEnv === "project"} onChange={() => props.onEnvChange("project")} />
-              <span className="segment-title">项目</span>
-              <span className="segment-desc">读写代码与运行命令</span>
-            </label>
-            <label className={props.newTaskEnv === "lobby" ? "is-active" : ""}>
-              <input type="radio" name="new-task-env" value="lobby" checked={props.newTaskEnv === "lobby"} onChange={() => props.onEnvChange("lobby")} />
-              <span className="segment-title">大厅</span>
-              <span className="segment-desc">只读分析，不改文件</span>
-            </label>
-          </div>
-        </div>
-        {props.newTaskEnv === "project" && (
-          <div className="new-task-project-row">
-            <label className="new-task-project-select">
-              <span>项目</span>
-              <select value={props.newTaskProject} onChange={(event) => props.onProjectChange(event.target.value)}>
-                {props.projects.filter((project) => project.key !== "lobby").map((project) => <option value={project.key} key={project.key}>{project.name}</option>)}
-              </select>
-            </label>
-            <button type="button" className="env-open-other" onClick={props.onOpenProjectPicker}>打开其他项目</button>
-            <label className="isolated-mode-toggle">
-              <input aria-label="隔离执行" type="checkbox" checked={props.workspaceMode === "isolated"} onChange={(event) => props.onWorkspaceModeChange(event.target.checked ? "isolated" : "project")} />
-              <span><strong>隔离执行</strong><small>使用独立 worktree，结果不自动合并</small></span>
-            </label>
-          </div>
-        )}
-        <div className="new-task-section permission-section">
-          <span className="new-task-section-label">权限档</span>
-          <div className="permission-choices" role="radiogroup" aria-label="权限档">
-            {([
-              ["normal", "标准", "需要时请求确认"],
-              ["strict", "严格", "写操作均需确认"],
-              ["trust", "信任", "适合无人值守"],
-            ] as const).map(([mode, label, desc]) => (
-              <label className={props.permissionMode === mode ? "is-active" : ""} key={mode}>
-                <input type="radio" name="permission-mode" value={mode} checked={props.permissionMode === mode} onChange={() => props.onPermissionMode(mode)} />
-                <span><strong>{label}</strong><small>{desc}</small></span>
-              </label>
-            ))}
-          </div>
-        </div>
+      <div className="new-task-context-row" aria-label="任务上下文">
+        <label>
+          <span>位置</span>
+          <select
+            value={props.newTaskEnv === "lobby" ? "lobby" : props.newTaskProject}
+            onChange={(event) => {
+              const key = event.target.value;
+              if (key === "lobby") {
+                props.onEnvChange("lobby");
+              } else {
+                props.onEnvChange("project");
+                props.onProjectChange(key);
+              }
+            }}
+          >
+            <option value="lobby">大厅（只读）</option>
+            <optgroup label="项目">
+              {props.projects
+                .filter((project) => project.key !== "lobby")
+                .map((project) => (
+                  <option value={project.key} key={project.key}>
+                    {project.name}
+                  </option>
+                ))}
+            </optgroup>
+          </select>
+        </label>
+        <label>
+          <span>权限</span>
+          <select
+            value={props.permissionMode}
+            onChange={(event) =>
+              props.onPermissionMode(event.target.value as PermissionMode)
+            }
+          >
+            <option value="normal">标准</option>
+            <option value="strict">严格</option>
+            <option value="trust">信任</option>
+          </select>
+        </label>
       </div>
+      <details className="new-task-options">
+        <summary>任务选项</summary>
+        <div className="new-task-options-grid">
+          <label className="compact-check">
+            <input
+              type="checkbox"
+              checked={props.runMode}
+              disabled={props.submitting}
+              onChange={(event) => props.onRunModeChange(event.target.checked)}
+            />
+            <span><strong>无人值守任务</strong><small>自动执行到完成</small></span>
+          </label>
+          <label className="compact-check">
+            <input
+              type="checkbox"
+              checked={props.planMode}
+              disabled={props.submitting}
+              onChange={(event) => props.onPlanModeChange(event.target.checked)}
+            />
+            <span><strong>先理解再执行</strong><small>先生成计划，确认后执行</small></span>
+          </label>
+          {props.newTaskEnv === "project" && (
+            <>
+              <label className="compact-check">
+                <input
+                  aria-label="隔离执行"
+                  type="checkbox"
+                  checked={props.workspaceMode === "isolated"}
+                  onChange={(event) =>
+                    props.onWorkspaceModeChange(
+                      event.target.checked ? "isolated" : "project",
+                    )
+                  }
+                />
+                <span><strong>隔离执行</strong><small>使用独立 worktree，不自动合并</small></span>
+              </label>
+              <button
+                type="button"
+                className="env-open-other"
+                onClick={props.onOpenProjectPicker}
+              >
+                打开其他项目
+              </button>
+            </>
+          )}
+        </div>
+      </details>
       {props.runBoundsPreview && (
         <RunBoundsConfirmation
           preview={props.runBoundsPreview}
