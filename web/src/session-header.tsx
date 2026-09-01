@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import type { SessionSummary } from "@shared/types.js";
 import { StatusTag } from "./session-render";
+import { groupSessions } from "./session-sidebar";
 
 /** 项目切换器里的一个项目项（/api/projects 响应） */
 export interface ProjectEntry {
@@ -8,7 +10,7 @@ export interface ProjectEntry {
   cwd: string;
 }
 
-/** 会话详情页头部：标题 + 项目切换 + 任务操作 + 导出/删除/详情 */
+/** 任务详情页头部：标题、状态与当前动作；技术操作收进更多菜单。 */
 export function SessionHeader(props: {
   selected: SessionSummary;
   currentProject: string;
@@ -26,17 +28,13 @@ export function SessionHeader(props: {
   return (
     <header className="page-header sessions-header">
       <div>
-        <p className="eyebrow">AGENT / SESSION</p>
         <div className="title-with-status">
           <h1>{props.selected.title}</h1>
           <StatusTag status={props.selected.status} />
         </div>
-        <p>
-          会话 #{props.selected.id} ·{" "}
-          {props.selected.kind === "run"
-            ? "无人值守"
-            : "交互会话"}{" "}
-          · {props.selected.permissionMode} 档
+        <p className="task-context">
+          {props.selected.kind === "run" ? "自动执行" : "与你协作"}
+          {taskAction(props.selected.status)}
         </p>
       </div>
       <div className="header-actions">
@@ -71,46 +69,30 @@ export function SessionHeader(props: {
             ↻ 续跑中断任务
           </button>
         )}
-        <button
-          className="secondary-button"
-          onClick={props.onNew}
-        >
-          ＋ 新会话
-        </button>
-        <button
-          className="detail-toggle"
-          onClick={props.onExport}
-          title="导出会话为 HTML（可分享/归档）"
-        >
-          导出
-        </button>
-        <button
-          className="detail-toggle"
-          onClick={props.onDelete}
-          title="删除此会话"
-        >
-          删除
-        </button>
-        <button
-          className={`detail-toggle ${props.showDetail ? "active" : ""}`}
-          onClick={props.onToggleDetail}
-          title="任务清单 / 消耗 / 会话信息"
-        >
-          ⤢ {props.showDetail ? "收起详情" : "详情"}
-        </button>
+        <button className="secondary-button" onClick={props.onNew}>＋ 新建任务</button>
+        <details className="header-more">
+          <summary>更多</summary>
+          <div className="header-more-menu">
+            <button className={`detail-toggle ${props.showDetail ? "active" : ""}`} onClick={props.onToggleDetail}>
+              {props.showDetail ? "收起任务详情" : "任务详情"}
+            </button>
+            <button className="detail-toggle" onClick={props.onExport}>导出任务</button>
+            <button className="detail-toggle danger" onClick={props.onDelete}>删除任务</button>
+          </div>
+        </details>
       </div>
     </header>
   );
 }
 
-/** 未选中会话时的空态：说明 + 项目切换 + 新建入口 */
+/** 未选中任务时的任务首页：主 CTA + 当前项目任务摘要。 */
 export function SessionEmpty(props: {
   error: string;
-  currentProject: string;
-  projects: ProjectEntry[];
-  onSwitchProject: (key: string) => void;
-  onNew: () => void;
+  sessions?: SessionSummary[];
+  onSelect?: (id: string) => void;
+  newTaskComposer?: ReactNode;
 }) {
+  const groups = props.sessions ? groupSessions(props.sessions) : [];
   return (
     <>
       {props.error && (
@@ -119,34 +101,40 @@ export function SessionEmpty(props: {
       <div className="empty-detail">
         <div className="empty-detail-inner">
           <span className="empty-detail-mark">◆</span>
-          <h2>选择一个会话，或新建</h2>
-          <p>
-            左侧是会话列表；也可以在下方直接开始一个新任务。
-          </p>
-          <div className="empty-detail-actions">
-            <select
-              className="project-switcher"
-              value={props.currentProject}
-              onChange={(event) =>
-                props.onSwitchProject(event.target.value)
-              }
-              title="切换项目"
-            >
-              {props.projects.map((project) => (
-                <option value={project.key} key={project.key}>
-                  {project.name}
-                </option>
+          <h2>把工作交给 MyAgent</h2>
+          <p>描述你想完成的工作，MyAgent 会在项目中执行、验证并汇报结果。</p>
+          {props.newTaskComposer}
+          {groups.some((group) => group.sessions.length > 0) && (
+            <div className="home-task-summary" aria-label="任务摘要">
+              {groups.map((group) => group.sessions.length > 0 && (
+                <div className="home-task-group" key={group.id}>
+                  <strong>{group.label}</strong>
+                  {group.sessions.slice(0, 3).map((session) => <button key={session.id} onClick={() => props.onSelect?.(session.id)}>{session.title}</button>)}
+                </div>
               ))}
-            </select>
-            <button
-              className="save-button"
-              onClick={props.onNew}
-            >
-              ＋ 新会话
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </>
   );
+}
+
+function taskAction(status: SessionSummary["status"]): string {
+  switch (status) {
+    case "waiting_permission":
+    case "waiting_plan":
+    case "waiting_user":
+      return " · 等待你的决定";
+    case "running":
+      return " · 正在处理";
+    case "done":
+      return " · 可查看交付结果";
+    case "error":
+      return " · 遇到问题，可继续处理";
+    case "interrupted":
+      return " · 可恢复任务";
+    case "idle":
+      return " · 可补充要求";
+  }
 }

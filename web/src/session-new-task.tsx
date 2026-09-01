@@ -8,8 +8,9 @@ import {
 } from "./session-composer";
 import type { ProjectEntry } from "./session-header";
 
-/** 新建会话模态面板：先说清任务，再选择执行环境与权限。 */
+/** 新建任务表单，可作为模态或首页嵌入式启动器。 */
 export function NewTaskOverlay(props: {
+  presentation?: "modal" | "home";
   newTaskEnv: "project" | "lobby";
   newTaskProject: string;
   projects: ProjectEntry[];
@@ -41,19 +42,20 @@ export function NewTaskOverlay(props: {
   // 面板展开后聚焦输入框（模态居中，无需滚动）
   const panelRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
+    if (props.presentation === "home") return;
     panelRef.current?.querySelector("textarea")?.focus();
-  }, []);
+  }, [props.presentation]);
 
   return (
-    <section className="new-task-panel" ref={panelRef}>
-      <button
+    <section className={`new-task-panel${props.presentation === "home" ? " new-task-panel-home" : ""}`} ref={panelRef}>
+      {props.presentation !== "home" && <button
         type="button"
         className="new-task-close"
         aria-label="关闭"
         onClick={props.onClose}
       >
         ×
-      </button>
+      </button>}
       <div className="new-task-heading">
         <span className="new-session-mark">◆</span>
         <div>

@@ -166,4 +166,24 @@ describe("DeliveryWorkbench 状态与证据", () => {
     await rendered.act(async () => rendered.root.unmount());
     rendered.container.remove();
   });
+
+  it("首屏突出四项交付指标，文件预览最多五项，完整清单保留在折叠详情", async () => {
+    const files = Array.from({ length: 8 }, (_, index) => `src/file-${index}.ts`);
+    const rendered = await renderWorkbench({
+      ...baseDelivery,
+      files,
+      verification: "passed",
+      review: "failed",
+      warnings: ["存在一个待确认风险"],
+      reviewResult: { passed: false, issues: ["需要复查"], summary: "Review 需要复查" },
+    });
+    assert.equal(rendered.container.querySelectorAll(".delivery-metrics > div").length, 4);
+    assert.equal(rendered.container.querySelectorAll(".delivery-files-preview li").length, 5);
+    const details = rendered.container.querySelector(".delivery-details");
+    assert.ok(details, "应存在机器验收详情折叠区");
+    assert.equal(details.querySelectorAll(".delivery-files li").length, 8);
+    assert.match(rendered.container.textContent ?? "", /还有 3 个文件/);
+    await rendered.act(async () => rendered.root.unmount());
+    rendered.container.remove();
+  });
 });

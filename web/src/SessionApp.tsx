@@ -59,7 +59,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [message, setMessage] = useState("");
   const [permissionMode, setPermissionMode] =
     useState<PermissionMode>("normal");
-  const [showNewTask, setShowNewTask] = useState(false);
   /** 新建会话的执行环境：项目 or 大厅（不操作文件） */
   const [newTaskEnv, setNewTaskEnv] = useState<"project" | "lobby">("project");
   /** 新建会话所选项目 key（项目环境下） */
@@ -77,10 +76,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
       setEvents([]);
       setCurrentProject(project.key);
       // 新建面板可能正打开着：同步面板内执行环境，避免下拉停留在旧项目
-      if (showNewTask) {
-        setNewTaskEnv("project");
-        setNewTaskProject(project.key);
-      }
+      setNewTaskEnv("project");
+      setNewTaskProject(project.key);
       // 打开后立即拉取该项目的会话列表（值不变时 useEffect 不会触发）
       void refreshSessions();
       // 刷新项目列表（把新项目并入切换器）
@@ -223,7 +220,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
     if (sessions.some((session) => session.id === initialSessionId)) {
       setSelectedId(initialSessionId);
       appliedInitialSessionId.current = initialSessionId;
-      setShowNewTask(false);
     }
   }, [sessionsLoaded, sessions, initialSessionId]);
 
@@ -380,21 +376,17 @@ export function SessionApp(props: { initialSessionId?: string }) {
     setSessions([]);
     setSessionsLoaded(false);
     setEvents([]);
-    // 新建面板打开时同步执行环境（面板是模态，正常无法同时操作，防御性同步）
-    if (showNewTask) {
-      setNewTaskEnv(key === "lobby" ? "lobby" : "project");
-      setNewTaskProject(key === "lobby" ? "" : key);
-      if (key === "lobby") setWorkspaceMode("project");
-    }
+    setNewTaskEnv(key === "lobby" ? "lobby" : "project");
+    setNewTaskProject(key === "lobby" ? "" : key);
+    if (key === "lobby") setWorkspaceMode("project");
   }
 
-  /** 打开新建会话面板：初始化执行环境（当前项目 or 大厅） */
+  /** 准备新任务首页状态：初始化执行环境（当前项目 or 大厅）。 */
   function openNewTask() {
     setSelectedId("");
     setNewTaskEnv(currentProject === "lobby" ? "lobby" : "project");
     setNewTaskProject(currentProject === "lobby" ? "" : currentProject);
     setWorkspaceMode("project");
-    setShowNewTask(true);
   }
 
   // 标题统一在此设置：等待审批 > 刚完成提醒 > 当前会话 > 默认
@@ -619,7 +611,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
           setEvents([]);
         }
         setSelectedId(payload.session.id);
-        setShowNewTask(false);
       }
       setMessage("");
       setRunBoundsPreview(null);
@@ -785,7 +776,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
         open={sidebarOpen}
         onSelect={(id) => {
           setSelectedId(id);
-          setShowNewTask(false);
           // 移动端：选中会话后收起抽屉
           setSidebarOpen(false);
         }}
@@ -934,50 +924,40 @@ export function SessionApp(props: { initialSessionId?: string }) {
         ) : (
           <SessionEmpty
             error={error}
-            currentProject={currentProject}
-            projects={projects}
-            onSwitchProject={switchProject}
-            onNew={startNewSession}
+            sessions={sessions}
+            onSelect={(id) => setSelectedId(id)}
+            newTaskComposer={
+              <NewTaskOverlay
+                presentation="home"
+                newTaskEnv={newTaskEnv}
+                newTaskProject={newTaskProject}
+                projects={projects}
+                permissionMode={permissionMode}
+                runBoundsPreview={runBoundsPreview}
+                submitting={submitting}
+                message={message}
+                runMode={runMode}
+                workspaceMode={workspaceMode}
+                onWorkspaceModeChange={setWorkspaceMode}
+                onRunModeChange={setRunMode}
+                planMode={planMode}
+                onPlanModeChange={setPlanMode}
+                onEnvChange={(env) => {
+                  setNewTaskEnv(env);
+                  if (env === "lobby") setWorkspaceMode("project");
+                }}
+                onProjectChange={setNewTaskProject}
+                onPermissionMode={setPermissionMode}
+                onMessage={updateMessage}
+                onPickTemplate={setMessage}
+                onSubmit={submitMessage}
+                onOpenProjectPicker={() => void projectPicker.openProjectPicker()}
+                onClose={() => undefined}
+                onCancelBounds={() => setRunBoundsPreview(null)}
+              />
+            }
           />
         )}
-            {showNewTask && (
-              <div
-                className="new-task-overlay"
-                onClick={(event) => {
-                  if (event.target === event.currentTarget) {
-                    setShowNewTask(false);
-                  }
-                }}
-              >
-                <NewTaskOverlay
-                  newTaskEnv={newTaskEnv}
-                  newTaskProject={newTaskProject}
-                  projects={projects}
-                  permissionMode={permissionMode}
-                  runBoundsPreview={runBoundsPreview}
-                  submitting={submitting}
-                  message={message}
-                  runMode={runMode}
-                  workspaceMode={workspaceMode}
-                  onWorkspaceModeChange={setWorkspaceMode}
-                  onRunModeChange={setRunMode}
-                  planMode={planMode}
-                  onPlanModeChange={setPlanMode}
-                  onEnvChange={(env) => {
-                    setNewTaskEnv(env);
-                    if (env === "lobby") setWorkspaceMode("project");
-                  }}
-                  onProjectChange={setNewTaskProject}
-                  onPermissionMode={setPermissionMode}
-                  onMessage={updateMessage}
-                  onPickTemplate={setMessage}
-                  onSubmit={submitMessage}
-                  onOpenProjectPicker={() => void projectPicker.openProjectPicker()}
-                  onClose={() => setShowNewTask(false)}
-                  onCancelBounds={() => setRunBoundsPreview(null)}
-                />
-              </div>
-            )}
             {planDetail && (
               <PlanDecisionOverlay
                 plan={planDetail}

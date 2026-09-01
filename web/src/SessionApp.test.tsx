@@ -490,7 +490,7 @@ describe("SessionListSidebar（会话列表交互）", () => {
     };
   }
 
-  it("渲染全部会话，选中项带 active 样式", async () => {
+  it("按任务分组渲染，选中项带 active 样式", async () => {
     const { container, root, act } = await setup({
       sessions: [makeSession("s1", "第一个会话"), makeSession("s2", "第二个会话")],
       selectedId: "s2",
@@ -551,7 +551,7 @@ describe("SessionListSidebar（会话列表交互）", () => {
   it("无会话时展示空状态提示（首拉完成前显示加载态）", async () => {
     const { container, root, act } = await setup({ sessions: [], selectedId: "" });
     assert.equal(container.querySelector("button.sidebar-session"), null);
-    assert.match(container.querySelector(".sidebar-empty")?.textContent ?? "", /加载会话/);
+    assert.match(container.querySelector(".sidebar-empty")?.textContent ?? "", /加载任务/);
     await act(async () => root.unmount());
   });
 
@@ -561,7 +561,7 @@ describe("SessionListSidebar（会话列表交互）", () => {
       selectedId: "",
       sessionsLoaded: true,
     });
-    assert.match(container.querySelector(".sidebar-empty")?.textContent ?? "", /还没有会话/);
+    assert.match(container.querySelector(".sidebar-empty")?.textContent ?? "", /还没有任务/);
     await act(async () => root.unmount());
   });
 
@@ -631,6 +631,56 @@ describe("SessionListSidebar（会话列表交互）", () => {
       "清空搜索后应恢复全部会话",
     );
     await act(async () => root.unmount());
+  });
+});
+
+describe("任务工作台信息层级", () => {
+  const makeTask = (id: string, status: string, title = id) => ({ id, title, status, permissionMode: "normal", createdAt: ts, updatedAt: ts, totalInputTokens: 0, totalOutputTokens: 0, totalCachedTokens: 0, totalCostCny: 0, todos: [], toolCallCount: 0, kind: "interactive" });
+  it("将等待、错误和中断归入需要处理，运行中单独分组，idle 归入最近任务", async () => {
+    const [{ act }, { createRoot }, { SessionListSidebar }] = await Promise.all([
+      import("react"), import("react-dom/client"), import("./SessionApp"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<SessionListSidebar sessions={[makeTask("wait", "waiting_user"), makeTask("error", "error"), makeTask("stop", "interrupted"), makeTask("run", "running"), makeTask("idle", "idle"), makeTask("done", "done")] as never} sessionsLoaded selectedId="" onSelect={() => undefined} onNew={() => undefined} />));
+    assert.deepEqual(Array.from(container.querySelectorAll(".task-group-label")).map((node) => node.textContent?.replace(/\d+$/, "")), ["需要你处理", "进行中", "最近任务"]);
+    assert.equal(container.querySelector(".task-group-attention")?.querySelectorAll(".sidebar-task-row").length, 3);
+    assert.equal(container.querySelector(".task-group-active")?.querySelectorAll(".sidebar-task-row").length, 1);
+    assert.equal(container.querySelector(".task-group-recent")?.querySelectorAll(".sidebar-task-row").length, 2);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("任务头部使用用户动作文案并将技术操作收进更多", async () => {
+    const [{ act }, { createRoot }, { SessionHeader }] = await Promise.all([
+      import("react"), import("react-dom/client"), import("./session-header"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<SessionHeader selected={makeTask("abc123", "waiting_user", "修复问题") as never} currentProject="" projects={[]} busy onSwitchProject={() => undefined} onInterrupt={() => undefined} onResume={() => undefined} onNew={() => undefined} onExport={() => undefined} onDelete={() => undefined} showDetail={false} onToggleDetail={() => undefined} />));
+    const text = container.textContent ?? "";
+    assert.match(text, /等待你的决定/);
+    assert.doesNotMatch(text, /AGENT \/ SESSION|会话 #|normal/);
+    assert.ok(container.querySelector(".header-more"));
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("首页空态使用任务化入口文案", async () => {
+    const [{ act }, { createRoot }, { SessionEmpty }] = await Promise.all([
+      import("react"), import("react-dom/client"), import("./session-header"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<SessionEmpty error="" sessions={[]} newTaskComposer={<button>新建任务</button>} />));
+    assert.match(container.textContent ?? "", /把工作交给 MyAgent/);
+    assert.match(container.textContent ?? "", /新建任务/);
+    assert.doesNotMatch(container.textContent ?? "", /选择一个会话|新会话/);
+    await act(async () => root.unmount());
+    container.remove();
   });
 });
 
@@ -948,6 +998,22 @@ describe("隔离工作区入口与结果提示", () => {
     (container.querySelector('.permission-choices input[value="strict"]') as HTMLInputElement).click();
     assert.equal(permission, "strict");
     await act(async () => root.unmount());
+  });
+
+  it("首页形态不抢占焦点，但仍展示执行位置和权限选择", async () => {
+    const [{ act }, { createRoot }, { NewTaskOverlay }] = await Promise.all([
+      import("react"), import("react-dom/client"), import("./session-new-task"),
+    ]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<NewTaskOverlay presentation="home" newTaskEnv="project" newTaskProject="p" projects={[{ key: "p", name: "示例项目", cwd: "/example" }]} permissionMode="normal" runBoundsPreview={null} submitting={false} message="" runMode={false} workspaceMode="project" onWorkspaceModeChange={() => undefined} onRunModeChange={() => undefined} planMode={false} onPlanModeChange={() => undefined} onEnvChange={() => undefined} onProjectChange={() => undefined} onPermissionMode={() => undefined} onMessage={() => undefined} onPickTemplate={() => undefined} onSubmit={async () => undefined} onOpenProjectPicker={() => undefined} onClose={() => undefined} onCancelBounds={() => undefined} />));
+    assert.notEqual(document.activeElement, container.querySelector("textarea"));
+    assert.ok(container.querySelector(".new-task-segmented"));
+    assert.equal(container.querySelectorAll(".permission-choices input").length, 3);
+    assert.equal(container.querySelector(".new-task-close"), null);
+    await act(async () => root.unmount());
+    container.remove();
   });
 
   it("隔离执行复选框可切换且工作区缺失时显示风险", async () => {
