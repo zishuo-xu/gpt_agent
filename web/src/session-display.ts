@@ -350,11 +350,21 @@ export function buildDisplayItems(events: SessionEvent[]): DisplayItem[] {
               : {}),
           });
         } else {
+          // 与紧随其前的 error 级 notify 同源（模型失败同时发两条）时只保留这张可操作的卡
+          const prev = items.at(-1);
+          if (
+            prev?.kind === "system" &&
+            prev.tone === "error" &&
+            prev.text.includes(event.question.slice(0, 20))
+          ) {
+            items.pop();
+          }
           system(seq, `需要你的决定：${event.question}`, "warning");
         }
         break;
       case "done":
-        system(seq, "✓ 本轮任务已完成", "done");
+        // 完成行保留（e2e 用它做完成信号），但渲染为无装饰的普通系统行
+        system(seq, "本轮任务已完成");
         break;
       case "error":
         system(seq, `运行失败：${event.message}`, "error");

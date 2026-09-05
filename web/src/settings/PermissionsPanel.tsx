@@ -34,9 +34,9 @@ export function PermissionsPanel(props: PermissionsPanelProps) {
               })
             }
           >
-            <option value="strict">strict</option>
-            <option value="normal">normal</option>
-            <option value="trust">trust</option>
+            <option value="strict">严格（写操作与命令都需批准）</option>
+            <option value="normal">标准（只读自动放行，写与命令需批准）</option>
+            <option value="trust">信任（除显式禁止外自动执行）</option>
           </select>
         </label>
         <label>
@@ -64,9 +64,9 @@ export function PermissionsPanel(props: PermissionsPanelProps) {
                 })
               }
             >
-              <option value="allow">allow</option>
-              <option value="ask">ask</option>
-              <option value="deny">deny</option>
+              <option value="allow">允许</option>
+              <option value="ask">询问</option>
+              <option value="deny">禁止</option>
             </select>
             <input
               value={rule.pattern}

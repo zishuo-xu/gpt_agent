@@ -21,3 +21,9 @@ tmp/
 
 # Playwright MCP 本地会话产物
 .playwright-mcp/
+
+# 设计稿源文件（AI 生成的 UI 参考图，非代码产物）
+ux/
+
+# WorkBuddy 工具产物（记忆/技能等，本地状态）
+.workbuddy/

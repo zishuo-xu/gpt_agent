@@ -22,6 +22,8 @@ export function ItemCard(props: {
   item: DisplayItem;
   /** 缓存 miss 提示开关（behavior.showCacheMissNotices；默认关） */
   showCacheMissNotices: boolean;
+  /** 对话视图精简模式：隐藏思考过程与每轮 token 行（轨迹视图已有每轮统计） */
+  compact?: boolean;
   locallyResolved: ReadonlySet<string>;
   /** 正在提交审批的 callId（按钮 loading 态，防重复点击） */
   pendingPermissionCallId?: string | null;
@@ -102,6 +104,7 @@ export function ItemCard(props: {
   }
 
   if (item.kind === "thinking") {
+    if (props.compact) return null;
     return (
       <details className="web-thinking">
         <summary>
@@ -115,6 +118,7 @@ export function ItemCard(props: {
   }
 
   if (item.kind === "cost") {
+    if (props.compact) return null;
     const { event } = item;
     const cached = Number(event.cached ?? 0);
     const input = Number(event.input ?? 0);

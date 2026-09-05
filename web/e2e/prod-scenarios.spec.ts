@@ -21,17 +21,15 @@ async function startTask(
   task: string,
 ): Promise<void> {
   await page.goto("/");
-  await page
-    .getByRole("main")
-    .getByRole("button", { name: "＋ 新会话" })
-    .click();
+  // 新版首页即新建面板：展开「任务选项」选 trust 无人值守档
+  await page.locator(".new-task-options > summary").click();
   // 生产长任务选择 trust 无人值守档（normal 下 Bash 审批会挂起等人工）
   await page.getByRole("combobox", { name: "权限档" }).selectOption("trust");
   const input = page.getByPlaceholder(
     "例如：检查这个项目，修复当前失败的测试",
   );
   await input.fill(task);
-  await page.getByRole("button", { name: "启动任务" }).click();
+  await page.getByRole("button", { name: "发送", exact: true }).click();
   // 等待任务真正启动（会话详情出现输入框；任务运行中 placeholder 为排队版）
   await expect(
     page.getByPlaceholder(/发消息给 MyAgent/),

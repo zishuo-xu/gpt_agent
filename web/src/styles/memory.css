@@ -16,16 +16,16 @@
   grid-template-columns: 235px minmax(0, 1fr);
   min-height: 0;
   flex: 1;
-  border: 1px solid #2b3441;
+  border: 1px solid var(--line);
   border-radius: 11px;
-  background: #141b24;
+  background: var(--surface-1);
   overflow: hidden;
 }
 
 .memory-list {
   padding: 15px 10px;
-  border-right: 1px solid #2b3441;
-  background: #111720;
+  border-right: 1px solid var(--line);
+  background: var(--surface-1);
 }
 
 .memory-list button {
@@ -38,20 +38,20 @@
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
-  color: #929dac;
+  color: var(--text-muted);
   cursor: pointer;
   text-align: left;
 }
 
 .memory-list button:hover,
 .memory-list button.selected {
-  border-color: #354153;
-  background: #1c2531;
-  color: #e3e7ed;
+  border-color: var(--line-strong);
+  background: var(--surface-3);
+  color: var(--text-strong);
 }
 
 .memory-list button.selected {
-  box-shadow: inset 3px 0 0 #668ff3;
+  box-shadow: inset 3px 0 0 var(--brand);
 }
 
 /* 四类记忆文档色彩标识 */
@@ -60,19 +60,19 @@
 }
 
 .memory-list .doc-preferences .doc-icon {
-  color: #a78bfa;
+  color: var(--accent-2);
 }
 
 .memory-list .doc-conventions .doc-icon {
-  color: #72a3ff;
+  color: var(--st-info);
 }
 
 .memory-list .doc-pitfalls .doc-icon {
-  color: #e57373;
+  color: var(--st-error);
 }
 
 .memory-list .doc-decisions .doc-icon {
-  color: #4cc38a;
+  color: var(--brand);
 }
 
 .memory-list strong,
@@ -89,7 +89,7 @@
 
 .memory-list small {
   margin-top: 3px;
-  color: #7a8698;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -116,16 +116,16 @@
 }
 
 .memory-editor-header code {
-  color: #687587;
+  color: var(--text-faint);
   font: 9px var(--mono);
 }
 
 .memory-clear-button {
   padding: 6px 10px;
-  border: 1px solid #55383e;
+  border: 1px solid #6e3737;
   border-radius: 6px;
   background: transparent;
-  color: #bd7e87;
+  color: #f28b85;
   cursor: pointer;
   font-size: 10px;
 }
@@ -139,27 +139,27 @@
   min-height: 300px;
   padding: 16px;
   resize: none;
-  border-color: #2d3846;
-  background: #0d131b;
-  color: #d5dbe5;
+  border-color: var(--line);
+  background: var(--surface-0);
+  color: var(--text-body);
   font: 11px/1.75 var(--mono);
 }
 
 /* 空文档占位提示（虚线框） */
 .memory-textarea:placeholder-shown {
   border-style: dashed;
-  border-color: #37445a;
+  border-color: var(--line-strong);
 }
 
 .memory-timeline {
   margin-top: 20px;
   padding-top: 17px;
-  border-top: 1px solid #293340;
+  border-top: 1px solid var(--line);
 }
 
 .memory-timeline h3 {
   margin: 0 0 12px;
-  color: #8b98aa;
+  color: var(--text-muted);
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -167,9 +167,9 @@
 
 .memory-timeline > p {
   padding: 14px 16px;
-  border: 1px dashed #303b4a;
+  border: 1px dashed var(--line);
   border-radius: 8px;
-  color: #6d7a8c;
+  color: var(--text-faint);
   font-size: 12px;
   text-align: center;
 }
@@ -190,21 +190,21 @@
 
 .timeline-chip {
   padding: 2px 10px;
-  border: 1px solid #33404f;
+  border: 1px solid var(--line);
   border-radius: 10px;
   background: none;
-  color: #8b98aa;
+  color: var(--text-muted);
   font-size: 11px;
   cursor: pointer;
 }
 
 .timeline-chip:hover {
-  border-color: #6f93d9;
-  color: #c6d2e2;
+  border-color: var(--brand);
+  color: var(--text-body);
 }
 
 .timeline-chip.active {
-  border-color: #6f93d9;
+  border-color: var(--brand);
   background: rgba(111, 147, 217, 0.14);
   color: #9db8ec;
 }
@@ -213,7 +213,7 @@
   position: relative;
   display: block;
   padding: 10px 0 10px 14px;
-  border-left: 1px solid #303b4a;
+  border-left: 1px solid var(--line);
   color: #a3aebd;
   font-size: 12px;
 }
@@ -372,8 +372,8 @@
 }
 
 .memory-preview-toggle:hover {
-  border-color: #6f93d9;
-  color: #e3e7ed;
+  border-color: var(--brand);
+  color: var(--text-strong);
 }
 
 .memory-preview {

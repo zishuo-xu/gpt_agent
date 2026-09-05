@@ -124,28 +124,31 @@ test.describe.serial("provider-free 计划批准门", () => {
 
   test("只读规划 → 反馈修订 → 弹窗批准 → 同会话执行", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("main").getByRole("button", { name: "＋ 新会话" }).click();
     await page.getByPlaceholder("例如：检查这个项目，修复当前失败的测试").fill("完成计划门演示");
+    // 新版首页：计划开关在「任务选项」折叠条内，先展开
+    await page.locator(".new-task-options > summary").click();
     const smartStart = page.locator(".new-task-panel .plan-mode-toggle input");
     await expect(smartStart).not.toBeChecked();
-    await smartStart.check();
+    // input 被外层 label 覆盖（自定义开关样式），点击 label 触发切换
+    await page.locator(".new-task-panel .plan-mode-toggle").click();
+    await expect(smartStart).toBeChecked();
     await page.locator(".new-task-panel button.save-button").click();
 
-    let dialog = page.getByRole("dialog", { name: "任务契约已就绪，请选择下一步" });
+    let dialog = page.getByRole("dialog", { name: "执行计划待确认" });
     await expect(dialog).toBeVisible({ timeout: 30_000 });
     await expect(dialog.getByText("完成计划门演示", { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 375, height: 812 });
     const analysisBox = await dialog.getByRole("button", { name: "仅保留分析" }).boundingBox();
-    const approveBox = await dialog.getByRole("button", { name: "批准并开始执行" }).boundingBox();
+    const approveBox = await dialog.getByRole("button", { name: /批准执行/ }).boundingBox();
     expect(analysisBox?.width ?? 0).toBeGreaterThan(300);
     expect(Math.abs((analysisBox?.x ?? 0) - (approveBox?.x ?? 0))).toBeLessThan(2);
     await dialog.getByPlaceholder(/公开 API/).fill("不要修改公开 API");
     await dialog.getByRole("button", { name: "修改计划" }).click();
 
-    dialog = page.getByRole("dialog", { name: "任务契约已就绪，请选择下一步" });
+    dialog = page.getByRole("dialog", { name: "执行计划待确认" });
     await expect(dialog).toBeVisible({ timeout: 30_000 });
     await expect(dialog.getByText(/在不修改公开 API 的前提下完成/)).toBeVisible();
-    await dialog.getByRole("button", { name: "批准并开始执行" }).click();
+    await dialog.getByRole("button", { name: /批准执行/ }).click();
 
     await expect(dialog).toBeHidden();
     await expect(page.getByText("计划已批准，开始执行")).toBeVisible({ timeout: 30_000 });
@@ -158,7 +161,7 @@ test.describe.serial("provider-free 计划批准门", () => {
     await expect(ledger).toContainText("检查现状");
     await expect(ledger).toContainText("实施最小修改");
     await expect(ledger.getByText("已完成", { exact: true })).toHaveCount(2);
-    const done = page.getByText("✓ 本轮任务已完成");
+    const done = page.getByText(/本轮任务已完成/);
     await done.scrollIntoViewIfNeeded();
     await expect(done).toBeVisible();
   });

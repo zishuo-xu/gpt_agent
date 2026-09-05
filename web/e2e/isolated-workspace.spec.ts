@@ -119,12 +119,12 @@ test.describe.serial("隔离执行真实用户入口", () => {
 
   test("新建隔离任务写入 worktree 且原项目不变", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("main").getByRole("button", { name: "＋ 新会话" }).click();
+    // 新版首页即新建面板：展开「任务选项」勾选隔离执行 + 信任权限档
+    await page.locator(".new-task-options > summary").click();
     await page.getByRole("checkbox", { name: "隔离执行" }).check();
-    await expect(page.getByText(/Agent 只修改独立 Git worktree/)).toBeVisible();
     await page.getByRole("combobox", { name: "权限档" }).selectOption("trust");
     await page.getByPlaceholder("例如：检查这个项目，修复当前失败的测试").fill("写入隔离标记文件");
-    await page.getByRole("button", { name: "启动任务" }).click();
+    await page.getByRole("button", { name: "发送", exact: true }).click();
 
     const banner = page.getByRole("region", { name: "隔离工作区" });
     await expect(banner).toBeVisible({ timeout: 30_000 });
@@ -136,8 +136,10 @@ test.describe.serial("隔离执行真实用户入口", () => {
     await expect.poll(async () => readFile(`${workspacePath}/isolated-e2e-marker.txt`, "utf8")).toBe("written-in-worktree\n");
     await expect.poll(async () => access(SOURCE_MARKER).then(() => true).catch(() => false)).toBe(false);
 
-    const delivery = page.getByRole("region", { name: "交付验收" });
+    const delivery = page.locator("details.delivery-workbench");
     await expect(delivery).toBeVisible({ timeout: 30_000 });
+    // 交付卡是折叠的 <details>：展开后才能读内容
+    await delivery.locator("> summary").click();
     await expect(delivery).toContainText("已完成但未机器验收");
     await expect(delivery).toContainText("isolated-e2e-marker.txt");
     await expect(delivery).toContainText("工作区自创建后已发生变化");

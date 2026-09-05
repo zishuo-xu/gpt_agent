@@ -154,7 +154,7 @@ test.describe.serial("provider-free Flight Recorder", () => {
     });
 
     await page.goto(`/#sessions/${parentId}`);
-    await page.getByRole("button", { name: "Trace" }).click();
+    await page.getByRole("button", { name: "轨迹" }).click();
     await expect(page.getByText("Turn 1", { exact: true })).toBeVisible();
     await page.locator(".trace-card").first().getByRole("button", { name: "从这里 Fork" }).click();
     const modal = page.getByRole("dialog", { name: "Fork 并运行实验" });

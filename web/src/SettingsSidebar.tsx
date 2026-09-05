@@ -1,14 +1,18 @@
 /**
- * 设置区侧栏：设置 + 记忆面板 整合的导航。
- * 记忆面板并入设置（作为子项），不再单独占主导航。
+ * 设置区侧栏：会话 / 设置 / 扩展 / 记忆 / 定时 / 统计（与任务栏同风格的品牌区）。
  */
 export function SettingsSidebar(props: {
-  active: "settings" | "memory" | "plugins" | "scheduled" | "stats";
+  active: "settings" | "plugins" | "memory" | "scheduled" | "stats";
 }) {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark">◆</span>
+        <span className="brand-mark">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="11" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M4.5 7h5M7 4.5v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </span>
         <span>MyAgent</span>
       </div>
       <nav aria-label="设置导航">
@@ -18,27 +22,7 @@ export function SettingsSidebar(props: {
             window.location.hash = "sessions";
           }}
         >
-          <span>◉</span>会话
-        </button>
-        <button
-          className={`nav-item ${
-            props.active === "scheduled" ? "active" : ""
-          }`}
-          onClick={() => {
-            window.location.hash = "scheduled";
-          }}
-        >
-          <span>⏱</span>定时任务
-        </button>
-        <button
-          className={`nav-item ${
-            props.active === "stats" ? "active" : ""
-          }`}
-          onClick={() => {
-            window.location.hash = "stats";
-          }}
-        >
-          <span>▤</span>任务统计
+          <span aria-hidden="true">◉</span>会话
         </button>
         <button
           className={`nav-item ${
@@ -48,7 +32,7 @@ export function SettingsSidebar(props: {
             window.location.hash = "settings";
           }}
         >
-          <span>⚙</span>模型配置
+          <span aria-hidden="true">⚙</span>设置
         </button>
         <button
           className={`nav-item ${
@@ -58,7 +42,7 @@ export function SettingsSidebar(props: {
             window.location.hash = "plugins";
           }}
         >
-          <span>▣</span>插件
+          <span aria-hidden="true">▣</span>扩展
         </button>
         <button
           className={`nav-item ${
@@ -68,7 +52,27 @@ export function SettingsSidebar(props: {
             window.location.hash = "memory";
           }}
         >
-          <span>✎</span>记忆面板
+          <span aria-hidden="true">▤</span>记忆
+        </button>
+        <button
+          className={`nav-item ${
+            props.active === "scheduled" ? "active" : ""
+          }`}
+          onClick={() => {
+            window.location.hash = "scheduled";
+          }}
+        >
+          <span aria-hidden="true">◷</span>定时
+        </button>
+        <button
+          className={`nav-item ${
+            props.active === "stats" ? "active" : ""
+          }`}
+          onClick={() => {
+            window.location.hash = "stats";
+          }}
+        >
+          <span aria-hidden="true">▦</span>统计
         </button>
       </nav>
       <div className="local-state">

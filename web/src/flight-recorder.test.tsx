@@ -51,6 +51,23 @@ function setTextarea(element: HTMLTextAreaElement, value: string): void {
   element.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+/**
+ * 调试测试用的受控包装：FlightRecorder 的 view 由父组件持有（同 SessionApp），
+ * 测试需要真实切换 Tab，因此用本地 state 驱动。
+ */
+async function renderControlled(
+  root: ReturnType<typeof import("react-dom/client").createRoot>,
+  props: Omit<Parameters<typeof import("./flight-recorder").FlightRecorder>[0], "view" | "onViewChange">,
+): Promise<void> {
+  const { act, createElement, useState } = await import("react");
+  const { FlightRecorder } = await import("./flight-recorder");
+  function Harness() {
+    const [view, setView] = useState<"conversation" | "trace" | "compare">("conversation");
+    return createElement(FlightRecorder, { ...props, view, onViewChange: setView });
+  }
+  await act(async () => root.render(createElement(Harness)));
+}
+
 describe("FlightRecorder Web 调试闭环", () => {
   before(() => {
     GlobalRegistrator.register();
@@ -110,29 +127,25 @@ describe("FlightRecorder Web 调试闭环", () => {
       });
     }) as typeof fetch;
 
-    const [{ act }, { createRoot }, { FlightRecorder }] = await Promise.all([
+    const [{ act }, { createRoot }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
-      import("./flight-recorder"),
     ]);
+    const { createElement } = await import("react");
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
     const selected: string[] = [];
-    await act(async () => {
-      root.render(
-        <FlightRecorder
-          session={session()}
-          project="project-key"
-          conversation={<div>conversation</div>}
-          onSelectSession={(id) => selected.push(id)}
-        />,
-      );
+    await renderControlled(root, {
+      session: session(),
+      project: "project-key",
+      conversation: createElement("div", null, "conversation"),
+      onSelectSession: (id) => selected.push(id),
     });
 
     await act(async () => {
       (Array.from(container.querySelectorAll("button")).find(
-        (button) => button.textContent === "Trace",
+        (button) => button.textContent === "轨迹",
       ) as HTMLButtonElement).click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -192,27 +205,23 @@ describe("FlightRecorder Web 调试闭环", () => {
         { turn: 2, observation: { saw: { lastUser: "旧任务" }, decided: { tools: ["Bash"] }, did: [] } },
       ],
     })) as typeof fetch;
-    const [{ act }, { createRoot }, { FlightRecorder }] = await Promise.all([
+    const [{ act }, { createRoot }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
-      import("./flight-recorder"),
     ]);
+    const { createElement } = await import("react");
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <FlightRecorder
-          session={session()}
-          project="project-key"
-          conversation={<div />}
-          onSelectSession={() => undefined}
-        />,
-      );
+    await renderControlled(root, {
+      session: session(),
+      project: "project-key",
+      conversation: createElement("div"),
+      onSelectSession: () => undefined,
     });
     await act(async () => {
       (Array.from(container.querySelectorAll("button")).find(
-        (button) => button.textContent === "Trace",
+        (button) => button.textContent === "轨迹",
       ) as HTMLButtonElement).click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -251,23 +260,19 @@ describe("FlightRecorder Web 调试闭环", () => {
         },
       },
     })) as typeof fetch;
-    const [{ act }, { createRoot }, { FlightRecorder }] = await Promise.all([
+    const [{ act }, { createRoot }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
-      import("./flight-recorder"),
     ]);
+    const { createElement } = await import("react");
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <FlightRecorder
-          session={session(true)}
-          project="project-key"
-          conversation={<div />}
-          onSelectSession={() => undefined}
-        />,
-      );
+    await renderControlled(root, {
+      session: session(true),
+      project: "project-key",
+      conversation: createElement("div"),
+      onSelectSession: () => undefined,
     });
     await act(async () => {
       (Array.from(container.querySelectorAll("button")).find(
@@ -300,27 +305,23 @@ describe("FlightRecorder Web 调试闭环", () => {
         observation: { saw: { lastUser: "问好" }, decided: { text: "你好" }, did: [] },
       }],
     })) as typeof fetch;
-    const [{ act }, { createRoot }, { FlightRecorder }] = await Promise.all([
+    const [{ act }, { createRoot }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
-      import("./flight-recorder"),
     ]);
+    const { createElement } = await import("react");
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <FlightRecorder
-          session={session()}
-          project="lobby"
-          conversation={<div />}
-          onSelectSession={() => undefined}
-        />,
-      );
+    await renderControlled(root, {
+      session: session(),
+      project: "lobby",
+      conversation: createElement("div"),
+      onSelectSession: () => undefined,
     });
     await act(async () => {
       (Array.from(container.querySelectorAll("button")).find(
-        (button) => button.textContent === "Trace",
+        (button) => button.textContent === "轨迹",
       ) as HTMLButtonElement).click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });

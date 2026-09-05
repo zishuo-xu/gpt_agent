@@ -59,9 +59,19 @@ export function FlightRecorder(props: {
   session: SessionSummary;
   project: string;
   conversation: ReactNode;
+  /**
+   * 视图控制：传了 view 即显示「对话 | 轨迹」（实验会话加「对比」）标签栏；
+   * 不传只渲染对话。轨迹是面向用户的任务可观测视图，默认由会话页直接开启。
+   */
+  view?: "conversation" | "trace" | "compare";
+  onViewChange?: (view: "conversation" | "trace" | "compare") => void;
   onSelectSession: (id: string) => void;
+  /** 轨迹页头部右侧动作（导出/删除/任务详情开关），由会话页注入 */
+  traceActions?: ReactNode;
 }) {
-  const [tab, setTab] = useState<"conversation" | "trace" | "compare">("conversation");
+  const [internalTab, setInternalTab] = useState<"conversation" | "trace" | "compare">("conversation");
+  const tab = props.view ?? internalTab;
+  const setTab = props.onViewChange ?? setInternalTab;
   const [traces, setTraces] = useState<Trace[]>([]);
   const [selectedTrace, setSelectedTrace] = useState<Trace | null>(null);
   const [raw, setRaw] = useState(false);
@@ -124,7 +134,7 @@ export function FlightRecorder(props: {
     }
   }
   useEffect(() => {
-    setTab("conversation");
+    if (props.view === undefined) setInternalTab("conversation");
     setTraces([]);
     setSelectedTrace(null);
     setRaw(false);
@@ -181,29 +191,35 @@ export function FlightRecorder(props: {
   }
 
   return <section className="flight-recorder">
-    <nav className="flight-tabs" aria-label="会话视图">
-      <button className={tab === "conversation" ? "active" : ""} onClick={() => setTab("conversation")}>对话</button>
-      <button className={tab === "trace" ? "active" : ""} onClick={() => setTab("trace")}>Trace</button>
-      <button
-        className={tab === "compare" ? "active" : ""}
-        onClick={() => setTab("compare")}
-        disabled={!isExperiment}
-        title={isExperiment ? "对照这次实验和父 Run" : "从 Trace 创建实验后才能对照"}
-      >对比</button>
-    </nav>
-    {tab === "conversation" ? props.conversation : tab === "trace" ? <TraceView traces={traces} selected={selectedTrace} loading={loading} error={loadError} raw={raw} onOpen={openTrace} onFork={beginFork} forkBlocked={props.project === "lobby" ? "大厅没有 Git 仓库，不能创建对照实验" : undefined} /> : <DiffView diff={diff} error={diffError} />}
+    {props.view !== undefined && (
+      <nav className="flight-tabs" aria-label="会话视图">
+        <button className={tab === "conversation" ? "active" : ""} onClick={() => setTab("conversation")}>对话</button>
+        <button className={tab === "trace" ? "active" : ""} onClick={() => setTab("trace")}>轨迹</button>
+        {isExperiment && (
+          <button
+            className={tab === "compare" ? "active" : ""}
+            onClick={() => setTab("compare")}
+            title="对照这次实验和父 Run"
+          >对比</button>
+        )}
+      </nav>
+    )}
+    {tab === "conversation" ? props.conversation : tab === "trace" ? <TraceView traces={traces} selected={selectedTrace} loading={loading} error={loadError} raw={raw} onOpen={openTrace} onFork={beginFork} forkBlocked={props.project === "lobby" ? "大厅没有 Git 仓库，不能创建对照实验" : undefined} actions={props.traceActions} /> : <DiffView diff={diff} error={diffError} />}
     {forkTrace && <ForkModal form={forkForm} error={forkError} forking={forking} result={forkResult} onChange={(key, value) => setForkForm((current) => ({ ...current, [key]: value }))} onCancel={() => setForkTrace(null)} onOpenChild={(id) => { setForkTrace(null); props.onSelectSession(id); }} onSubmit={() => void submitFork()} />}
   </section>;
 }
 
-function TraceView(props: { traces: Trace[]; selected: Trace | null; loading: boolean; error: string; raw: boolean; onOpen: (trace: Trace, view?: string) => void; onFork: (trace: Trace) => void; forkBlocked?: string }) {
+function TraceView(props: { traces: Trace[]; selected: Trace | null; loading: boolean; error: string; raw: boolean; onOpen: (trace: Trace, view?: string) => void; onFork: (trace: Trace) => void; forkBlocked?: string; actions?: ReactNode }) {
   return <div className="flight-panel">
     <div className="flight-heading">
       <div>
-        <h2>Turn 观测</h2>
-        <p>每个 Turn 先看它看见了什么、决定做什么、实际做了什么。详情默认脱敏。</p>
+        <h2>任务轨迹</h2>
+        <p>每一轮：它看见了什么 → 决定做什么 → 实际做了什么。点「详情」可看上下文与工具结果（默认脱敏）。</p>
       </div>
-      <span>{props.traces.length} turns</span>
+      <span className="flight-heading-side">
+        <span>{props.traces.length} 轮</span>
+        {props.actions}
+      </span>
     </div>
     {props.loading && <p className="flight-muted">正在读取 Trace…</p>}
     {props.error && <div className="notice error">{props.error}</div>}
@@ -235,7 +251,7 @@ function TraceView(props: { traces: Trace[]; selected: Trace | null; loading: bo
         {open && props.selected && <TraceDetail trace={props.selected} raw={props.raw} onRaw={() => props.onOpen(trace, "raw")} />}
       </article>;
     })}</div>
-    {!props.traces.length && !props.loading && <div className="flight-empty">这一轮还没有 Model Turn。对话跑起来之后，这里会按 Turn 列出观测。</div>}
+    {!props.traces.length && !props.loading && <div className="flight-empty">这一轮还没有模型回合。任务跑起来之后，这里会按轮列出它的观测、决策和动作。</div>}
   </div>;
 }
 

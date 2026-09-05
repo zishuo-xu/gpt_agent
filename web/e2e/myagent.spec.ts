@@ -64,21 +64,20 @@ test.describe("设置页", () => {
   test("加载并渲染六分区，编辑扩展字段后保存", async ({ page }) => {
     await page.goto("/#settings");
     await expect(
-      page.getByRole("heading", { name: "模型设置" }),
+      page.getByRole("heading", { name: "设置", exact: true }),
     ).toBeVisible();
-    // 供应商分区
+    // 模型 tab：供应商分区 + 角色模型
     await expect(
       page.getByRole("heading", { name: "模型供应商" }),
     ).toBeVisible();
-    // 角色模型
     await expect(
       page.getByRole("heading", { name: "角色模型" }),
     ).toBeVisible();
-    // 权限与审批
+    // 切到通用 tab：权限 / 上下文 / 扩展设置
+    await page.getByRole("button", { name: "通用", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "权限与审批" }),
     ).toBeVisible();
-    // 上下文
     await expect(
       page.getByRole("heading", { name: "上下文" }),
     ).toBeVisible();
@@ -93,7 +92,8 @@ test.describe("设置页", () => {
     await expect(
       page.getByRole("checkbox", { name: /插件工具/ }),
     ).toBeChecked();
-    // 作用域切换
+    // 切回模型 tab → 作用域切换
+    await page.getByRole("button", { name: "模型", exact: true }).click();
     await page.getByRole("button", { name: "当前项目" }).click();
     await expect(
       page.getByText("正在读取本机配置…").or(page.getByRole("heading", { name: "模型供应商" })),
@@ -102,6 +102,7 @@ test.describe("设置页", () => {
 
   test("修改上下文阈值触发 dirty 状态并可保存", async ({ page }) => {
     await page.goto("/#settings");
+    await page.getByRole("button", { name: "通用", exact: true }).click();
     const threshold = page.getByRole("spinbutton", {
       name: "硬压缩触发（估算 tokens）",
     });
@@ -118,9 +119,9 @@ test.describe("设置页", () => {
 test.describe("插件面板", () => {
   test("插件页渲染三分区（加载清单 / 错误 / 调用统计）", async ({ page }) => {
     await page.goto("/#plugins");
-    await expect(page.getByRole("heading", { name: "插件" })).toBeVisible();
-    // 侧栏导航有「插件」项
-    await expect(page.getByRole("button", { name: /插件/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "扩展", exact: true })).toBeVisible();
+    // 侧栏导航有「扩展」项
+    await expect(page.getByRole("navigation").getByRole("button", { name: "扩展", exact: true })).toBeVisible();
     // 三个分区标题（数量随环境变化，用正则）
     await expect(
       page.getByRole("heading", { name: /已加载（\d+）/ }),
@@ -143,59 +144,43 @@ test.describe("插件面板", () => {
 });
 
 test.describe("会话页", () => {
-  test("会话列表加载、新建面板打开", async ({ page }) => {
+  test("会话列表加载、首页新建面板渲染", async ({ page }) => {
     await page.goto("/");
     // 侧栏（会话列表区）
     await expect(
       page.locator(".session-list-sidebar"),
     ).toBeVisible();
     await expect(
-      page.getByLabel("会话列表", { exact: true }),
+      page.getByRole("searchbox", { name: "搜索任务" }),
     ).toBeVisible();
-    // 新建会话
-    await page
-      .getByRole("main")
-      .getByRole("button", { name: "＋ 新会话" })
-      .click();
+    // 新版首页即新建面板：大标题 + hero 输入框
     await expect(
-      page.getByRole("heading", { name: "今天想让 MyAgent 做什么？" }),
+      page.getByRole("heading", { name: "今天想完成什么？" }),
     ).toBeVisible();
-    // 项目/大厅二选一（radio input 视觉隐藏，点击关联 label）
+    const input = page.getByPlaceholder("例如：检查这个项目，修复当前失败的测试");
+    await expect(input).toBeVisible();
+    // 位置选择（任务位置 chip）：默认项目
     await expect(
-      page.getByRole("radio", { name: /在项目下执行/ }),
-    ).toBeChecked();
-    await page.getByText("在大厅执行", { exact: false }).first().click();
-    await expect(
-      page.getByRole("radio", { name: /在大厅执行/ }),
-    ).toBeChecked();
-    // 范围建议模板（N4）：四个按钮渲染，点击填充输入框
-    await expect(
-      page.locator(".task-scope-templates"),
+      page.getByRole("combobox", { name: "任务位置" }),
     ).toBeVisible();
+    // 范围建议模板（设计稿示例入口）：四个按钮渲染，点击填充输入框
+    await expect(page.locator(".home-examples")).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "只读分析" }),
+      page.getByRole("button", { name: "修复问题" }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "修复缺陷" }).click();
-    await expect(
-      page.getByPlaceholder("例如：检查这个项目，修复当前失败的测试"),
-    ).toHaveValue(/先运行相关测试复现失败/);
-    // 关闭面板
-    await page.getByRole("button", { name: "关闭" }).click();
+    await page.getByRole("button", { name: "补充测试" }).click();
+    await expect(input).toHaveValue(/补充缺失的单元测试/);
   });
 
   test("新建会话并发送只读任务，事件流实时渲染", async ({ page }) => {
     await page.goto("/");
-    await page
-      .getByRole("main")
-      .getByRole("button", { name: "＋ 新会话" })
-      .click();
     const input = page.getByPlaceholder(
       "例如：检查这个项目，修复当前失败的测试",
     );
     await input.fill(
       "List the files in this project and briefly summarize what this project is about. Use read-only commands only.",
     );
-    await page.getByRole("button", { name: "启动任务" }).click();
+    await page.getByRole("button", { name: "发送", exact: true }).click();
     const done = page.getByText("本轮任务已完成");
     // 并行：等待完成的同时自动批准白名单外只读命令触发的审批卡
     const approvalLoop = autoApproveReadonly(page, done, 180_000);
@@ -223,17 +208,13 @@ test.describe("审批流", () => {
     // 否则模型会发现文件已存在并跳过 Write，审批卡永不出现
     await rm(path.join(E2E_WORKSPACE, "e2e-proof.txt"), { force: true });
     await page.goto("/");
-    await page
-      .getByRole("main")
-      .getByRole("button", { name: "＋ 新会话" })
-      .click();
     const input = page.getByPlaceholder(
       "例如：检查这个项目，修复当前失败的测试",
     );
     await input.fill(
       "Create a file named e2e-proof.txt in this project with the content: e2e ok",
     );
-    await page.getByRole("button", { name: "启动任务" }).click();
+    await page.getByRole("button", { name: "发送", exact: true }).click();
     // 等待审批卡（Write 触发）
     await expect(
       page.getByRole("button", { name: "仅这一次" }),
@@ -250,22 +231,21 @@ test.describe("审批流", () => {
 test.describe("新功能：书签 / 导出 / 续跑按钮", () => {
   async function startSession(page: import("@playwright/test").Page) {
     await page.goto("/");
-    await page
-      .getByRole("main")
-      .getByRole("button", { name: "＋ 新会话" })
-      .click();
     const input = page.getByPlaceholder(
       "例如：检查这个项目，修复当前失败的测试",
     );
     await input.fill("回复 OK，不要使用工具。");
-    await page.getByRole("button", { name: "启动任务" }).click();
-    // 用户消息立即渲染（★ 按钮随 user 消息出现，无需等任务完成）
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    // 用户消息立即渲染（无需等任务完成）
     await expect(
-      page.locator("button.stream-bookmark").first(),
+      page.locator(".stream-item").first(),
     ).toBeVisible({ timeout: 30_000 });
   }
 
   test("用户消息书签：打标 → 书签栏出现 → 移除", async ({ page }) => {
+    // 书签功能在前端重构中被移除（SessionStream ★ 按钮 + 书签栏 + SessionApp 状态），
+    // 后端 /api/sessions/:id/bookmarks 仍在。待确认是否恢复后，再启用此用例。
+    test.skip(true, "书签功能已在本次前端重构中移除，待确认恢复后再启用");
     await startSession(page);
     // ★ 悬停消息卡片显示星标（真实用户路径），点击打书签
     const bookmark = page.locator("button.stream-bookmark").first();
@@ -293,6 +273,8 @@ test.describe("新功能：书签 / 导出 / 续跑按钮", () => {
     await expect(page.getByText("本轮", { exact: false }).first()).toBeVisible(
       { timeout: 60_000 },
     );
+    // 导出按钮在「轨迹」标签页头部，先切换过去
+    await page.getByRole("button", { name: "轨迹" }).click();
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "导出" }).click();
     const download = await downloadPromise;
@@ -327,7 +309,13 @@ test.describe("新功能：定时任务 / 统计面板", () => {
       page.getByRole("heading", { name: "定时任务" }),
     ).toBeVisible();
     // 选择第一个非大厅项目（隔离 workspace 的默认项目）；
-    // 原型 setter 模拟真实用户选择（React 19 tracker 兼容）
+    // 项目下拉异步加载，先等出现第二个选项（非大厅）再做原型 setter 选择
+    await expect(async () => {
+      const count = await page
+        .getByRole("combobox", { name: "项目" })
+        .evaluate((el) => (el as HTMLSelectElement).options.length);
+      expect(count).toBeGreaterThan(1);
+    }).toPass({ timeout: 15_000 });
     await page
       .getByRole("combobox", { name: "项目" })
       .evaluate((el) => {
@@ -368,7 +356,17 @@ test.describe("新功能：定时任务 / 统计面板", () => {
     ).toBeVisible();
     // 选择 e2e 工作区项目（defaultCwd，startSession 的会话所在）——不能按 index：
     // listProjects 按 updatedAt 降序，隔离 HOME 积累的历史项目会抢占前位；
-    // 用原型 setter 模拟真实用户选择（React 19 tracker 兼容，见 helper 注释）
+    // 项目下拉是异步加载的，先等目标选项出现再做原型 setter 选择
+    await expect(async () => {
+      const has = await page.getByRole("combobox", { name: "项目" }).evaluate(
+        (el, label) =>
+          Array.from((el as HTMLSelectElement).options).some(
+            (o) => o.textContent === label,
+          ),
+        "myagent-gui-test-workspace",
+      );
+      expect(has).toBe(true);
+    }).toPass({ timeout: 15_000 });
     await selectProjectOption(page, "myagent-gui-test-workspace");
     // 总量卡与图表
     await expect(page.locator(".stats-card").first()).toBeVisible({

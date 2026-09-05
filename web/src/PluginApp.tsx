@@ -102,6 +102,16 @@ export function PluginApp() {
 
   const hasStats = (status?.stats.length ?? 0) > 0;
   const disabledSet = new Set(status?.disabled ?? []);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "enabled" | "disabled">("all");
+  const keyword = search.trim().toLowerCase();
+  const visibleLoaded = (status?.loaded ?? []).filter((entry) => {
+    const isOff = disabledSet.has(entry.name);
+    if (filter === "enabled" && isOff) return false;
+    if (filter === "disabled" && !isOff) return false;
+    if (keyword && !entry.name.toLowerCase().includes(keyword) && !entry.source.toLowerCase().includes(keyword)) return false;
+    return true;
+  });
 
   return (
     <div className="shell">
@@ -110,9 +120,8 @@ export function PluginApp() {
       <main>
         <header className="page-header">
           <div>
-            <p className="eyebrow">PLUGINS / OBSERVABILITY</p>
-            <h1>插件</h1>
-            <p>已加载插件、加载错误与调用统计。变更插件文件后点「重新加载」即可生效（新请求），无需重启 server。</p>
+            <h1>扩展</h1>
+            <p>管理插件与集成能力。变更插件文件后点「重新加载」即可生效（新请求），无需重启 server。</p>
           </div>
           <button
             className="save-button"
@@ -129,6 +138,25 @@ export function PluginApp() {
           </p>
         )}
 
+        <div className="plugin-toolbar">
+          <div className="sidebar-search-wrap plugin-search">
+            <input
+              className="sidebar-search"
+              type="search"
+              placeholder="搜索扩展名称或描述"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              aria-label="搜索扩展"
+            />
+            <kbd className="sidebar-search-kbd" aria-hidden="true">⌘F</kbd>
+          </div>
+          <div className="scope-switch plugin-filter" aria-label="扩展筛选">
+            <button className={filter === "all" ? "selected" : ""} onClick={() => setFilter("all")}>全部</button>
+            <button className={filter === "enabled" ? "selected" : ""} onClick={() => setFilter("enabled")}>已启用</button>
+            <button className={filter === "disabled" ? "selected" : ""} onClick={() => setFilter("disabled")}>未启用</button>
+          </div>
+        </div>
+
         {loading && <p className="plugin-hint">读取中…</p>}
         {!loading && error && (
           <p className="plugin-hint plugin-error">{error}</p>
@@ -140,24 +168,40 @@ export function PluginApp() {
               <h2>已加载（{status.loaded.length}）</h2>
               {status.loaded.length === 0 ? (
                 <p className="plugin-hint">未加载插件。放入 .myagent/tools/ 并点「重新加载」。</p>
+              ) : visibleLoaded.length === 0 ? (
+                <p className="plugin-hint">无匹配扩展。</p>
               ) : (
                 <ul className="plugin-list">
-                  {status.loaded.map((entry) => {
+                  {visibleLoaded.map((entry) => {
                     const isOff = disabledSet.has(entry.name);
+                    const stat = status.stats.find((item) => item.name === entry.name);
                     return (
                       <li
                         key={entry.name}
                         className={`plugin-item${isOff ? " plugin-item-off" : ""}`}
                       >
-                        <span className="plugin-name">{entry.name}</span>
-                        <code className="plugin-source">{entry.source}</code>
+                        <span className="plugin-icon" aria-hidden="true">
+                          {entry.name.slice(0, 1).toUpperCase()}
+                        </span>
+                        <span className="plugin-item-main">
+                          <span className="plugin-name">{entry.name}</span>
+                          <code className="plugin-source">{entry.source}</code>
+                        </span>
+                        {stat && (
+                          <span className="plugin-item-stat" title="调用次数 / 失败">
+                            {stat.calls} 次调用{stat.errors > 0 ? ` · ${stat.errors} 失败` : ""}
+                          </span>
+                        )}
+                        <span className={`plugin-state${isOff ? " off" : ""}`}>
+                          {isOff ? "未启用" : "已启用"}
+                        </span>
                         <button
-                          className={`plugin-toggle${isOff ? " off" : ""}`}
+                          className={`switch plugin-switch${isOff ? "" : " on"}`}
+                          aria-checked={!isOff}
+                          aria-label={`${isOff ? "启用" : "禁用"} ${entry.name}`}
                           onClick={() => void toggle(entry.name, isOff)}
                           title={isOff ? "启用该插件" : "禁用该插件（模型将不可见、不可调用）"}
-                        >
-                          {isOff ? "已禁用" : "启用中"}
-                        </button>
+                        />
                       </li>
                     );
                   })}

@@ -34,7 +34,10 @@ test.describe("插件面板（生产级回归）", () => {
 
   test("全生命周期：空态 → 加载 → 错误可见 → 修复恢复", async ({ page }) => {
     // 1) 空态：无插件时面板显示空提示（不报错不静默）
+    // 注：beforeEach 清空 tools 目录，但服务器内存注册表仍留上次插件，
+    // 需先「重新加载」让服务器按当前（空）目录重建，才能看到空态。
     await page.goto("/#plugins");
+    await page.getByRole("button", { name: "重新加载" }).click();
     await expect(
       page.getByRole("heading", { name: "已加载（0）" }),
     ).toBeVisible();
@@ -83,20 +86,49 @@ test.describe("插件面板（生产级回归）", () => {
     await expect(
       page.getByRole("heading", { name: "已加载（1）" }),
     ).toBeVisible();
+    // 等插件行的开关渲染完成（加载/启用状态异步，避免竞态）
+    await expect(
+      page.getByRole("button", { name: /PanelProbe/ }),
+    ).toBeVisible();
+    // 前置状态不确定（plugins.json 持久化跨运行）：先确保处于启用态。
+    // 用 toPass 包住「如出现未启用态则点启用」：等待 UI 经 loadStatus 刷新后再断言，
+    // 避免 toggle 的异步 refetch 竞态导致的偶发残留。
+    await expect(async () => {
+      const enableButton = page.getByRole("button", { name: /启用 PanelProbe/ });
+      if (await enableButton.count()) {
+        await enableButton.click();
+      }
+      await expect(
+        page.getByRole("button", { name: /禁用 PanelProbe/ }),
+      ).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 15_000 });
 
-    // 禁用 → 按钮切「已禁用」（模型将不可见）
-    await page.getByRole("button", { name: "启用中" }).click();
-    await expect(page.getByRole("button", { name: "已禁用" })).toBeVisible();
+    // 禁用 → 开关切到未启用态（模型将不可见）；toggle 后 UI 经 loadStatus 异步刷新，用轮询等终态
+    await page.getByRole("button", { name: /禁用 PanelProbe/ }).click();
+    await expect(async () => {
+      await expect(
+        page.getByRole("button", { name: /启用 PanelProbe/ }),
+      ).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 15_000 });
 
     // 重新加载（模拟用户重启/刷新后）→ 禁用状态保留（pluginDisabled 已持久化）
     await page.getByRole("button", { name: "重新加载" }).click();
     await expect(
       page.getByRole("heading", { name: "已加载（1）" }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "已禁用" })).toBeVisible();
+    // reload 后整棵列表重建，轮询等开关出现且为「启用」（禁用保留）
+    await expect(async () => {
+      await expect(
+        page.getByRole("button", { name: /启用 PanelProbe/ }),
+      ).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 15_000 });
 
-    // 重新启用 → 恢复「启用中」
-    await page.getByRole("button", { name: "已禁用" }).click();
-    await expect(page.getByRole("button", { name: "启用中" })).toBeVisible();
+    // 重新启用 → 恢复启用态（等 refetch 刷新后再断言）
+    await page.getByRole("button", { name: /启用 PanelProbe/ }).click();
+    await expect(async () => {
+      await expect(
+        page.getByRole("button", { name: /禁用 PanelProbe/ }),
+      ).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 15_000 });
   });
 });

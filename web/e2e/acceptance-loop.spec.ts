@@ -133,17 +133,13 @@ test.describe.serial("provider-free 可信完成闭环", () => {
 
   test("UI 驱动失败、修复、复验、Review 与证据交付", async ({ page }) => {
     await page.goto("/");
-    await page
-      .getByRole("main")
-      .getByRole("button", { name: "＋ 新会话" })
-      .click();
     const input = page.getByPlaceholder(
       "例如：检查这个项目，修复当前失败的测试",
     );
     await input.fill(
       `/run 创建验收标记 --check "test -f ${MARKER}" --check-timeout 10 --permission trust`,
     );
-    await page.getByRole("button", { name: "启动任务" }).click();
+    await page.getByRole("button", { name: "发送", exact: true }).click();
 
     const confirmation = page.getByRole("region", { name: "确认任务边界" });
     await expect(confirmation.getByText(`check · test -f ${MARKER}`)).toBeVisible();

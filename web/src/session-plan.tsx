@@ -12,7 +12,7 @@ export interface TaskPlanDetail {
   contract?: TaskContract;
 }
 
-/** 人在闭环中的计划决策弹窗：计划本身只读，三种出口均显式。 */
+/** 人在闭环中的计划决策弹窗（设计稿：需要你确认角标 + 批准执行/修改计划）。 */
 export function PlanDecisionOverlay(props: {
   plan: TaskPlanDetail;
   feedback: string;
@@ -34,10 +34,10 @@ export function PlanDecisionOverlay(props: {
         <header className="plan-decision-header">
           <div>
             <span className="plan-decision-kicker">只读规划 · 第 {props.plan.revision} 版</span>
-            <h2 id="plan-decision-title">任务契约已就绪，请选择下一步</h2>
-            <p>规划阶段仅使用 Read、Grep、Glob，没有修改当前工作区。</p>
+            <h2 id="plan-decision-title">执行计划待确认</h2>
+            <p>规划阶段仅使用 Read、Grep、Glob，没有修改当前工作区。批准后按计划执行。</p>
           </div>
-          <span className="plan-readonly-badge">只读</span>
+          <span className="plan-confirm-badge">需要你确认</span>
         </header>
 
         <div className="plan-task">原始任务：{props.plan.task}</div>
@@ -93,7 +93,7 @@ export function PlanDecisionOverlay(props: {
             disabled={props.submitting}
             onClick={() => void props.onDecision("approved")}
           >
-            {props.submitting ? "提交中…" : "批准并开始执行"}
+            {props.submitting ? "提交中…" : "批准执行（批准并开始执行）"}
           </button>
         </div>
       </section>

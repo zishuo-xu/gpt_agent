@@ -82,13 +82,20 @@ describe("DeliveryWorkbench 状态与证据", () => {
 
     for (const item of cases) {
       const rendered = await renderWorkbench(item.delivery);
-      assert.equal(
-        rendered.container.querySelector("h2")?.textContent,
-        item.heading,
+      assert.match(
+        rendered.container.querySelector(".delivery-collapsed-title")?.textContent ?? "",
+        new RegExp(item.heading),
       );
       await rendered.act(async () => rendered.root.unmount());
       rendered.container.remove();
     }
+  });
+
+  it("任务运行中不渲染交付卡", async () => {
+    const rendered = await renderWorkbench({ ...baseDelivery, outcome: "running" });
+    assert.equal(rendered.container.querySelector(".delivery-workbench"), null);
+    await rendered.act(async () => rendered.root.unmount());
+    rendered.container.remove();
   });
 
   it("展示验收输出、Review、完整文件清单和隔离工作区风险", async () => {
@@ -181,7 +188,7 @@ describe("DeliveryWorkbench 状态与证据", () => {
     assert.equal(rendered.container.querySelectorAll(".delivery-files-preview li").length, 5);
     const details = rendered.container.querySelector(".delivery-details");
     assert.ok(details, "应存在机器验收详情折叠区");
-    assert.equal(details.querySelectorAll(".delivery-files li").length, 8);
+    assert.equal(details!.querySelectorAll(".delivery-files li").length, 8);
     assert.match(rendered.container.textContent ?? "", /还有 3 个文件/);
     await rendered.act(async () => rendered.root.unmount());
     rendered.container.remove();

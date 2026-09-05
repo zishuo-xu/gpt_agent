@@ -22,7 +22,7 @@ pnpm run build        # 构建（tsc 编译 core + vite 构建 web）
 | `src/tools` | 工具实现与执行器、插件加载（plugin-loader）、MCP 桥接（mcp-client/mcp-loader）、截断 |
 | `src/shared` | 插件工具协议与注册表（PluginToolRegistry）、工具名枚举 |
 | `src/web` | Web 后端（Hono 服务、会话 API） |
-| `web/src` | Web 前端（React + Vite） |
+| `web/src` | Web 前端（React + Vite）：`SessionApp` 会话三区（侧栏 `session-sidebar` / 会话流 `session-stream`+`session-card` / 右栏 `session-rail` 计划与文件改动）、首页新建 `session-new-task`+`session-composer`、设置 `App`+`settings/`、扩展 `PluginApp`、记忆/定时/统计面板、轨迹 `flight-recorder` |
 | `.myagent/tools` | 项目级插件（WebSearch / WebFetch），协议见 docs/plugin-tools.md |
 
 入口在 `src/cli.ts`。

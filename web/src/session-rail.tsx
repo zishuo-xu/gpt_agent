@@ -1,163 +1,119 @@
-import type { SessionBranch, SessionSummary, TodoItem } from "@shared/types.js";
+import type { SessionSummary, TodoItem } from "@shared/types.js";
 import { formatTime, formatTokens } from "./session-format";
 import { statusMeta } from "./session-render";
-import { BranchTree, KeyValue, RailCard } from "./session-branch";
+import { KeyValue, RailCard } from "./session-branch";
 
-/** 对话链路：每轮用户提问的目录项（点击定位到对应消息） */
-export interface UserTurn {
-  seq: number;
-  ts: string;
-  text: string;
-  turn: number;
+/** 从事件流提取的文件改动条目（Edit/Write/MultiEdit 工具调用） */
+export interface FileChangeEntry {
+  path: string;
+  /** 累计增删行（能从 diff 解析则给出，否则为 undefined） */
+  added?: number;
+  removed?: number;
 }
 
-export interface Bookmark {
-  seq: number;
-  name: string;
-}
-
-/** 右侧信息栏：分支树 / 对话链路 / 书签 /（详情展开）清单·消耗·会话 */
+/** 任务清单卡（有 todo 时显示，设计稿「计划详情」形态）+ 文件改动卡 + 消耗/会话卡。 */
 export function SessionRail(props: {
-  branches: SessionBranch[];
-  currentBranchId: string;
-  busy: boolean;
-  userTurns: UserTurn[];
-  bookmarks: Bookmark[];
   latestTodos: TodoItem[];
   selected: SessionSummary;
   showDetail: boolean;
-  onSwitchBranch: (branchId: string) => void;
-  onScrollToSeq: (seq: number) => void;
-  onToggleBookmark: (seq: number, name: string) => void;
+  /** 会话内累计文件改动（从事件流的 Edit/Write 工具结果提取） */
+  fileChanges?: FileChangeEntry[];
 }) {
+  const zeroToolWarning =
+    props.selected.status === "done" &&
+    props.selected.kind === "run" &&
+    props.selected.toolCallCount === 0;
+  const hasTodos = props.latestTodos.length > 0;
+  const fileChanges = props.fileChanges ?? [];
+  const totalAdded = fileChanges.reduce((sum, item) => sum + (item.added ?? 0), 0);
+  const totalRemoved = fileChanges.reduce((sum, item) => sum + (item.removed ?? 0), 0);
+  if (!zeroToolWarning && !hasTodos && !props.showDetail && fileChanges.length === 0) {
+    return null;
+  }
   return (
     <aside className="session-rail">
-      {props.selected.status === "done" &&
-        props.selected.kind === "run" &&
-        props.selected.toolCallCount === 0 && (
-          <div className="rail-todo-warning">
-            Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，
-            结果可能不完整，请检查或让 Agent 重新执行
-          </div>
-        )}
-      <RailCard title="分支树">
-        {props.branches.length === 0 ? (
-          <p className="rail-empty">
-            fork 后可在此回溯切换分支。
-          </p>
-        ) : (
-          <BranchTree
-            branches={props.branches}
-            currentBranchId={props.currentBranchId}
-            busy={props.busy}
-            onSwitch={props.onSwitchBranch}
-          />
-        )}
-      </RailCard>
-      <RailCard title="对话链路">
-        {props.userTurns.length === 0 ? (
-          <p className="rail-empty">
-            发送消息后，这里会列出每轮提问，点击可跳转。
-          </p>
-        ) : (
-          <div className="chain-list">
-            {props.userTurns.map((turn) => (
-              <button
-                className="chain-item"
-                key={turn.seq}
-                onClick={() => props.onScrollToSeq(turn.seq)}
-                title={turn.text}
-              >
-                <span className="chain-index">
-                  {turn.turn}
+      {zeroToolWarning && (
+        <div className="rail-todo-warning">
+          Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，
+          结果可能不完整，请检查或让 Agent 重新执行
+        </div>
+      )}
+      {hasTodos && (
+        <RailCard title="计划详情">
+          {props.selected.status === "done" &&
+            props.latestTodos.some((todo) => todo.status !== "completed") && (
+              <div className="rail-todo-warning">
+                Agent 已宣布完成，但仍有{" "}
+                {
+                  props.latestTodos.filter(
+                    (todo) => todo.status !== "completed",
+                  ).length
+                }{" "}
+                项任务未完成或未更新
+              </div>
+            )}
+          <ol className="rail-plan-steps">
+            {props.latestTodos.map((todo, index) => (
+              <li className={`rail-plan-step ${todo.status}`} key={todo.id}>
+                <span className="rail-plan-index" aria-hidden="true">
+                  {todo.status === "completed" ? (
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                      <path d="M2.5 6.5 5 9l4.5-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : (
+                    index + 1
+                  )}
                 </span>
-                <span className="chain-text">
-                  {turn.text}
+                {/* 三态文本标记（✓/→/○）：供测试与无样式环境识别状态 */}
+                <span className="todo-check sr-only">
+                  {todo.status === "completed"
+                    ? "✓"
+                    : todo.status === "in_progress"
+                      ? "→"
+                      : "○"}
                 </span>
-                <time>{formatTime(turn.ts)}</time>
-              </button>
+                <span className="rail-plan-content">{todo.content}</span>
+                <span className="rail-plan-state">
+                  {todo.status === "completed"
+                    ? ""
+                    : todo.status === "in_progress"
+                      ? "进行中"
+                      : "待执行"}
+                </span>
+              </li>
             ))}
-          </div>
-        )}
-      </RailCard>
-      <RailCard title="书签">
-        {props.bookmarks.length === 0 ? (
-          <p className="rail-empty">
-            在对话中右键/长按消息可打书签；CLI /label 亦可。
+          </ol>
+        </RailCard>
+      )}
+      {fileChanges.length > 0 && (
+        <RailCard title={`文件改动 (${fileChanges.length})`}>
+          <p className="rail-diff-total">
+            {fileChanges.length} 个文件被修改
+            <span className="diff-stat">
+              <b className="diff-add">+{totalAdded}</b>
+              <b className="diff-del">-{totalRemoved}</b>
+            </span>
           </p>
-        ) : (
-          <div className="chain-list">
-            {props.bookmarks.map((bookmark) => (
-              <button
-                className="chain-item bookmark-item"
-                key={bookmark.seq}
-                onClick={() => props.onScrollToSeq(bookmark.seq)}
-                title={bookmark.name}
-              >
-                <span className="chain-index">
-                  #{bookmark.seq}
-                </span>
-                <span className="chain-text">
-                  {bookmark.name}
-                </span>
-                <time
-                  role="button"
-                  aria-label={`移除书签 ${bookmark.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    props.onToggleBookmark(bookmark.seq, "");
-                  }}
-                >
-                  ✕
-                </time>
-              </button>
+          <ul className="rail-file-changes">
+            {fileChanges.map((change) => (
+              <li key={change.path} className="rail-file-change">
+                <code title={change.path}>{change.path}</code>
+                {(change.added !== undefined || change.removed !== undefined) && (
+                  <span className="diff-stat">
+                    <b className="diff-add">+{change.added ?? 0}</b>
+                    <b className="diff-del">-{change.removed ?? 0}</b>
+                  </span>
+                )}
+              </li>
             ))}
-          </div>
-        )}
-      </RailCard>
+          </ul>
+        </RailCard>
+      )}
       {props.showDetail && (
         <>
-          <RailCard title="任务清单">
-            {props.selected.status === "done" &&
-              props.latestTodos.some(
-                (todo) => todo.status !== "completed",
-              ) && (
-                <div className="rail-todo-warning">
-                  Agent 已宣布完成，但仍有{" "}
-                  {
-                    props.latestTodos.filter(
-                      (todo) => todo.status !== "completed",
-                    ).length
-                  }{" "}
-                  项任务未完成或未更新
-                </div>
-              )}
-            {props.latestTodos.length === 0 ? (
-              <p className="rail-empty">
-                Agent 建立 todo 后会显示在这里。
-              </p>
-            ) : (
-              props.latestTodos.map((todo) => (
-                <div
-                  className={`rail-todo ${todo.status}`}
-                  key={todo.id}
-                >
-                  <span className="todo-check">
-                    {todo.status === "completed"
-                      ? "✓"
-                      : todo.status === "in_progress"
-                        ? "→"
-                        : "○"}
-                  </span>
-                  <span>{todo.content}</span>
-                </div>
-              ))
-            )}
-          </RailCard>
           <RailCard title="消耗">
             <KeyValue
               label="本会话累计"
-              tone="kv-total"
               value={`${formatTokens(
                 props.selected.totalInputTokens +
                   props.selected.totalOutputTokens,
@@ -165,7 +121,6 @@ export function SessionRail(props: {
             />
             <KeyValue
               label="输入 / 输出"
-              tone="kv-io"
               value={`${formatTokens(
                 props.selected.totalInputTokens,
               )} / ${formatTokens(
@@ -174,23 +129,10 @@ export function SessionRail(props: {
             />
             <KeyValue
               label="缓存命中"
-              tone="kv-cache"
               value={`${formatTokens(
                 props.selected.totalCachedTokens,
               )} tokens`}
             />
-            {props.selected.totalMissedTokens > 0 && (
-              <KeyValue
-                label="缓存浪费"
-                value={`${formatTokens(
-                  props.selected.totalMissedTokens,
-                )} tokens${
-                  props.selected.totalMissedCostCny > 0
-                    ? `（多花 ¥${props.selected.totalMissedCostCny.toFixed(4)}）`
-                    : ""
-                }`}
-              />
-            )}
             <KeyValue
               label="估算费用"
               value={

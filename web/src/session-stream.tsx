@@ -4,7 +4,7 @@ import type { DisplayItem } from "./session-display";
 import { DeliveryWorkbench, type DeliveryWorkbenchData } from "./DeliveryWorkbench";
 
 /**
- * 消息流：来源筛选 chips + 事件卡片序列。
+ * 消息流：事件卡片序列。
  * 纯展示组件——事件/审批状态由父组件持有。
  */
 export function SessionStream(props: {
@@ -17,6 +17,10 @@ export function SessionStream(props: {
   onExport?: () => void;
   totalEvents: number;
   sourceFilter: string;
+  /** 来源筛选 chips：轨迹视图才显示，对话视图不出现 */
+  showSourceFilter?: boolean;
+  /** 对话视图精简模式：隐藏思考过程折叠条与每轮 token 行 */
+  compact?: boolean;
   streamRef: RefObject<HTMLDivElement | null>;
   showCacheMissNotices: boolean;
   resolvedPermissions: ReadonlySet<string>;
@@ -24,7 +28,6 @@ export function SessionStream(props: {
   pendingClarificationId?: string | null;
   permissionFeedback: Record<string, string>;
   onFeedback: (callId: string, value: string) => void;
-  onBookmark: (seq: number, name: string) => void;
   onPermission: (
     callId: string,
     granted: boolean,
@@ -40,7 +43,8 @@ export function SessionStream(props: {
 }) {
   return (
     <>
-      <div className="replay-filters">
+      {props.showSourceFilter && props.totalEvents > 0 && (
+        <div className="replay-filters">
             {(
               [
                 ["all", "全部"],
@@ -63,6 +67,7 @@ export function SessionStream(props: {
               </button>
             ))}
           </div>
+      )}
       <div
         className="chat-stream"
         ref={props.streamRef}
@@ -79,28 +84,10 @@ export function SessionStream(props: {
             data-display-kind={item.kind}
             key={item.seq}
           >
-            {item.kind === "message" &&
-              item.author === "user" && (
-                <button
-                  className="stream-bookmark"
-                  title="打书签（长会话导航用）"
-                  aria-label={`打书签 #${item.seq}`}
-                  onClick={() => {
-                    const name = window.prompt(
-                      `书签名称（#${item.seq}）：`,
-                      item.text.slice(0, 20),
-                    );
-                    if (name !== null) {
-                      props.onBookmark(item.seq, name.trim());
-                    }
-                  }}
-                >
-                  ★
-                </button>
-              )}
             <ItemCard
               item={item}
               showCacheMissNotices={props.showCacheMissNotices}
+              compact={props.compact}
               locallyResolved={props.resolvedPermissions}
               pendingPermissionCallId={props.pendingPermissionCallId}
               pendingClarificationId={props.pendingClarificationId}
@@ -117,35 +104,6 @@ export function SessionStream(props: {
             />
           </div>
         ))}
-        {(() => {
-          // 审批风暴：挂起审批 ≥2 时提供"全部允许（本次会话）"批量放行
-          const pendingApprovals = props.displayItems.filter(
-            (item): item is Extract<DisplayItem, { kind: "approval" }> =>
-              item.kind === "approval" &&
-              !item.resolvedByEvent &&
-              !props.resolvedPermissions.has(String(item.event.call.id)),
-          );
-          if (pendingApprovals.length < 2) return null;
-          return (
-            <div className="approval-batch-bar">
-              <span>{pendingApprovals.length} 个审批等待处理</span>
-              <button
-                className="approve-button"
-                onClick={() => {
-                  for (const item of pendingApprovals) {
-                    void props.onPermission(
-                      String(item.event.call.id),
-                      true,
-                      "session",
-                    );
-                  }
-                }}
-              >
-                全部允许（本次会话）
-              </button>
-            </div>
-          );
-        })()}
         {props.delivery && <DeliveryWorkbench delivery={props.delivery} workspace={props.workspace} onContinue={props.onContinue} onCopyPath={props.onCopyPath} onExport={props.onExport} />}
       </div>
     </>

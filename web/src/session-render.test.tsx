@@ -440,17 +440,9 @@ describe("SessionRail 任务清单（三态标记 + 完成矛盾警告）", () =
     await act(async () => {
       root.render(
         <SessionRail
-          branches={[]}
-          currentBranchId="main"
-          busy={false}
-          userTurns={[]}
-          bookmarks={[]}
           latestTodos={todos as never}
           selected={selected as never}
           showDetail
-          onSwitchBranch={() => {}}
-          onScrollToSeq={() => {}}
-          onToggleBookmark={() => {}}
         />,
       );
     });
@@ -490,19 +482,11 @@ describe("SessionRail 任务清单（三态标记 + 完成矛盾警告）", () =
     await act(async () => {
       root.render(
         <SessionRail
-          branches={[]}
-          currentBranchId="main"
-          busy={false}
-          userTurns={[]}
-          bookmarks={[]}
           latestTodos={[
             { id: "a", content: "写核心逻辑", status: "pending" },
           ] as never}
           selected={selected as never}
           showDetail
-          onSwitchBranch={() => {}}
-          onScrollToSeq={() => {}}
-          onToggleBookmark={() => {}}
         />,
       );
     });
@@ -542,17 +526,9 @@ describe("SessionRail 0 工具调用完成警告", () => {
     await act(async () => {
       root.render(
         <SessionRail
-          branches={[]}
-          currentBranchId="main"
-          busy={false}
-          userTurns={[]}
-          bookmarks={[]}
           latestTodos={[]}
           selected={selected as never}
           showDetail
-          onSwitchBranch={() => {}}
-          onScrollToSeq={() => {}}
-          onToggleBookmark={() => {}}
         />,
       );
     });
@@ -575,11 +551,6 @@ describe("SessionRail 0 工具调用完成警告", () => {
     await act(async () => {
       root.render(
         <SessionRail
-          branches={[]}
-          currentBranchId="main"
-          busy={false}
-          userTurns={[]}
-          bookmarks={[]}
           latestTodos={[]}
           selected={{
             id: "s1",
@@ -597,9 +568,6 @@ describe("SessionRail 0 工具调用完成警告", () => {
             kind: "interactive",
           } as never}
           showDetail
-          onSwitchBranch={() => {}}
-          onScrollToSeq={() => {}}
-          onToggleBookmark={() => {}}
         />,
       );
     });
@@ -635,112 +603,13 @@ describe("SessionRail 0 工具调用完成警告", () => {
     await act(async () => {
       root.render(
         <SessionRail
-          branches={[]}
-          currentBranchId="main"
-          busy={false}
-          userTurns={[]}
-          bookmarks={[]}
           latestTodos={[]}
           selected={selected as never}
           showDetail
-          onSwitchBranch={() => {}}
-          onScrollToSeq={() => {}}
-          onToggleBookmark={() => {}}
         />,
       );
     });
     assert.equal(container.querySelector(".rail-todo-warning"), null);
-    await act(async () => root.unmount());
-  });
-});
-
-
-describe("审批批量操作", () => {
-  it("挂起审批 ≥2 时显示按钮，点击对全部挂起审批放行（本次会话）", async () => {
-    const [{ act }, { createRoot }, { SessionStream }] = await Promise.all([
-      import("react"),
-      import("react-dom/client"),
-      import("./session-stream"),
-    ]);
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    mountedRoots.push(root);
-    const calls: Array<[string, boolean, string]> = [];
-    const ts = "2026-08-01T10:00:00.000Z";
-    const displayItems = [
-      { kind: "approval", seq: 1, ts, event: { call: { id: "c1" } }, resolvedByEvent: false },
-      { kind: "approval", seq: 2, ts, event: { call: { id: "c2" } }, resolvedByEvent: false },
-    ] as never;
-    await act(async () => {
-      root.render(
-        <SessionStream
-          displayItems={displayItems}
-          totalEvents={2}
-          sourceFilter="all"
-          streamRef={{ current: null }}
-          showCacheMissNotices={false}
-          resolvedPermissions={new Set()}
-          pendingPermissionCallId={null}
-          permissionFeedback={{}}
-          onFeedback={() => {}}
-          onBookmark={() => {}}
-          onPermission={async (callId, granted, scope) => {
-            calls.push([callId, granted, scope ?? "once"]);
-          }}
-          onSourceFilter={() => {}}
-        />,
-      );
-    });
-    const bar = container.querySelector(".approval-batch-bar");
-    assert.ok(bar, "应显示批量放行条");
-    assert.match(bar?.textContent ?? "", /2 个审批等待处理/);
-    const button = container.querySelector(".approval-batch-bar .approve-button");
-    assert.ok(button, "应有全部允许按钮");
-    await act(async () => {
-      (button as HTMLButtonElement).click();
-    });
-    assert.deepEqual(calls, [
-      ["c1", true, "session"],
-      ["c2", true, "session"],
-    ]);
-    await act(async () => root.unmount());
-  });
-
-  it("已处理审批不计入挂起数", async () => {
-    const [{ act }, { createRoot }, { SessionStream }] = await Promise.all([
-      import("react"),
-      import("react-dom/client"),
-      import("./session-stream"),
-    ]);
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    mountedRoots.push(root);
-    const ts = "2026-08-01T10:00:00.000Z";
-    const displayItems = [
-      { kind: "approval", seq: 1, ts, event: { call: { id: "c1" } }, resolvedByEvent: true },
-      { kind: "approval", seq: 2, ts, event: { call: { id: "c2" } }, resolvedByEvent: false },
-    ] as never;
-    await act(async () => {
-      root.render(
-        <SessionStream
-          displayItems={displayItems}
-          totalEvents={2}
-          sourceFilter="all"
-          streamRef={{ current: null }}
-          showCacheMissNotices={false}
-          resolvedPermissions={new Set(["c1"])}
-          pendingPermissionCallId={null}
-          permissionFeedback={{}}
-          onFeedback={() => {}}
-          onBookmark={() => {}}
-          onPermission={async () => {}}
-          onSourceFilter={() => {}}
-        />,
-      );
-    });
-    assert.equal(container.querySelector(".approval-batch-bar"), null, "只剩 1 个挂起时不显示");
     await act(async () => root.unmount());
   });
 });

@@ -7,13 +7,12 @@ import {
 import type {
   PermissionMode,
   RecordedEvent,
-  SessionBranch,
   SessionStatus,
   SessionSummary,
   WorkspaceInfo,
 } from "@shared/types.js";
 import { useProjectPicker, type OpenedProject } from "./use-project-picker";
-import { buildDisplayItems } from "./session-display";
+import { buildDisplayItems, toolResultDiffText } from "./session-display";
 import type { DeliveryWorkbenchData } from "./DeliveryWorkbench";
 import type { ApprovalScope } from "./session-render";
 import {
@@ -26,11 +25,7 @@ import {
   SessionEmpty,
   type ProjectEntry,
 } from "./session-header";
-import {
-  SessionRail,
-  type Bookmark,
-  type UserTurn,
-} from "./session-rail";
+import { SessionRail } from "./session-rail";
 import { SessionListSidebar } from "./session-sidebar";
 import { SessionStream } from "./session-stream";
 import { NewTaskOverlay } from "./session-new-task";
@@ -62,9 +57,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [currentProject, setCurrentProject] = useState("");
   const [events, setEvents] = useState<SessionEvent[]>([]);
-  const [branches, setBranches] = useState<SessionBranch[]>([]);
-  const [currentBranchId, setCurrentBranchId] = useState("main");
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [message, setMessage] = useState("");
   const [permissionMode, setPermissionMode] =
     useState<PermissionMode>("normal");
@@ -74,6 +66,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [newTaskProject, setNewTaskProject] = useState("");
   /** 详情区右栏（任务清单/消耗/会话信息）展开/收起 */
   const [showDetail, setShowDetail] = useState(false);
+  /** 会话视图标签：对话 | 轨迹（任务可观测，默认展示标签栏）；实验会话额外有对比 */
+  const [sessionView, setSessionView] = useState<"conversation" | "trace" | "compare">("conversation");
   /** 移动端侧栏抽屉开合（≤768px 生效） */
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // 项目选择器（目录浏览 + 打开项目）：打开成功后切换到目标项目视图
@@ -139,8 +133,10 @@ export function SessionApp(props: { initialSessionId?: string }) {
     [sessions, selectedId],
   );
   const waitingUser = selected?.status === "waiting_user";
+  // running 表示"真的在跑"；等待审批/等待用户时任务暂停，不显示中止按钮，但输入框仍按排队语义处理
+  const running = selected?.status === "running";
   const busy =
-    selected?.status === "running" ||
+    running ||
     selected?.status === "waiting_permission" ||
     waitingUser;
   const visibleEvents = events;
@@ -166,22 +162,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
       );
     });
   }, [displayItems, sourceFilter]);
-  // 对话链路：每轮用户提问的目录，点击可定位到对应消息
-  const userTurns = useMemo<UserTurn[]>(() => {
-    let turn = 0;
-    return displayItems.flatMap((item) =>
-      item.kind === "message" && item.author === "user"
-        ? [
-            {
-              seq: item.seq,
-              ts: item.ts,
-              text: item.text,
-              turn: (turn += 1),
-            },
-          ]
-        : [],
-    );
-  }, [displayItems]);
   const latestTodos = useMemo(() => {
     const update = [...visibleEvents]
       .reverse()
@@ -191,6 +171,37 @@ export function SessionApp(props: { initialSessionId?: string }) {
     }
     return update.event.todos ?? selected?.todos ?? [];
   }, [visibleEvents, selected]);
+
+  /** 右栏「文件改动」面板：从 Edit/Write/MultiEdit 工具结果汇总（同路径合并累计增删行） */
+  const fileChanges = useMemo(() => {
+    const byPath = new Map<string, { added: number; removed: number }>();
+    for (const item of displayItems) {
+      if (item.kind !== "tool") continue;
+      const tool = String(item.call.tool ?? "");
+      if (!["Edit", "Write", "MultiEdit"].includes(tool)) continue;
+      const path = String(item.call.target ?? "");
+      if (!path) continue;
+      const text = toolResultDiffText(item.result);
+      let added = 0;
+      let removed = 0;
+      if (text) {
+        for (const line of text.split("\n")) {
+          if (line.startsWith("+++") || line.startsWith("---")) continue;
+          if (line.startsWith("+")) added += 1;
+          else if (line.startsWith("-")) removed += 1;
+        }
+      }
+      const entry = byPath.get(path) ?? { added: 0, removed: 0 };
+      entry.added += added;
+      entry.removed += removed;
+      byPath.set(path, entry);
+    }
+    return [...byPath.entries()].map(([path, stat]) => ({
+      path,
+      added: stat.added,
+      removed: stat.removed,
+    }));
+  }, [displayItems]);
 
   // 存在任务清单时自动展开详情右栏（从 0 搭建场景：用户默认看到任务进度）
   const autoExpandedRef = useRef(false);
@@ -272,68 +283,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
     if (!response.ok) return;
     if (selectedId === id) setSelectedId("");
     await refreshSessions();
-  }
-
-  async function refreshBranches() {
-    if (!selectedId) {
-      setBranches([]);
-      setCurrentBranchId("main");
-      return;
-    }
-    const response = await fetch(
-      projectUrl(`/api/sessions/${selectedId}/branches`),
-    );
-    if (!response.ok) return;
-    const payload = await response.json();
-    setBranches((payload.branches ?? []) as SessionBranch[]);
-    setCurrentBranchId(payload.currentBranchId ?? "main");
-  }
-
-  async function refreshBookmarks() {
-    if (!selectedId) {
-      setBookmarks([]);
-      return;
-    }
-    const response = await fetch(
-      projectUrl(`/api/sessions/${selectedId}/bookmarks`),
-    );
-    if (!response.ok) return;
-    const payload = await response.json();
-    setBookmarks((payload.bookmarks ?? []) as Bookmark[]);
-  }
-
-  /** 打书签：name 空串移除；成功后刷新列表 */
-  async function toggleBookmark(seq: number, name: string) {
-    if (!selectedId) return;
-    const response = await fetch(
-      projectUrl(`/api/sessions/${selectedId}/bookmarks`),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seq, name }),
-      },
-    );
-    if (response.ok) await refreshBookmarks();
-  }
-
-  /** 回溯切换分支：事件流会推送 branch_switch，树随 SSE 自动刷新 */
-  async function switchBranch(branchId: string) {
-    if (busy || !selectedId || branchId === currentBranchId) return;
-    const response = await fetch(
-      projectUrl(`/api/sessions/${selectedId}/switch-branch`),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ branchId }),
-      },
-    );
-    if (response.ok) {
-      const payload = await response.json();
-      setCurrentBranchId(payload.currentBranchId ?? branchId);
-    } else {
-      const payload = await response.json().catch(() => null);
-      setError(payload?.error ?? "切换分支失败");
-    }
   }
 
   function projectUrl(path: string, key?: string): string {
@@ -482,8 +431,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
     setEvents([]);
     setResolvedPermissions(new Set());
     seenSeqs.current = new Set();
-    void refreshBranches();
-    void refreshBookmarks();
     const source = new EventSource(
       projectUrl(`/api/sessions/${selectedId}/stream`),
     );
@@ -496,10 +443,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
       setEvents((current) => [...current, record]);
       if (["run_finished", "done", "error", "interrupted", "acceptance_result", "review_result"].includes(record.event.type)) {
         void refreshDelivery();
-      }
-      // 分支切换事件实时刷新分支树（含跨端切换：CLI /branch 或 /goto）
-      if (record.event.type === "branch_switch") {
-        void refreshBranches();
       }
       if (record.event.type === "plan_proposed") {
         void loadPlan(selectedId);
@@ -532,14 +475,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
     }
     stream.scrollTop = stream.scrollHeight;
   }, [selectedId, events.length, waitingUser]);
-
-  /** 对话链路跳转：平滑滚动到对应 seq 的消息 */
-  function scrollToSeq(seq: number) {
-    const node = chatStreamRef.current?.querySelector(
-      `[data-seq="${seq}"]`,
-    );
-    node?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
 
   function updateMessage(value: string) {
     setMessage(value);
@@ -776,6 +711,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
 
   function startNewSession() {
     setSelectedId("");
+    setSessionView("conversation");
     setMessage("");
     setRunBoundsPreview(null);
     openNewTask();
@@ -788,8 +724,12 @@ export function SessionApp(props: { initialSessionId?: string }) {
         sessionsLoaded={sessionsLoaded}
         selectedId={selectedId}
         open={sidebarOpen}
+        currentProject={currentProject}
+        projects={projects}
+        onSwitchProject={switchProject}
         onSelect={(id) => {
           setSelectedId(id);
+          setSessionView("conversation");
           // 移动端：选中会话后收起抽屉
           setSidebarOpen(false);
         }}
@@ -810,27 +750,9 @@ export function SessionApp(props: { initialSessionId?: string }) {
           <>
             <SessionHeader
               selected={selected}
-              currentProject={currentProject}
-              projects={projects}
-              busy={busy}
-              showDetail={showDetail}
-              onSwitchProject={switchProject}
+              busy={running}
               onInterrupt={() => void interrupt()}
               onResume={() => void resumeInterrupted()}
-              onNew={startNewSession}
-              onExport={() => {
-                exportSession(selected.id);
-              }}
-              onDelete={() => {
-                if (
-                  window.confirm(
-                    `确认删除会话「${selected.title}」？该操作不可恢复。`,
-                  )
-                ) {
-                  void deleteSession(selected.id);
-                }
-              }}
-              onToggleDetail={() => setShowDetail((v) => !v)}
             />
 
             {error && (
@@ -840,19 +762,63 @@ export function SessionApp(props: { initialSessionId?: string }) {
             <FlightRecorder
               session={selected}
               project={currentProject}
+              view={sessionView}
+              onViewChange={setSessionView}
               onSelectSession={(id) => {
                 setSelectedId(id);
+                setSessionView("conversation");
                 void refreshSessions();
               }}
+              traceActions={
+                <>
+                  <button
+                    className={`detail-toggle ${showDetail ? "active" : ""}`}
+                    onClick={() => setShowDetail((v) => !v)}
+                  >
+                    {showDetail ? "收起任务详情" : "任务详情"}
+                  </button>
+                  <button
+                    className="detail-toggle"
+                    onClick={() => exportSession(selected.id)}
+                  >
+                    导出
+                  </button>
+                  <button
+                    className="detail-toggle danger"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `确认删除会话「${selected.title}」？该操作不可恢复。`,
+                        )
+                      ) {
+                        void deleteSession(selected.id);
+                      }
+                    }}
+                  >
+                    删除
+                  </button>
+                </>
+              }
               conversation={
-              <div className="session-workspace with-rail">
-              <section className="chat-column">
+              <div
+                className={`session-workspace${
+                  sessionView === "conversation" &&
+                  (latestTodos.length > 0 ||
+                    showDetail ||
+                    (selected.status === "done" &&
+                      selected.kind === "run" &&
+                      selected.toolCallCount === 0))
+                    ? " with-rail"
+                    : ""
+                }`}
+              >   <section className="chat-column">
                 {workspaceInfo && <WorkspaceBanner workspace={workspaceInfo} />}
                 <SessionStream
                   displayItems={filteredDisplayItems}
                   totalEvents={events.length}
                   streamRef={chatStreamRef}
                   showCacheMissNotices={showCacheMissNotices}
+                  compact
                   resolvedPermissions={resolvedPermissions}
                   pendingPermissionCallId={pendingPermissionCallId}
                   pendingClarificationId={pendingClarificationId}
@@ -862,9 +828,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
                       ...current,
                       [callId]: value,
                     }))
-                  }
-                  onBookmark={(seq, name) =>
-                    void toggleBookmark(seq, name)
                   }
                   onPermission={answerPermission}
                   onClarification={answerClarification}
@@ -909,28 +872,20 @@ export function SessionApp(props: { initialSessionId?: string }) {
                       onRunModeChange={setRunMode}
                       planMode={planMode}
                       onPlanModeChange={setPlanMode}
+                      showModes={false}
                       onSubmit={submitMessage}
                     />
                 </>
               </section>
 
-              <SessionRail
-                branches={branches}
-                currentBranchId={currentBranchId}
-                busy={busy}
-                userTurns={userTurns}
-                bookmarks={bookmarks}
-                latestTodos={latestTodos}
-                selected={selected}
-                showDetail={showDetail}
-                onSwitchBranch={(branchId) =>
-                  void switchBranch(branchId)
-                }
-                onScrollToSeq={scrollToSeq}
-                onToggleBookmark={(seq, name) =>
-                  void toggleBookmark(seq, name)
-                }
-              />
+              {sessionView === "conversation" && (
+                <SessionRail
+                  latestTodos={latestTodos}
+                  selected={selected}
+                  showDetail={showDetail}
+                  fileChanges={fileChanges}
+                />
+              )}
             </div>
               }
             />
@@ -996,17 +951,18 @@ export function SessionApp(props: { initialSessionId?: string }) {
 }
 
 export function WorkspaceBanner({ workspace }: { workspace: WorkspaceInfo }) {
+  // 路径已失效：交付详情里有说明，对话流不再展示残留提示
+  if (!workspace.exists) return null;
   return (
     <section
-      className={`workspace-banner${workspace.exists ? "" : " workspace-banner-missing"}`}
+      className="workspace-banner"
       aria-label="隔离工作区"
     >
-      <strong>{workspace.exists ? "隔离工作区" : "隔离工作区不可用"}</strong>
-      <span>
+      <strong>隔离工作区</strong>
+      <span className="workspace-banner-path" title={workspace.path}>
         原项目未自动修改 · 独立 worktree：<code>{workspace.path}</code>
       </span>
       {workspace.head && <span>HEAD <code>{workspace.head.slice(0, 12)}</code></span>}
-      {!workspace.exists && <span>风险：隔离路径已不存在，无法继续或复现。</span>}
       {(workspace.warnings ?? []).length > 0 && (
         <span>快照提示：{(workspace.warnings ?? []).join("；")}</span>
       )}
@@ -1017,7 +973,3 @@ export function WorkspaceBanner({ workspace }: { workspace: WorkspaceInfo }) {
 
 // 兼容既有测试引用：这些组件原定义于本文件，现移入独立模块，经此处 re-export
 export { SessionListSidebar } from "./session-sidebar";
-export {
-  TaskScopeTemplates,
-  TASK_SCOPE_TEMPLATES,
-} from "./session-composer";

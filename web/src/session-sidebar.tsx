@@ -1,19 +1,23 @@
 import { useState } from "react";
 import type { SessionSummary } from "@shared/types.js";
-import { statusMeta } from "./session-render";
 
 export type TaskGroup = { id: string; label: string; sessions: SessionSummary[] };
 
-function relativeTime(value: string): string {
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return "最近";
-  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
-  if (minutes < 1) return "刚刚";
-  if (minutes < 60) return `${minutes} 分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  const days = Math.floor(hours / 24);
-  return days < 7 ? `${days} 天前` : new Date(timestamp).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+/** 任务行尾的状态标记：待处理红点 / 进行中绿圈 / 完成绿勾 */
+function TaskStateMark({ status }: { status: SessionSummary["status"] }) {
+  if (["waiting_permission", "waiting_plan", "waiting_user", "error", "interrupted"].includes(status)) {
+    return <span className="task-state-mark mark-attention" aria-label="需要处理" />;
+  }
+  if (status === "running") {
+    return <span className="task-state-mark mark-running" aria-label="进行中" />;
+  }
+  return (
+    <span className="task-state-mark mark-done" aria-label="已完成">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+        <path d="M2.5 6.5 5 9l4.5-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
 }
 
 export function groupSessions(sessions: SessionSummary[]): TaskGroup[] {
@@ -27,13 +31,17 @@ export function groupSessions(sessions: SessionSummary[]): TaskGroup[] {
   ];
 }
 
-/** 左侧任务列表（移动端为抽屉，≤768px 生效；桌面恒展开） */
+/** 左侧任务栏（设计稿形态：品牌 / 项目切换 / 新建任务 / 搜索 / 分组列表 / 底部设置与扩展）
+ *  移动端为抽屉（≤768px 生效；桌面恒展开） */
 export function SessionListSidebar(props: {
   sessions: SessionSummary[];
   sessionsLoaded: boolean;
   selectedId: string;
   onSelect: (id: string) => void;
   onNew: () => void;
+  currentProject?: string;
+  projects?: { key: string; name: string; cwd: string }[];
+  onSwitchProject?: (key: string) => void;
   /** 移动端抽屉开合（≤768px 生效；桌面恒展开） */
   open?: boolean;
 }) {
@@ -46,40 +54,70 @@ export function SessionListSidebar(props: {
           (session.firstMessage ?? "").toLowerCase().includes(keyword),
       )
     : props.sessions;
+  const groups = groupSessions(visible);
   return (
     <aside
       className={`sidebar session-list-sidebar${props.open ? " open" : ""}`}
     >
       <div className="brand">
-        <span className="brand-mark">◆</span>
+        <span className="brand-mark">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="11" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M4.5 7h5M7 4.5v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </span>
         <span>MyAgent</span>
       </div>
+      {props.projects && props.projects.length > 0 && (
+        <select
+          className="sidebar-project-switcher"
+          value={props.currentProject}
+          onChange={(event) => props.onSwitchProject?.(event.target.value)}
+          title="选择工作区"
+          aria-label="选择工作区"
+        >
+          {props.projects.map((project) => (
+            <option value={project.key} key={project.key}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+      )}
       <button className="sidebar-new" onClick={props.onNew}>
-        ＋ 新建任务
+        <span className="sidebar-new-plus" aria-hidden="true">+</span> 新建任务
       </button>
-      <input
-        className="sidebar-search"
-        type="search"
-        placeholder="搜索任务…"
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-      />
-      <div className="sidebar-sessions" aria-label="任务列表">
+      <div className="sidebar-search-wrap">
+        <input
+          className="sidebar-search"
+          type="search"
+          placeholder="搜索任务"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <kbd className="sidebar-search-kbd" aria-hidden="true">⌘K</kbd>
+      </div>
+      <div className="sidebar-sessions" aria-label="会话列表">
         {visible.length === 0 && (
           <div className="sidebar-empty">
             {props.sessions.length === 0
               ? props.sessionsLoaded
                 ? "还没有任务"
                 : "加载任务…"
-                : "无匹配任务"}
+              : "无匹配任务"}
           </div>
         )}
-        {groupSessions(visible).map((group) => group.sessions.length > 0 && (
+        {groups.map((group) => group.sessions.length > 0 && (
           <section className={`task-group task-group-${group.id}`} key={group.id} aria-label={group.label}>
-            <h2 className="task-group-label">{group.label}<span>{group.sessions.length}</span></h2>
+            <h2 className="task-group-label">
+              <span className="task-group-name">
+                {group.id === "attention" && <span className="task-group-dot dot-amber" aria-hidden="true" />}
+                {group.id === "active" && <span className="task-group-dot dot-green" aria-hidden="true" />}
+                {group.label}
+              </span>
+              <span className="task-group-count">{group.sessions.length}</span>
+            </h2>
             {group.sessions.map((session) => {
               const active = session.id === props.selectedId;
-              const status = statusMeta[session.status];
               return (
                 <div className={`sidebar-task-row ${active ? "active" : ""}`} key={session.id}>
                   <button
@@ -87,10 +125,9 @@ export function SessionListSidebar(props: {
                     onClick={() => props.onSelect(session.id)}
                     title={session.title}
                   >
-                    <span className={`session-dot tone-${status.tone}`} aria-hidden="true" />
                     <span className="session-line-title">{session.title}</span>
+                    <TaskStateMark status={session.status} />
                   </button>
-                  <span className="task-meta"><span>{status.label}</span><time dateTime={session.updatedAt}>{relativeTime(session.updatedAt)}</time></span>
                 </div>
               );
             })}
@@ -104,12 +141,18 @@ export function SessionListSidebar(props: {
             window.location.hash = "settings";
           }}
         >
-          <span>⚙</span>设置
+          <span aria-hidden="true">⚙</span>设置
         </button>
-        <div className="local-state">
+        <button
+          className="nav-item"
+          onClick={() => {
+            window.location.hash = "plugins";
+          }}
+        >
+          <span aria-hidden="true">🧩</span>扩展
+        </button>
+        <div className="local-state" title={`本机服务 ${window.location.host}`}>
           <span className="status-dot" />
-          本机服务
-          <small>{window.location.host}</small>
         </div>
       </div>
     </aside>

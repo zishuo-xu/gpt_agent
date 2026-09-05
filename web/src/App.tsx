@@ -13,6 +13,7 @@ import { SchemaDrivenSections } from "./settings/SchemaSections";
 
 export function App() {
   const [scope, setScope] = useState<Scope>("global");
+  const [tab, setTab] = useState<"models" | "general">("models");
   const [config, setConfig] = useState<Config | null>(null);
   const [schema, setSchema] = useState<SchemaField[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState("");
@@ -493,9 +494,8 @@ export function App() {
       <main>
         <header className="page-header">
           <div>
-            <p className="eyebrow">SETTINGS / MODELS</p>
-            <h1>模型设置</h1>
-            <p>管理模型供应商，并为每个模型独立验证连接状态。</p>
+            <p className="eyebrow">SETTINGS</p>
+            <h1>设置</h1>
           </div>
           <button
             className={`save-button${dirty ? " dirty" : ""}`}
@@ -507,26 +507,43 @@ export function App() {
           </button>
         </header>
 
-        <div className="scope-switch" aria-label="配置作用域">
+        <div className="scope-switch" aria-label="设置分类">
           <button
-            className={scope === "global" ? "selected" : ""}
-            onClick={() => setScope("global")}
+            className={tab === "models" ? "selected" : ""}
+            onClick={() => setTab("models")}
           >
-            全局
+            模型
           </button>
           <button
-            className={scope === "project" ? "selected" : ""}
-            onClick={() => setScope("project")}
+            className={tab === "general" ? "selected" : ""}
+            onClick={() => setTab("general")}
           >
-            当前项目
+            通用
           </button>
         </div>
+
+        {tab === "models" && (
+          <div className="scope-switch" aria-label="配置作用域">
+            <button
+              className={scope === "global" ? "selected" : ""}
+              onClick={() => setScope("global")}
+            >
+              全局
+            </button>
+            <button
+              className={scope === "project" ? "selected" : ""}
+              onClick={() => setScope("project")}
+            >
+              当前项目
+            </button>
+          </div>
+        )}
 
         {notice && <div className={`notice ${notice.tone}`}>{notice.text}</div>}
 
         {loading || !config ? (
           <div className="loading-card">正在读取本机配置…</div>
-        ) : (
+        ) : tab === "models" ? (
           <div className="content">
             <ProviderPanel
               providers={config.providers}
@@ -562,7 +579,9 @@ export function App() {
               onUpdateRoleFallback={updateRoleFallback}
               onRemoveRoleFallback={removeRoleFallback}
             />
-
+          </div>
+        ) : (
+          <div className="content">
             <PermissionsPanel
               permissions={config.permissions}
               description={schema.find((field) => field.key === "permissions")?.description}

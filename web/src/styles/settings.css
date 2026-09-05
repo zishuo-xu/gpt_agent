@@ -8,7 +8,7 @@
 .compact-heading {
   margin: 0;
   padding: 18px 22px;
-  border-bottom: 1px solid #29313e;
+  border-bottom: 1px solid var(--line);
 }
 
 .provider-workspace {
@@ -21,8 +21,8 @@
   display: flex;
   flex-direction: column;
   padding: 16px 12px;
-  border-right: 1px solid #29313e;
-  background: #111720;
+  border-right: 1px solid var(--line);
+  background: var(--surface-1);
 }
 
 .provider-group-label {
@@ -56,13 +56,13 @@
 }
 
 .provider-nav-item:hover {
-  background: #19212c;
+  background: var(--surface-2);
 }
 
 .provider-nav-item.selected {
-  border-color: #394454;
-  background: #1d2531;
-  box-shadow: inset 3px 0 0 #668ff3;
+  border-color: var(--line-strong);
+  background: var(--surface-3);
+  box-shadow: inset 3px 0 0 var(--brand);
   color: #f0f3f8;
 }
 
@@ -99,8 +99,8 @@
 }
 
 .provider-nav-item i.enabled {
-  background: #41c675;
-  box-shadow: 0 0 0 3px rgba(65, 198, 117, 0.1);
+  background: var(--brand);
+  box-shadow: 0 0 0 3px rgba(63, 185, 112, 0.12);
 }
 
 .add-provider-button {
@@ -120,7 +120,7 @@
 }
 
 .add-provider-button:hover {
-  background: #19212c;
+  background: var(--surface-2);
 }
 
 .add-provider-button span {
@@ -131,7 +131,7 @@
 .provider-editor {
   min-width: 0;
   padding: 20px 24px 22px;
-  background: #151b24;
+  background: var(--surface-1);
 }
 
 .provider-editor-header {
@@ -201,8 +201,8 @@
 }
 
 .enable-button.on {
-  border-color: #2b8a52;
-  background: #2eb966;
+  border-color: var(--brand-strong);
+  background: var(--brand);
   color: #07160d;
 }
 
@@ -245,7 +245,7 @@
   padding: 0 9px;
   border: 0;
   border-radius: 5px;
-  background: #1a2230;
+  background: var(--surface-2);
   color: #7f8b9d;
   cursor: pointer;
   font-size: 10px;
@@ -257,7 +257,7 @@
   max-width: 780px;
   margin-top: 18px;
   padding-top: 15px;
-  border-top: 1px solid #29313e;
+  border-top: 1px solid var(--line);
 }
 
 .model-list-heading {
@@ -280,7 +280,7 @@
 
 .model-list-heading > span {
   padding: 3px 7px;
-  border: 1px solid #303a49;
+  border: 1px solid var(--line);
   border-radius: 11px;
   color: #7c899a;
   font-size: 10px;
@@ -292,9 +292,9 @@
 }
 
 .model-row-wrap {
-  border: 1px solid #2d3745;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #10161e;
+  background: var(--surface-0);
   overflow: hidden;
 }
 
@@ -309,13 +309,13 @@
 .model-row input {
   height: 32px;
   border-color: transparent;
-  background: #151c26;
+  background: var(--surface-2);
   font-family: var(--mono);
   font-size: 12px;
 }
 
 .model-row input:focus {
-  border-color: #5369b7;
+  border-color: var(--brand);
 }
 
 .model-test-button,
@@ -330,13 +330,13 @@
 .model-test-button {
   height: 30px;
   padding: 0 10px;
-  border: 1px solid #3c4e6d;
-  background: #1b2941;
-  color: #a9c0ff;
+  border: 1px solid var(--brand-line);
+  background: var(--brand-soft);
+  color: var(--accent-2);
 }
 
 .model-test-button:hover:not(:disabled) {
-  background: #243554;
+  background: rgba(63,185,112,0.2);
 }
 
 .model-delete-button {
@@ -364,9 +364,9 @@
 }
 
 .model-test-result.success {
-  border-color: #285d3d;
-  background: #11271a;
-  color: #84dca3;
+  border-color: #24573a;
+  background: #122418;
+  color: #6fd598;
 }
 
 .model-test-result.warning {
@@ -397,13 +397,13 @@
 .add-model-button {
   margin-top: 8px;
   padding: 7px 12px;
-  border: 1px solid #354052;
-  background: #202833;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-3);
   color: #c8d0dc;
 }
 
 .add-model-button:hover {
-  background: #293443;
+  background: var(--line-strong);
 }
 
 /* ========== 设置页：角色模型 ========== */
@@ -417,7 +417,7 @@
 .role-card {
   position: relative;
   padding: 17px;
-  border: 1px solid #293341;
+  border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface-2);
   box-shadow: var(--card-inset);
@@ -610,7 +610,7 @@
 .schema-field input[type="checkbox"] {
   width: 18px;
   height: 18px;
-  accent-color: #668ff3;
+  accent-color: var(--brand);
 }
 
 
@@ -634,8 +634,8 @@
 }
 
 .toggle-button.on {
-  border-color: #2b8a52;
-  background: #2eb966;
+  border-color: var(--brand-strong);
+  background: var(--brand);
   color: #07160d;
 }
 

@@ -117,6 +117,9 @@ export function ObjectFieldEditor(props: {
   );
 }
 
+/** 已有专用面板（模型/权限/上下文）处理的复合字段，不再重复渲染 */
+const HANDLED_KEYS = new Set(["providers", "models", "permissions", "context"]);
+
 /**
  * Schema 驱动面板：非标量复合字段的通用编辑器 + 标量字段的扩展设置区。
  * 新增配置项（未指定专用 renderer）时零前端改动即可显示并编辑。
@@ -131,7 +134,10 @@ export function SchemaDrivenSections(props: {
     (field) => isScalarType(field.type) || LINE_LIST_TYPES.includes(field.type),
   );
   const compoundFields = schema.filter(
-    (field) => !isScalarType(field.type) && !field.renderer,
+    (field) =>
+      !isScalarType(field.type) &&
+      !field.renderer &&
+      !HANDLED_KEYS.has(field.key),
   );
   return (
     <>

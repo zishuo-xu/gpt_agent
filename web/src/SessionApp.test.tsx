@@ -212,7 +212,7 @@ describe("buildDisplayItems（会话回放事件流转换）", () => {
       items.map((item) => item.kind),
       ["system", "system", "system", "system", "system"],
     );
-    if (items[0]?.kind === "system") assert.equal(items[0].tone, "done");
+    if (items[0]?.kind === "system") assert.equal(items[0].tone, undefined);
     if (items[1]?.kind === "system") {
       assert.match(items[1].text, /超时/);
       assert.equal(items[1].tone, "error");
@@ -658,23 +658,25 @@ describe("任务工作台信息层级", () => {
     container.remove();
   });
 
-  it("任务头部使用用户动作文案并将技术操作收进更多", async () => {
+  it("任务头部只保留标题、状态与中止/续跑", async () => {
     const [{ act }, { createRoot }, { SessionHeader }] = await Promise.all([
       import("react"), import("react-dom/client"), import("./session-header"),
     ]);
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
-    await act(async () => root.render(<SessionHeader selected={makeTask("abc123", "waiting_user", "修复问题") as never} currentProject="" projects={[]} busy onSwitchProject={() => undefined} onInterrupt={() => undefined} onResume={() => undefined} onNew={() => undefined} onExport={() => undefined} onDelete={() => undefined} showDetail={false} onToggleDetail={() => undefined} />));
+    await act(async () => root.render(<SessionHeader selected={makeTask("abc123", "waiting_user", "修复问题") as never} busy={false} onInterrupt={() => undefined} onResume={() => undefined} />));
     const text = container.textContent ?? "";
-    assert.match(text, /等待你的决定/);
+    assert.match(text, /修复问题/);
+    assert.match(text, /等待你的回答/);
     assert.doesNotMatch(text, /AGENT \/ SESSION|会话 #|normal/);
-    assert.ok(container.querySelector(".header-more"));
+    // 等待状态下不显示中止按钮
+    assert.equal(container.querySelector(".interrupt-button"), null);
     await act(async () => root.unmount());
     container.remove();
   });
 
-  it("首页空态使用任务化入口文案", async () => {
+  it("首页空态只呈现任务入口，无欢迎标题", async () => {
     const [{ act }, { createRoot }, { SessionEmpty }] = await Promise.all([
       import("react"), import("react-dom/client"), import("./session-header"),
     ]);
@@ -684,9 +686,8 @@ describe("任务工作台信息层级", () => {
     await act(async () => root.render(
       <SessionEmpty error="" newTaskComposer={<button>新建任务</button>} />,
     ));
-    assert.match(container.textContent ?? "", /把工作交给 MyAgent/);
     assert.match(container.textContent ?? "", /新建任务/);
-    assert.doesNotMatch(container.textContent ?? "", /选择一个会话|新会话/);
+    assert.doesNotMatch(container.textContent ?? "", /把工作交给|选择一个会话|新会话/);
     await act(async () => root.unmount());
     container.remove();
   });
@@ -812,72 +813,6 @@ describe("ProjectPicker（打开其他项目选择器）", () => {
     });
     assert.ok(container.querySelector(".project-picker-error")?.textContent?.includes("无法读取目录列表"));
     assert.ok(container.querySelector(".project-picker-empty")?.textContent?.includes("没有可打开的子目录"));
-    await act(async () => root.unmount());
-  });
-});
-
-describe("TaskScopeTemplates（新建面板范围建议）", () => {
-  before(() => {
-    // 同文件其他 describe 可能已注册（全局单例），幂等处理
-    try {
-      GlobalRegistrator.register();
-    } catch {
-      // 已注册：忽略
-    }
-    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
-  });
-
-  it("渲染 4 个模板按钮，点击填入对应模板文本", async () => {
-    const [{ act }, { createRoot }, { TaskScopeTemplates, TASK_SCOPE_TEMPLATES }] =
-      await Promise.all([
-        import("react"),
-        import("react-dom/client"),
-        import("./SessionApp"),
-      ]);
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    const picked: string[] = [];
-    await act(async () => {
-      root.render(
-        <TaskScopeTemplates
-          onPick={(text) => {
-            picked.push(text);
-          }}
-        />,
-      );
-    });
-
-    const buttons = Array.from(
-      container.querySelectorAll("button.task-scope-button"),
-    );
-    assert.deepEqual(
-      buttons.map((button) => button.textContent),
-      TASK_SCOPE_TEMPLATES.map((template) => template.label),
-      "应渲染全部 4 个模板按钮",
-    );
-    assert.equal(
-      container.querySelector(".task-scope-label")?.textContent,
-      "范围建议（点击填入，可再编辑）",
-    );
-
-    // 模拟真实用户点击「修复缺陷」
-    const target = buttons.find(
-      (button) => button.textContent === "修复缺陷",
-    );
-    assert.ok(target, "应找到「修复缺陷」按钮");
-    await act(async () => {
-      target.dispatchEvent(
-        new MouseEvent("click", { bubbles: true, cancelable: true }),
-      );
-    });
-    assert.deepEqual(
-      picked,
-      [
-        "先运行相关测试复现失败（<测试文件>），定位并修复实现中的问题。只修改实现文件，不要修改测试文件。",
-      ],
-      "点击后应把模板文本交给上层填入输入框",
-    );
     await act(async () => root.unmount());
   });
 });
@@ -1026,8 +961,8 @@ describe("隔离工作区入口与结果提示", () => {
     const root = createRoot(container);
     await act(async () => root.render(<NewTaskOverlay presentation="home" newTaskEnv="project" newTaskProject="p" projects={[{ key: "p", name: "示例项目", cwd: "/example" }]} permissionMode="normal" runBoundsPreview={null} submitting={false} message="" runMode={false} workspaceMode="project" onWorkspaceModeChange={() => undefined} onRunModeChange={() => undefined} planMode={false} onPlanModeChange={() => undefined} onEnvChange={() => undefined} onProjectChange={() => undefined} onPermissionMode={() => undefined} onMessage={() => undefined} onSubmit={async () => undefined} onOpenProjectPicker={() => undefined} onClose={() => undefined} onCancelBounds={() => undefined} />));
     assert.notEqual(document.activeElement, container.querySelector("textarea"));
-    assert.ok(container.querySelector(".new-task-context-row"));
-    assert.equal(container.querySelectorAll('.new-task-context-row select').length, 2);
+    // 首页：位置/权限在左栏，面板只留任务选项
+    assert.equal(container.querySelector(".new-task-context-row"), null);
     assert.equal(container.querySelector(".new-task-close"), null);
     const options = container.querySelector(".new-task-options") as HTMLDetailsElement;
     assert.ok(options);
@@ -1064,9 +999,8 @@ describe("隔离工作区入口与结果提示", () => {
     await act(async () => {
       root.render(<WorkspaceBanner workspace={{ mode: "isolated", sourceCwd: "/repo", path: "/tmp/wt", head: "abcdef123456", warnings: ["依赖目录未复制"], exists: false }} />);
     });
-    assert.match(container.textContent ?? "", /原项目未自动修改/);
-    assert.match(container.textContent ?? "", /隔离路径已不存在/);
-    assert.match(container.textContent ?? "", /依赖目录未复制/);
+    // 路径失效时对话流不再渲染横幅（说明在交付详情中）
+    assert.equal(container.textContent ?? "", "");
     await act(async () => root.unmount());
   });
 });
