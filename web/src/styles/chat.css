@@ -1309,6 +1309,22 @@
 @media (prefers-reduced-motion: reduce) {
   .rail-drawer { animation: none; }
 }
+@media (max-width: 768px) {
+  .rail-drawer {
+    top: auto; left: 0; right: 0; bottom: 0;
+    width: auto; max-height: 70vh;
+    border-left: none; border-top: 1px solid var(--line);
+    border-radius: 12px 12px 0 0;
+    animation: rail-drawer-in-mobile .2s ease;
+  }
+  @keyframes rail-drawer-in-mobile {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rail-drawer { animation: none; }
+  }
+}
 .rail-drawer-head {
   display: flex; align-items: center; justify-content: space-between;
   font-size: 13px; font-weight: 600; margin-bottom: 8px;

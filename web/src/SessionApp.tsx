@@ -769,7 +769,10 @@ export function SessionApp(props: { initialSessionId?: string }) {
                 <>
                   <button
                     className={`detail-toggle ${showDetail ? "active" : ""}`}
-                    onClick={() => setShowDetail(true)}
+                    onClick={() => {
+                      setSessionView("conversation");
+                      setShowDetail(true);
+                    }}
                   >
                     任务详情
                   </button>
