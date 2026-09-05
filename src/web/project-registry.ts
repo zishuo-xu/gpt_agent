@@ -42,6 +42,8 @@ export class ProjectRegistry {
   readonly #homeDir: string;
   readonly #defaultCwd: string;
   readonly #cache = new Map<string, ProjectResources>();
+  /** 加载中的项目（cwd → promise）：并发首触共享同一加载，避免重复实例撞项目写锁 */
+  readonly #loading = new Map<string, Promise<ProjectResources>>();
 
   constructor(options: { defaultCwd: string; stateDir?: string; homeDir?: string }) {
     this.#defaultCwd = options.defaultCwd;
@@ -130,38 +132,62 @@ export class ProjectRegistry {
   }
 
   /** 大厅项目（只读不写），始终可用。 */
-  async getLobby(): Promise<ProjectResources> {
-    const cwd = this.lobbyCwd();
-    const cached = this.#cache.get(cwd);
-    if (cached) return cached;
-    // 大厅 cwd 是专用临时目录：确保存在（工具的工作目录依赖它），只读规则仍阻止写文件
-    mkdirSync(cwd, { recursive: true });
-    const configService = new ConfigService({
-      cwd,
-      homeDir: this.#homeDir,
-    });
-    const sessionManager = new WebSessionManager(cwd, configService, {
-      lobby: true,
-      stateDir: this.#stateDir,
-    });
-    await sessionManager.restore();
-    const resources: ProjectResources = { configService, sessionManager };
-    this.#cache.set(cwd, resources);
-    return resources;
+  getLobby(): Promise<ProjectResources> {
+    return this.#loadProject(this.lobbyCwd(), { lobby: true });
   }
 
   /** 按 cwd 获取（并缓存）该项目的资源。 */
-  async getByCwd(cwd: string): Promise<ProjectResources> {
+  getByCwd(cwd: string): Promise<ProjectResources> {
+    return this.#loadProject(cwd);
+  }
+
+  /**
+   * 按需加载项目资源：缓存命中直接返回；加载中并发复用同一 promise。
+   * 前端切项目时会并发请求多个接口，若各自创建实例并 restore，
+   * 项目单实例写锁会把后到者判为"同进程占用"，整批请求报错。
+   */
+  #loadProject(
+    cwd: string,
+    options: { lobby?: boolean } = {},
+  ): Promise<ProjectResources> {
     const cached = this.#cache.get(cwd);
-    if (cached) return cached;
+    if (cached) return Promise.resolve(cached);
+    const inflight = this.#loading.get(cwd);
+    if (inflight) return inflight;
+    const load = this.#createResources(cwd, options.lobby === true)
+      .then((resources) => {
+        this.#cache.set(cwd, resources);
+        return resources;
+      })
+      .finally(() => {
+        this.#loading.delete(cwd);
+      });
+    this.#loading.set(cwd, load);
+    return load;
+  }
+
+  async #createResources(
+    cwd: string,
+    lobby: boolean,
+  ): Promise<ProjectResources> {
+    if (lobby) {
+      // 大厅 cwd 是专用临时目录：确保存在（工具的工作目录依赖它），只读规则仍阻止写文件
+      mkdirSync(cwd, { recursive: true });
+    }
     const configService = new ConfigService({ cwd, homeDir: this.#homeDir });
     const sessionManager = new WebSessionManager(cwd, configService, {
+      ...(lobby ? { lobby: true } : {}),
       stateDir: this.#stateDir,
     });
-    await sessionManager.restore();
-    const resources: ProjectResources = { configService, sessionManager };
-    this.#cache.set(cwd, resources);
-    return resources;
+    try {
+      await sessionManager.restore();
+    } catch (error) {
+      // 首触失败须释放已取得的写锁：锁残留的持有者是本进程（存活），
+      // 后续加载会一直报"项目已被占用"，只能重启自愈
+      await sessionManager.releaseLock().catch(() => undefined);
+      throw error;
+    }
+    return { configService, sessionManager };
   }
 
   /** 按项目 key（?project=）解析资源；未知 key 回退启动目录项目。 */
