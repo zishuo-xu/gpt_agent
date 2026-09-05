@@ -96,6 +96,55 @@ describe("RichText（markdown 渲染）", () => {
     // 代码块之后的内容正常渲染（未吞掉后续行）
     assert.match(container.textContent ?? "", /之后正常段落/);
   });
+
+  it("GFM 表格渲染为 table（表头/对齐分隔行/数据行 + 单元格 inline 渲染）", async () => {
+    const container = await render(
+      [
+        "| 类型 | 数据流向 | 典型场景 |",
+        "| --- | --- | --- |",
+        "| `Readable` | 单向 | 日志、传感器 |",
+        "| **Writable** | 单向落 | 写文件 |",
+        "表格后的普通段落",
+      ].join("\n"),
+    );
+    const table = container.querySelector(".rich-text table.rich-table");
+    assert.ok(table, "表格应渲染为 table.rich-table");
+    assert.equal(table!.querySelectorAll("thead th").length, 3);
+    assert.equal(table!.querySelectorAll("tbody tr").length, 2);
+    assert.equal(
+      table!.querySelector("tbody tr td code")?.textContent,
+      "Readable",
+      "单元格应支持 inline code",
+    );
+    assert.equal(
+      table!.querySelector("tbody tr:nth-child(2) td strong")?.textContent,
+      "Writable",
+      "单元格应支持粗体",
+    );
+    // 表格后的内容不吞
+    assert.match(container.textContent ?? "", /表格后的普通段落/);
+  });
+
+  it("表格转义 \\| 保留为字面管道符，不切列", async () => {
+    const container = await render(
+      ["| 表达式 | 含义 |", "| --- | --- |", "| a \\| b | 或者 |"].join("\n"),
+    );
+    const cells = container.querySelectorAll(".rich-table tbody td");
+    assert.equal(cells.length, 2);
+    assert.equal(cells[0]?.textContent, "a | b");
+  });
+
+  it("无分隔行的管道符文本不误判为表格（保持原样段落）", async () => {
+    const container = await render(
+      ["| 类型 | 数据流向 |", "| Readable | 单向 |"].join("\n"),
+    );
+    assert.equal(
+      container.querySelector(".rich-text table"),
+      null,
+      "缺少 |---| 分隔行时不应渲染表格",
+    );
+    assert.match(container.textContent ?? "", /\| 类型 \|/);
+  });
 });
 
 describe("ItemCard（会话展示组件全分支）", () => {

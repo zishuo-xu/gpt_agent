@@ -1847,6 +1847,46 @@
   content: attr(data-lang);
 }
 
+/* GFM 表格：窄容器横向滚动，单元格细边框 + 表头底色 */
+.rich-table-wrap {
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.rich-table {
+  border-collapse: collapse;
+  min-width: 100%;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.rich-table th,
+.rich-table td {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.rich-table th {
+  background: var(--surface-2);
+  color: var(--text-strong);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.rich-table td {
+  color: var(--text-body);
+}
+
+.rich-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.rich-table code {
+  font-size: 10.5px;
+}
+
 .rich-text blockquote {
   margin: 6px 0;
   padding: 2px 0 2px 10px;
@@ -3083,13 +3123,23 @@
   font-family: var(--mono);
   font-size: 11px;
 }
+/* 超限警示：计数变红加粗，配合发送按钮禁用 */
+.web-composer-hero .composer-hint-over {
+  color: #e5534b;
+  font-weight: 700;
+}
 .composer-send {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
+/* 空输入/超限导致的禁用：与提交中的 opacity .6 区分，避免"看起来能点" */
+.composer-send.is-idle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .composer-enter-hint {
-  margin: 8px 4px 0;
+  margin: 10px 6px 0;
   color: var(--text-faint);
   font-size: 11px;
   text-align: right;

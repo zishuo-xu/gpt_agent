@@ -46,10 +46,10 @@ export function Composer(props: {
         }
         onKeyDown={(event) => {
           if (hero) {
-            // 首页：Enter 发送，Shift+Enter 换行
+            // 首页：Enter 发送，Shift+Enter 换行；超限时吞掉 Enter（计数器已标红提示）
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
-              void props.onSubmit();
+              if (props.message.length <= maxLength) void props.onSubmit();
             }
             return;
           }
@@ -100,7 +100,13 @@ export function Composer(props: {
             </label>
           </>
         )}
-        <span className="composer-hint">
+        <span
+          className={
+            props.message.length > maxLength
+              ? "composer-hint composer-hint-over"
+              : "composer-hint"
+          }
+        >
           {hero
             ? `${props.message.length}/${maxLength}`
             : props.waitingUser
@@ -110,11 +116,14 @@ export function Composer(props: {
                 : ""}
         </span>
         <button
-          className="save-button composer-send"
+          className={`save-button composer-send${props.submitting ? "" : " is-idle"}`}
           aria-label={props.selected ? (props.waitingUser ? "回答并继续" : "发送") : "发送"}
           onClick={() => void props.onSubmit()}
+          // 超限禁发：textarea 的 maxLength 只拦真实键入，粘贴/程序化路径可绕过
           disabled={
-            props.submitting || !props.message.trim()
+            props.submitting ||
+            !props.message.trim() ||
+            props.message.length > maxLength
           }
         >
           {props.submitting

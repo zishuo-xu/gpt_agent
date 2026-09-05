@@ -385,3 +385,13 @@
   color: #556071;
   font-size: 12px;
 }
+
+/* ========== 移动端（≤768px） ========== */
+/* 须覆盖上方 .memory-main 的桌面固定宽（width: calc(100vw - 232px)）：
+   本文件加载顺序在 base.css 之后，同特异性规则以此处为准 */
+@media (max-width: 768px) {
+  .memory-main {
+    width: 100%;
+    padding: 66px 16px 24px;
+  }
+}

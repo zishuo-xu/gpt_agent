@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { SessionSummary } from "@shared/types.js";
+import { formatDateTime } from "./session-format";
 
 export type TaskGroup = { id: string; label: string; sessions: SessionSummary[] };
 
@@ -135,7 +136,8 @@ export function SessionListSidebar(props: {
                   <button
                     className={`sidebar-session ${active ? "active" : ""}`}
                     onClick={() => props.onSelect(session.id)}
-                    title={session.title}
+                    // 悬浮提示带更新时间：同名会话（如多条"你好"）可区分
+                    title={`${session.title} · ${formatDateTime(session.updatedAt)}`}
                   >
                     <span className="session-line-title">{session.title}</span>
                     <TaskStateMark status={session.status} />

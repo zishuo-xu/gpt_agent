@@ -23,3 +23,13 @@ export function formatDuration(ms: number): string {
   if (ms >= 1000) return `${seconds.toFixed(1)}s`;
   return `${Math.round(ms)}ms`;
 }
+
+/** 侧栏悬浮提示用：MM-DD HH:mm（同名会话靠时间区分） */
+export function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}

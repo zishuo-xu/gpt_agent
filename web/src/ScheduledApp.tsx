@@ -124,7 +124,14 @@ export function ScheduledApp() {
 
   async function addTask() {
     const command = draft.trim();
-    if (!command) return;
+    if (!command) {
+      // 空输入静默返回会让用户以为点击无效；给出与加载失败同风格的错误提示
+      setNotice({
+        tone: "error",
+        text: "请先输入任务描述，例如：/run 每早巡检 --at 09:00",
+      });
+      return;
+    }
     setSubmitting(true);
     setNotice(null);
     try {
@@ -235,7 +242,8 @@ export function ScheduledApp() {
           />
           <button
             className="save-button"
-            disabled={submitting || !draft.trim() || !currentProject}
+            // 空草稿不禁用：可点击并由 addTask 给出错误提示（禁用态无解释，用户会以为点击无效）
+            disabled={submitting || !currentProject}
             onClick={() => void addTask()}
           >
             {submitting ? "注册中…" : "注册定时任务"}

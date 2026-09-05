@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -67,7 +67,7 @@ export class ProjectRegistry {
     const byCwd = new Map<string, ProjectEntry>();
 
     // 启动目录项目总是可用
-    byCwd.set(this.#defaultCwd, {
+    byCwd.set(this.#realCwd(this.#defaultCwd), {
       key: ProjectRegistry.projectKey(this.#defaultCwd),
       name: path.basename(this.#defaultCwd),
       cwd: this.#defaultCwd,
@@ -99,7 +99,9 @@ export class ProjectRegistry {
         if (!existsSync(meta.cwd)) continue;
         // 大厅是合成项目（key=lobby），其真实临时目录不重复列出
         if (meta.cwd === lobbyCwd) continue;
-        byCwd.set(meta.cwd, {
+        // 同一目录可能有多种路径拼写（macOS /tmp ↔ /private/tmp）：
+        // 按真实路径归一去重，避免切换器出现重复条目
+        byCwd.set(this.#realCwd(meta.cwd), {
           key,
           name: meta.name ?? path.basename(meta.cwd),
           cwd: meta.cwd,
@@ -112,6 +114,15 @@ export class ProjectRegistry {
     return [...byCwd.values()].sort((a, b) =>
       (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""),
     );
+  }
+
+  /** 真实路径归一（符号链接/拼写差异收敛为一个 key）；失败退回原路径 */
+  #realCwd(cwd: string): string {
+    try {
+      return realpathSync(cwd);
+    } catch {
+      return cwd;
+    }
   }
 
   /** 大厅项目的固定 cwd（专用临时目录，不触碰任何用户目录）。 */
@@ -207,8 +218,19 @@ export class ProjectRegistry {
     }
     const projects = await this.listProjects();
     const found = projects.find((entry) => entry.key === key);
-    const cwd = found?.cwd ?? this.#defaultCwd;
-    return { cwd, resources: await this.getByCwd(cwd) };
+    let cwd = found?.cwd;
+    if (!cwd) {
+      // listProjects 已按真实路径去重：历史 key（如 /tmp 与 /private/tmp 两种拼写）
+      // 可能被归并掉——解码出 cwd 归一后再匹配，避免老链接回退到默认项目
+      try {
+        const decoded = Buffer.from(key, "base64url").toString("utf8");
+        const real = this.#realCwd(decoded);
+        cwd = projects.find((entry) => this.#realCwd(entry.cwd) === real)?.cwd;
+      } catch {
+        cwd = undefined;
+      }
+    }
+    return { cwd: cwd ?? this.#defaultCwd, resources: await this.getByCwd(cwd ?? this.#defaultCwd) };
   }
 
   /** 释放全部已缓存项目实例的单实例写锁（进程优雅退出路径调用）。 */

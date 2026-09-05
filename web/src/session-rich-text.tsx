@@ -1,6 +1,25 @@
 import { Fragment, createElement, useState, type ReactNode } from "react";
 
-/** 块级 markdown 轻量渲染（自研：标题/列表/引用/分隔线/fenced code block） */
+/** 表格行切分：去首尾管道后按 | 分列；单元格内的 \| 是字面管道符（GFM 转义） */
+function splitTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .replace(/\\\|/g, "\u0000")
+    .split("|")
+    .map((cell) => cell.trim().replace(/\u0000/g, "|"));
+}
+
+/** 分隔行判定（| --- | :---: |）：每格为可选冒号包裹的连字符串 */
+function isTableSeparator(cells: string[]): boolean {
+  return (
+    cells.length > 0 &&
+    cells.every((cell) => /^:?-{3,}:?$/.test(cell))
+  );
+}
+
+/** 块级 markdown 轻量渲染（自研：标题/列表/引用/分隔线/fenced code block/表格） */
 export function RichText(props: { text: string }) {
   const lines = props.text.split(/\r?\n/);
   const blocks: ReactNode[] = [];
@@ -48,6 +67,43 @@ export function RichText(props: { text: string }) {
     if (!trimmed) {
       blocks.push(<br key={index} />);
       continue;
+    }
+    // GFM 表格：当前行含 | 且下一行是分隔行（强判据，避免把含管道符的普通文本误判为表格）
+    if (trimmed.includes("|") && index + 1 < lines.length) {
+      const headerCells = splitTableRow(line);
+      if (headerCells.length >= 1 && isTableSeparator(splitTableRow(lines[index + 1]!))) {
+        const rows: string[][] = [];
+        let cursor = index + 2;
+        while (cursor < lines.length && lines[cursor]!.trim().includes("|")) {
+          rows.push(splitTableRow(lines[cursor]!));
+          cursor += 1;
+        }
+        blocks.push(
+          <div className="rich-table-wrap" key={index}>
+            <table className="rich-table">
+              <thead>
+                <tr>
+                  {headerCells.map((cell, cellIndex) => (
+                    <th key={cellIndex}>{renderInline(cell)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, rowIndex) => (
+                  <tr key={rowIndex}>
+                    {headerCells.map((_, cellIndex) => (
+                      <td key={cellIndex}>{renderInline(row[cellIndex] ?? "")}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>,
+        );
+        // 跳过已消费的表头+分隔+数据行（for 的 index++ 会补上）
+        index = cursor - 1;
+        continue;
+      }
     }
     // markdown 标题：## 等原样渲染为分级标题（h1 过大映射 h2，最多 h4）
     const heading = /^(#{1,6})\s+(.*)$/.exec(trimmed);

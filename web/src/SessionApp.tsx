@@ -56,7 +56,11 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  const [currentProject, setCurrentProject] = useState("");
+  // 工作区选择记忆在 localStorage：刷新/重开后不回落到默认项目，
+  // 否则上个会话所在项目的列表会被默认项目顶掉（表现为"任务丢了"）
+  const [currentProject, setCurrentProject] = useState(
+    () => window.localStorage.getItem("myagent.project") ?? "",
+  );
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [message, setMessage] = useState("");
   const [permissionMode, setPermissionMode] =
@@ -83,6 +87,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
       setSessionsLoaded(false);
       setEvents([]);
       setCurrentProject(project.key);
+      window.localStorage.setItem("myagent.project", project.key);
       // 新建面板可能正打开着：同步面板内执行环境，避免下拉停留在旧项目
       setNewTaskEnv("project");
       setNewTaskProject(project.key);
@@ -307,14 +312,23 @@ export function SessionApp(props: { initialSessionId?: string }) {
       const response = await fetch("/api/projects");
       if (!response.ok) return;
       const payload = await response.json();
-      setProjects((payload.projects ?? []) as ProjectEntry[]);
+      const nextProjects = (payload.projects ?? []) as ProjectEntry[];
+      setProjects(nextProjects);
       const defaultKey = payload.defaultKey ?? "";
       if (!defaultKey) return;
-      const taskContext = initialTaskContext(defaultKey);
-      setCurrentProject((current) => current || defaultKey);
-      setNewTaskProject((current) => current || taskContext.project);
-      if (taskContext.env === "lobby") setNewTaskEnv("lobby");
+      // currentProject 闭包值 = localStorage 恢复的记忆项目（effect 只跑一次）
+      const effective =
+        currentProject &&
+        nextProjects.some((project) => project.key === currentProject)
+          ? currentProject
+          : defaultKey;
+      setCurrentProject(effective);
+      setNewTaskProject((current) =>
+        current || (effective === "lobby" ? "" : effective),
+      );
+      if (effective === "lobby") setNewTaskEnv("lobby");
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -331,6 +345,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
 
   function switchProject(key: string) {
     setCurrentProject(key);
+    window.localStorage.setItem("myagent.project", key);
     setSelectedId("");
     setSessions([]);
     setSessionsLoaded(false);

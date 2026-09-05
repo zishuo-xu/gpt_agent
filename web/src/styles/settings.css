@@ -688,3 +688,34 @@
   outline: none;
   border-color: #759cff;
 }
+
+/* ========== 移动端（≤768px） ========== */
+@media (max-width: 768px) {
+  /* 供应商工作区 224px+1fr 双列在窄屏溢出，改单列 */
+  .provider-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .provider-nav {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  /* 页头（标题+保存按钮）允许换行，避免按钮溢出视口 */
+  .page-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .scope-switch,
+  .settings-actions {
+    flex-wrap: wrap;
+  }
+
+  /* 表单输入在 iOS 聚焦时不小于 16px，避免触发视口缩放 */
+  .provider-panel input,
+  .provider-panel select,
+  .provider-panel textarea {
+    font-size: 16px;
+  }
+}
