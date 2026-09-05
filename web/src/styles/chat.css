@@ -579,24 +579,6 @@
   color: var(--text-strong);
 }
 
-.env-open-other {
-  background: none;
-  border: 1px solid var(--line-strong);
-  color: var(--text-body);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.env-open-other:hover {
-  border-color: var(--line-strong);
-  color: var(--text-body);
-}
-
 .title-with-status,
 .header-actions {
   display: flex;
@@ -1136,11 +1118,6 @@
   box-shadow: 0 0 0 3px rgba(102, 133, 234, 0.2);
 }
 
-.new-task-options {
-  display: grid;
-  gap: 15px;
-}
-
 .new-task-section {
   display: grid;
   gap: 7px;
@@ -1230,17 +1207,6 @@
   background: var(--surface-1);
   color: #e0e6ef;
   font-size: 12px;
-}
-
-.env-open-other {
-  min-height: 36px;
-  padding: 8px 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: transparent;
-  color: #a9baf0;
-  font-size: 11px;
-  cursor: pointer;
 }
 
 .isolated-mode-toggle {
@@ -3132,43 +3098,47 @@
   text-align: right;
 }
 
-/* 「任务选项」折叠条 */
-.new-task-panel-home .new-task-options {
-  display: block;
-  width: 100%;
-  margin-top: 10px;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
-  background: var(--surface-1);
-}
-.new-task-panel-home .new-task-options > summary {
-  display: flex;
+/* 「任务选项」弹层（home / modal 共用，挂在 composer footer） */
+.new-task-opts { position: relative; }
+.new-task-opts-toggle {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 11px 14px;
-  cursor: pointer;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
   color: var(--text-body);
-  font-size: 13px;
-  list-style: none;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
 }
-.new-task-panel-home .new-task-options > summary::-webkit-details-marker { display: none; }
-.new-task-panel-home .new-task-options > summary::after {
-  content: "▾";
-  margin-left: auto;
-  color: var(--text-faint);
-  font-size: 10px;
-  transition: transform 150ms ease;
+.new-task-opts-toggle:hover {
+  border-color: var(--line-strong);
+  color: var(--text-strong);
 }
-.new-task-panel-home .new-task-options[open] > summary::after { transform: rotate(180deg); }
-.new-task-options-icon { color: var(--text-faint); }
-.new-task-options-hint { color: var(--text-faint); font-size: 12px; }
-.new-task-panel-home .new-task-options-grid {
+.new-task-opts-toggle[aria-expanded="true"] {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+  color: var(--accent-2);
+}
+.new-task-opts-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  padding: 0 14px 14px;
+  width: 260px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-3);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
-.new-task-panel-home .compact-check {
+.new-task-opts-pop .compact-check {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3180,39 +3150,17 @@
   font-size: 12px;
   cursor: pointer;
 }
-.new-task-panel-home .compact-check input { width: 14px; height: 14px; min-width: 14px; min-height: 14px; flex: 0 0 14px; margin: 0; padding: 0; accent-color: var(--brand); }
-.new-task-panel-home .compact-check small { display: inline; margin-left: 4px; color: var(--text-faint); font-size: 11px; }
-.new-task-panel-home .new-task-options-grid .env-open-other { min-height: 34px; padding: 7px 10px; font-size: 12px; }
-
-/* 「试试这些示例」 */
-.home-examples { margin-top: 22px; }
-.home-examples-label {
-  margin: 0 0 8px;
-  color: var(--text-faint);
-  font-size: 12px;
-}
-.home-examples-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.home-example-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 16px;
+.new-task-opts-pop .compact-check input { width: 14px; height: 14px; min-width: 14px; min-height: 14px; flex: 0 0 14px; margin: 0; padding: 0; accent-color: var(--brand); }
+.new-task-opts-pop .compact-check small { display: inline; margin-left: 4px; color: var(--text-faint); font-size: 11px; }
+.new-task-opts-pop .compact-select { justify-content: space-between; }
+.new-task-opts-pop .compact-select select {
+  padding: 4px 20px 4px 8px;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface-1);
-  color: var(--text-body);
-  font-size: 13px;
-  cursor: pointer;
-  transition: border-color 140ms ease, background 140ms ease;
-}
-.home-example-chip:hover {
-  border-color: var(--brand-line);
-  background: var(--brand-soft);
-  color: var(--accent-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 12px;
 }
 
 /* modal 形态的新建面板：上下文行 */
@@ -3231,8 +3179,6 @@
   .empty-detail { padding: 5vh 16px 24px; }
   .home-hero-title { font-size: 23px; }
   .new-task-context-row { grid-template-columns: minmax(0, 1fr); }
-  .new-task-panel-home .new-task-options-grid { grid-template-columns: minmax(0, 1fr); }
-  .new-task-panel-home .compact-check, .new-task-panel-home .new-task-options-grid .env-open-other { width: 100%; }
 }
 
 /* 审批风暴：挂起审批批量放行条 */

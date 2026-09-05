@@ -964,10 +964,14 @@ describe("隔离工作区入口与结果提示", () => {
     // 首页：位置/权限在左栏，面板只留任务选项
     assert.equal(container.querySelector(".new-task-context-row"), null);
     assert.equal(container.querySelector(".new-task-close"), null);
-    const options = container.querySelector(".new-task-options") as HTMLDetailsElement;
-    assert.ok(options);
-    options.open = true;
-    assert.ok(options.querySelector("input[type=checkbox]"));
+    const toggle = container.querySelector(".new-task-opts-toggle") as HTMLButtonElement;
+    assert.ok(toggle);
+    assert.equal(container.querySelector(".new-task-opts-pop"), null);
+    await act(async () => toggle.click());
+    const pop = container.querySelector(".new-task-opts-pop") as HTMLElement;
+    assert.ok(pop);
+    assert.ok(pop.querySelector("input[type=checkbox]"));
+    assert.ok(pop.textContent?.includes("无人值守任务"));
     await act(async () => root.unmount());
     container.remove();
   });
@@ -992,6 +996,10 @@ describe("隔离工作区入口与结果提示", () => {
         onOpenProjectPicker={() => undefined} onClose={() => undefined} onCancelBounds={() => undefined}
       />);
     });
+    // 「隔离执行」收在任务选项弹层内，先点开
+    const optsToggle = container.querySelector(".new-task-opts-toggle") as HTMLButtonElement;
+    assert.ok(optsToggle);
+    await act(async () => optsToggle.click());
     const checkbox = container.querySelector('input[aria-label="隔离执行"]') as HTMLInputElement;
     assert.ok(checkbox);
     checkbox.click();

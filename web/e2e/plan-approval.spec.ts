@@ -125,8 +125,8 @@ test.describe.serial("provider-free 计划批准门", () => {
   test("只读规划 → 反馈修订 → 弹窗批准 → 同会话执行", async ({ page }) => {
     await page.goto("/");
     await page.getByPlaceholder("例如：检查这个项目，修复当前失败的测试").fill("完成计划门演示");
-    // 新版首页：计划开关在「任务选项」折叠条内，先展开
-    await page.locator(".new-task-options > summary").click();
+    // 新版首页：任务选项收在「⚙ 选项」弹层内，先展开
+    await page.locator(".new-task-opts-toggle").click();
     const smartStart = page.locator(".new-task-panel .plan-mode-toggle input");
     await expect(smartStart).not.toBeChecked();
     // input 被外层 label 覆盖（自定义开关样式），点击 label 触发切换

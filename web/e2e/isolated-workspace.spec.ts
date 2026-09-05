@@ -119,8 +119,8 @@ test.describe.serial("隔离执行真实用户入口", () => {
 
   test("新建隔离任务写入 worktree 且原项目不变", async ({ page }) => {
     await page.goto("/");
-    // 新版首页即新建面板：展开「任务选项」勾选隔离执行 + 信任权限档
-    await page.locator(".new-task-options > summary").click();
+    // 新版首页即新建面板：点开「⚙ 选项」弹层勾选隔离执行 + 信任权限档
+    await page.locator(".new-task-opts-toggle").click();
     await page.getByRole("checkbox", { name: "隔离执行" }).check();
     await page.getByRole("combobox", { name: "权限档" }).selectOption("trust");
     await page.getByPlaceholder("例如：检查这个项目，修复当前失败的测试").fill("写入隔离标记文件");

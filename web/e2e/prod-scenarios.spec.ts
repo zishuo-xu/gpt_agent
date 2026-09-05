@@ -21,8 +21,8 @@ async function startTask(
   task: string,
 ): Promise<void> {
   await page.goto("/");
-  // 新版首页即新建面板：展开「任务选项」选 trust 无人值守档
-  await page.locator(".new-task-options > summary").click();
+  // 新版首页即新建面板：点开「⚙ 选项」弹层选 trust 无人值守档
+  await page.locator(".new-task-opts-toggle").click();
   // 生产长任务选择 trust 无人值守档（normal 下 Bash 审批会挂起等人工）
   await page.getByRole("combobox", { name: "权限档" }).selectOption("trust");
   const input = page.getByPlaceholder(

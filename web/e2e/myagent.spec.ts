@@ -163,13 +163,9 @@ test.describe("会话页", () => {
     await expect(
       page.getByRole("combobox", { name: "任务位置" }),
     ).toBeVisible();
-    // 范围建议模板（设计稿示例入口）：四个按钮渲染，点击填充输入框
-    await expect(page.locator(".home-examples")).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "修复问题" }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "补充测试" }).click();
-    await expect(input).toHaveValue(/补充缺失的单元测试/);
+    // 示例区已移除；任务选项收进「⚙ 选项」弹层
+    await expect(page.locator(".home-examples")).toHaveCount(0);
+    await expect(page.locator(".new-task-opts-toggle")).toBeVisible();
   });
 
   test("新建会话并发送只读任务，事件流实时渲染", async ({ page }) => {
