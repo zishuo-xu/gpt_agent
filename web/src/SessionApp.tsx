@@ -71,6 +71,10 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [sessionView, setSessionView] = useState<"conversation" | "trace" | "compare">("conversation");
   /** 移动端侧栏抽屉开合（≤768px 生效） */
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /** 桌面端左侧栏折叠为图标栏（记忆在 localStorage） */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => window.localStorage.getItem("myagent.sidebarCollapsed") === "1",
+  );
   // 项目选择器（目录浏览 + 打开项目）：打开成功后切换到目标项目视图
   const projectPicker = useProjectPicker({
     onOpened: (project: OpenedProject) => {
@@ -714,12 +718,19 @@ export function SessionApp(props: { initialSessionId?: string }) {
   }
 
   return (
-    <div className="shell">
+    <div className={`shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <SessionListSidebar
         sessions={sessions}
         sessionsLoaded={sessionsLoaded}
         selectedId={selectedId}
         open={sidebarOpen}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() =>
+          setSidebarCollapsed((v) => {
+            window.localStorage.setItem("myagent.sidebarCollapsed", v ? "0" : "1");
+            return !v;
+          })
+        }
         currentProject={currentProject}
         projects={projects}
         onSwitchProject={switchProject}

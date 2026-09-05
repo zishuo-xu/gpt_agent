@@ -1236,3 +1236,116 @@ describe("SessionApp 详情抽屉与内联警告", () => {
     container.remove();
   });
 });
+
+describe("SessionApp 左侧栏折叠与状态记忆", () => {
+  const originalFetch = globalThis.fetch;
+
+  before(() => {
+    try {
+      GlobalRegistrator.register();
+    } catch {
+      // 已注册：忽略
+    }
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  after(() => {
+    globalThis.fetch = originalFetch;
+    window.localStorage.removeItem("myagent.sidebarCollapsed");
+  });
+
+  /** 挂载 SessionApp（无选中会话，只 mock 列表/项目/配置三个首屏请求） */
+  async function setup() {
+    const [{ act }, { createRoot }, { SessionApp }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./SessionApp"),
+    ]);
+    globalThis.fetch = (async (input: unknown) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : String((input as { url?: string })?.url ?? input);
+      const json = (payload: unknown) =>
+        ({ ok: true, status: 200, json: async () => payload }) as Response;
+      if (url.includes("/api/sessions")) return json({ sessions: [] });
+      if (url.includes("/api/projects")) return json({ projects: [], defaultKey: "p" });
+      if (url.includes("/api/config/effective")) return json({ config: {} });
+      return json({});
+    }) as typeof fetch;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<SessionApp />);
+    });
+    await act(async () => {});
+    return { container, root, act };
+  }
+
+  it("点击折叠按钮切换 collapsed 类并写入 localStorage，重新渲染后保持折叠", async () => {
+    window.localStorage.removeItem("myagent.sidebarCollapsed");
+    const first = await setup();
+    const aside = first.container.querySelector("aside.session-list-sidebar");
+    const collapseButton = first.container.querySelector(
+      "button.sidebar-collapse",
+    ) as HTMLButtonElement;
+    assert.ok(aside, "应渲染侧栏");
+    assert.ok(collapseButton, "应渲染折叠按钮");
+    assert.equal(aside.classList.contains("collapsed"), false, "默认不折叠");
+    assert.equal(
+      first.container.querySelector(".shell")?.classList.contains("sidebar-collapsed"),
+      false,
+    );
+
+    // 点击 → 折叠 + 记忆 "1"
+    await first.act(async () => {
+      collapseButton.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    assert.equal(aside.classList.contains("collapsed"), true, "点击后应折叠");
+    assert.equal(
+      first.container.querySelector(".shell")?.classList.contains("sidebar-collapsed"),
+      true,
+      "shell 应同步折叠态以收窄网格列",
+    );
+    assert.equal(window.localStorage.getItem("myagent.sidebarCollapsed"), "1");
+    assert.equal(collapseButton.getAttribute("aria-label"), "展开侧栏");
+
+    // 再点击 → 展开 + 记忆 "0"
+    await first.act(async () => {
+      collapseButton.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    assert.equal(aside.classList.contains("collapsed"), false);
+    assert.equal(window.localStorage.getItem("myagent.sidebarCollapsed"), "0");
+
+    // 折叠后模拟刷新：新 root 初始即折叠
+    await first.act(async () => {
+      collapseButton.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    assert.equal(window.localStorage.getItem("myagent.sidebarCollapsed"), "1");
+    await first.act(async () => first.root.unmount());
+    first.container.remove();
+
+    const second = await setup();
+    const aside2 = second.container.querySelector("aside.session-list-sidebar");
+    assert.equal(
+      aside2?.classList.contains("collapsed"),
+      true,
+      "刷新后应从 localStorage 恢复折叠态",
+    );
+    assert.equal(
+      second.container.querySelector(".shell")?.classList.contains("sidebar-collapsed"),
+      true,
+    );
+    await second.act(async () => second.root.unmount());
+    second.container.remove();
+    window.localStorage.removeItem("myagent.sidebarCollapsed");
+  });
+});
+

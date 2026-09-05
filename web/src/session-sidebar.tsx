@@ -44,6 +44,9 @@ export function SessionListSidebar(props: {
   onSwitchProject?: (key: string) => void;
   /** 移动端抽屉开合（≤768px 生效；桌面恒展开） */
   open?: boolean;
+  /** 桌面端折叠为图标栏（≤768px 抽屉态下忽略） */
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) {
   const [search, setSearch] = useState("");
   const keyword = search.trim().toLowerCase();
@@ -57,7 +60,7 @@ export function SessionListSidebar(props: {
   const groups = groupSessions(visible);
   return (
     <aside
-      className={`sidebar session-list-sidebar${props.open ? " open" : ""}`}
+      className={`sidebar session-list-sidebar${props.open ? " open" : ""}${props.collapsed ? " collapsed" : ""}`}
     >
       <div className="brand">
         <span className="brand-mark">
@@ -66,7 +69,16 @@ export function SessionListSidebar(props: {
             <path d="M4.5 7h5M7 4.5v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
           </svg>
         </span>
-        <span>MyAgent</span>
+        <span className="brand-name">MyAgent</span>
+        <button
+          type="button"
+          className="sidebar-collapse"
+          aria-label={props.collapsed ? "展开侧栏" : "折叠侧栏"}
+          title={props.collapsed ? "展开侧栏" : "折叠侧栏"}
+          onClick={props.onToggleCollapse}
+        >
+          {props.collapsed ? "»" : "«"}
+        </button>
       </div>
       {props.projects && props.projects.length > 0 && (
         <select
