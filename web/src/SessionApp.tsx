@@ -26,6 +26,7 @@ import {
   type ProjectEntry,
 } from "./session-header";
 import { SessionRail } from "./session-rail";
+import { SessionStatusBar } from "./session-statusbar";
 import { SessionListSidebar } from "./session-sidebar";
 import { SessionStream } from "./session-stream";
 import { NewTaskOverlay } from "./session-new-task";
@@ -64,7 +65,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [newTaskEnv, setNewTaskEnv] = useState<"project" | "lobby">("project");
   /** 新建会话所选项目 key（项目环境下） */
   const [newTaskProject, setNewTaskProject] = useState("");
-  /** 详情区右栏（任务清单/消耗/会话信息）展开/收起 */
+  /** 详情抽屉（任务清单/消耗/会话信息）是否打开 */
   const [showDetail, setShowDetail] = useState(false);
   /** 会话视图标签：对话 | 轨迹（任务可观测，默认展示标签栏）；实验会话额外有对比 */
   const [sessionView, setSessionView] = useState<"conversation" | "trace" | "compare">("conversation");
@@ -202,15 +203,6 @@ export function SessionApp(props: { initialSessionId?: string }) {
       removed: stat.removed,
     }));
   }, [displayItems]);
-
-  // 存在任务清单时自动展开详情右栏（从 0 搭建场景：用户默认看到任务进度）
-  const autoExpandedRef = useRef(false);
-  useEffect(() => {
-    if (!autoExpandedRef.current && latestTodos.length > 0) {
-      autoExpandedRef.current = true;
-      setShowDetail(true);
-    }
-  }, [latestTodos]);
 
   async function refreshSessions() {
     const response = await fetch(projectUrl("/api/sessions"));
@@ -699,15 +691,19 @@ export function SessionApp(props: { initialSessionId?: string }) {
   }
 
   useEffect(() => {
-    if (!selectedId || !busy) return;
+    if (!selectedId) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      void interrupt();
+      if (showDetail) {
+        setShowDetail(false);
+        return;
+      }
+      if (busy) void interrupt();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedId, busy]);
+  }, [selectedId, busy, showDetail]);
 
   function startNewSession() {
     setSelectedId("");
@@ -773,9 +769,9 @@ export function SessionApp(props: { initialSessionId?: string }) {
                 <>
                   <button
                     className={`detail-toggle ${showDetail ? "active" : ""}`}
-                    onClick={() => setShowDetail((v) => !v)}
+                    onClick={() => setShowDetail(true)}
                   >
-                    {showDetail ? "收起任务详情" : "任务详情"}
+                    任务详情
                   </button>
                   <button
                     className="detail-toggle"
@@ -800,19 +796,31 @@ export function SessionApp(props: { initialSessionId?: string }) {
                 </>
               }
               conversation={
-              <div
-                className={`session-workspace${
-                  sessionView === "conversation" &&
-                  (latestTodos.length > 0 ||
-                    showDetail ||
-                    (selected.status === "done" &&
-                      selected.kind === "run" &&
-                      selected.toolCallCount === 0))
-                    ? " with-rail"
-                    : ""
-                }`}
-              >   <section className="chat-column">
+              <div className="session-workspace">
+                <section className="chat-column">
                 {workspaceInfo && <WorkspaceBanner workspace={workspaceInfo} />}
+                {selected.status === "done" &&
+                  selected.kind === "run" &&
+                  selected.toolCallCount === 0 && (
+                    <div className="rail-todo-warning" role="alert">
+                      Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，
+                      结果可能不完整，请检查或让 Agent 重新执行
+                    </div>
+                  )}
+                {selected.status === "done" &&
+                  latestTodos.some((todo) => todo.status !== "completed") && (
+                    <div className="rail-todo-warning" role="alert">
+                      Agent 已宣布完成，但仍有{" "}
+                      {latestTodos.filter((todo) => todo.status !== "completed").length}{" "}
+                      项任务未完成或未更新
+                    </div>
+                  )}
+                <SessionStatusBar
+                  latestTodos={latestTodos}
+                  fileChanges={fileChanges}
+                  selected={selected}
+                  onOpen={() => setShowDetail(true)}
+                />
                 <SessionStream
                   displayItems={filteredDisplayItems}
                   totalEvents={events.length}
@@ -878,13 +886,27 @@ export function SessionApp(props: { initialSessionId?: string }) {
                 </>
               </section>
 
-              {sessionView === "conversation" && (
-                <SessionRail
-                  latestTodos={latestTodos}
-                  selected={selected}
-                  showDetail={showDetail}
-                  fileChanges={fileChanges}
-                />
+              {showDetail && sessionView === "conversation" && (
+                <>
+                  <div className="rail-drawer-mask" onClick={() => setShowDetail(false)} />
+                  <div className="rail-drawer" role="dialog" aria-label="任务详情">
+                    <div className="rail-drawer-head">
+                      <span>详情</span>
+                      <button
+                        type="button"
+                        className="rail-drawer-close"
+                        aria-label="关闭详情"
+                        onClick={() => setShowDetail(false)}
+                      >✕</button>
+                    </div>
+                    <SessionRail
+                      latestTodos={latestTodos}
+                      selected={selected}
+                      showDetail
+                      fileChanges={fileChanges}
+                    />
+                  </div>
+                </>
               )}
             </div>
               }

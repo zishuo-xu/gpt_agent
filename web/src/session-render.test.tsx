@@ -406,7 +406,7 @@ describe("ItemCard（会话展示组件全分支）", () => {
 
 
 
-describe("SessionRail 任务清单（三态标记 + 完成矛盾警告）", () => {
+describe("SessionRail 任务清单（三态标记）", () => {
   it("completed 显示 ✓、in_progress 显示 →、pending 显示 ○", async () => {
     const [{ act }, { createRoot }, { SessionRail }] = await Promise.all([
       import("react"),
@@ -454,7 +454,7 @@ describe("SessionRail 任务清单（三态标记 + 完成矛盾警告）", () =
     await act(async () => root.unmount());
   });
 
-  it("status=done 且有未完成 todo 时显示矛盾警告条", async () => {
+  it("status=done 且有未完成 todo 时警告已移出右栏（改由会话页内联展示）", async () => {
     const [{ act }, { createRoot }, { SessionRail }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
@@ -490,15 +490,16 @@ describe("SessionRail 任务清单（三态标记 + 完成矛盾警告）", () =
         />,
       );
     });
-    const warning = container.querySelector(".rail-todo-warning");
-    assert.ok(warning, "应显示矛盾警告条");
-    assert.match(warning?.textContent ?? "", /仍有 1 项任务未完成/);
+    // 矛盾警告改由 SessionApp 会话列内联渲染，右栏不再承担
+    assert.equal(container.querySelector(".rail-todo-warning"), null);
+    // 计划详情卡本身仍正常渲染
+    assert.equal(container.querySelectorAll(".rail-plan-step").length, 1);
     await act(async () => root.unmount());
   });
 });
 
-describe("SessionRail 0 工具调用完成警告", () => {
-  it("无人值守任务完成且未调用工具时显示警告", async () => {
+describe("SessionRail 0 工具调用完成警告（已移出右栏）", () => {
+  it("无人值守任务完成且未调用工具时右栏不再渲染警告", async () => {
     const [{ act }, { createRoot }, { SessionRail }] = await Promise.all([
       import("react"),
       import("react-dom/client"),
@@ -533,8 +534,9 @@ describe("SessionRail 0 工具调用完成警告", () => {
       );
     });
     const warning = container.querySelector(".rail-todo-warning");
-    assert.ok(warning, "应显示 0 工具调用警告条");
-    assert.match(warning?.textContent ?? "", /未调用任何工具/);
+    assert.equal(warning, null, "0 工具调用警告已移至会话列内联渲染，右栏不再显示");
+    // 仅详情卡（消耗/会话）仍渲染
+    assert.ok(container.querySelector(".session-rail"), "右栏本体仍渲染");
     await act(async () => root.unmount());
   });
 

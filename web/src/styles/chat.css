@@ -1278,10 +1278,46 @@
   overflow: hidden;
 }
 
-/* 右栏展开时才分出第二列，收起时聊天区占满 */
-.session-workspace.with-rail {
-  grid-template-columns: minmax(0, 1fr) 292px;
+/* 覆盖式详情抽屉：状态条 + 抽屉 + 遮罩 */
+.statusbar {
+  display: flex; align-items: center; gap: 0;
+  width: 100%; padding: 0 14px; height: 36px; margin-bottom: 8px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface-1); color: var(--text-body);
+  font: inherit; font-size: 12.5px; cursor: pointer; text-align: left;
 }
+.statusbar:hover { border-color: rgba(52, 211, 153, .3); }
+.statusbar-seg { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; }
+.statusbar-seg + .statusbar-seg { border-left: 1px solid var(--line); }
+.statusbar-seg:first-child { padding-left: 0; }
+.statusbar-seg b { color: var(--text-strong); font-weight: 500; }
+.statusbar-state { margin-left: auto; color: var(--text-faint); }
+.statusbar-hint { color: var(--text-faint); font-size: 12px; padding-left: 12px; }
+.rail-drawer-mask {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 40;
+}
+.rail-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 320px; z-index: 41;
+  background: var(--surface-1); border-left: 1px solid var(--line);
+  overflow-y: auto; padding: 16px;
+  animation: rail-drawer-in .2s ease;
+}
+@keyframes rail-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail-drawer { animation: none; }
+}
+.rail-drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; font-weight: 600; margin-bottom: 8px;
+}
+.rail-drawer-close {
+  border: 0; background: transparent; color: var(--text-faint);
+  font-size: 15px; cursor: pointer; padding: 2px 6px; border-radius: 6px;
+}
+.rail-drawer-close:hover { background: var(--surface-3, rgba(255,255,255,.06)); color: var(--text-strong); }
 
 .chat-column {
   display: flex;
@@ -1316,12 +1352,11 @@
   margin: 0 16px 16px;
 }
 
+/* 详情卡片列（仅出现在覆盖抽屉内，不再占网格列） */
 .session-rail {
   display: flex;
-  min-height: 0;
   flex-direction: column;
   gap: 12px;
-  overflow-y: auto;
 }
 
 .rail-card {
@@ -2609,24 +2644,6 @@
   .sessions-header .header-actions select {
     min-width: 132px;
     flex: 1 1 132px;
-  }
-  .session-workspace.with-rail {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  /* 移动端：右栏改为底部抽屉（设计稿移动端「文件改动」抽屉形态） */
-  .session-rail {
-    position: fixed;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 30;
-    max-height: 62dvh;
-    padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--line);
-    border-radius: 16px 16px 0 0;
-    background: var(--surface-1);
-    box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.5);
-    overflow-y: auto;
   }
   .header-actions {
     flex-wrap: wrap;

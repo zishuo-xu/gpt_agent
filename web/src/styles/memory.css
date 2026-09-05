@@ -333,10 +333,6 @@
 }
 
 @media (min-width: 769px) and (max-width: 1180px) {
-  .session-workspace.with-rail {
-    grid-template-columns: minmax(0, 1fr) 248px;
-  }
-
   .sessions-main {
     padding-right: 28px;
     padding-left: 28px;

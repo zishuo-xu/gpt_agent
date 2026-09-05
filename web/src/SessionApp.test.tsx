@@ -1,4 +1,4 @@
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
@@ -1070,5 +1070,169 @@ describe("ItemCard（subtask 卡片）", () => {
       "超时保留的部分结论应展示",
     );
     await act(async () => root.unmount());
+  });
+});
+
+describe("SessionApp 详情抽屉与内联警告", () => {
+  const originalFetch = globalThis.fetch;
+  const originalEventSource = (globalThis as Record<string, unknown>).EventSource;
+  const fetchCalls: string[] = [];
+
+  class FakeEventSource {
+    static CLOSED = 2;
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: (() => void) | null = null;
+    readyState = 0;
+    constructor(public url: string) {}
+    close() {
+      this.readyState = FakeEventSource.CLOSED;
+    }
+  }
+
+  before(() => {
+    try {
+      GlobalRegistrator.register();
+    } catch {
+      // 已注册：忽略
+    }
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  after(() => {
+    globalThis.fetch = originalFetch;
+    (globalThis as Record<string, unknown>).EventSource = originalEventSource;
+  });
+
+  function makeSession(overrides: Record<string, unknown>): Record<string, unknown> {
+    return {
+      id: "s1",
+      title: "示例会话",
+      status: "running",
+      permissionMode: "normal",
+      createdAt: ts,
+      updatedAt: ts,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCachedTokens: 0,
+      totalCostCny: 0,
+      todos: [],
+      toolCallCount: 0,
+      kind: "interactive",
+      ...overrides,
+    };
+  }
+
+  /** 挂载完整 SessionApp：mock fetch（按路由返回）+ 假的 EventSource */
+  async function setup(session: Record<string, unknown>) {
+    const [{ act }, { createRoot }, { SessionApp }] = await Promise.all([
+      import("react"),
+      import("react-dom/client"),
+      import("./SessionApp"),
+    ]);
+    (globalThis as Record<string, unknown>).EventSource = FakeEventSource;
+    globalThis.fetch = (async (input: unknown) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : String((input as { url?: string })?.url ?? input);
+      fetchCalls.push(url);
+      const json = (payload: unknown) =>
+        ({ ok: true, status: 200, json: async () => payload }) as Response;
+      if (url.includes("/interrupt")) return json({});
+      if (url.includes("/workspace")) return json({ workspace: null });
+      if (url.includes("/delivery")) return json({});
+      if (url.includes("/plan")) return json({ plan: null });
+      if (url.includes("/api/sessions")) return json({ sessions: [session] });
+      if (url.includes("/api/projects")) return json({ projects: [], defaultKey: "p" });
+      if (url.includes("/api/config/effective")) return json({ config: {} });
+      return json({});
+    }) as typeof fetch;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<SessionApp initialSessionId="s1" />);
+    });
+    // 等待首屏 fetch 链（sessions → initialSessionId 选中 → workspace/delivery）落定
+    await act(async () => {});
+    await act(async () => {});
+    return { container, root, act };
+  }
+
+  function pressEscape() {
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", cancelable: true }),
+    );
+  }
+
+  it("点击状态条打开抽屉，Esc 关闭抽屉且不触发中止", async () => {
+    fetchCalls.length = 0;
+    const { container, root, act } = await setup(
+      makeSession({
+        status: "running",
+        todos: [{ id: "t1", content: "写核心逻辑", status: "in_progress" }],
+        toolCallCount: 1,
+      }),
+    );
+    // 状态条常驻（有 todo），抽屉默认关闭且右栏不常驻
+    const statusbar = container.querySelector(".statusbar") as HTMLButtonElement;
+    assert.ok(statusbar, "应渲染状态条");
+    assert.match(statusbar.textContent ?? "", /计划 0\/1/);
+    assert.equal(container.querySelector(".rail-drawer"), null);
+    assert.equal(container.querySelector(".session-rail"), null, "右栏不再常驻");
+
+    // 点击状态条 → 打开覆盖抽屉
+    await act(async () => {
+      statusbar.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    const drawer = container.querySelector(".rail-drawer");
+    assert.ok(drawer, "应打开详情抽屉");
+    assert.ok(drawer.querySelector(".session-rail"), "抽屉内渲染右栏内容");
+    assert.match(drawer.textContent ?? "", /计划详情/);
+    assert.match(drawer.textContent ?? "", /写核心逻辑/);
+
+    // Esc → 关闭抽屉，且不触发中止
+    await act(async () => {
+      pressEscape();
+    });
+    assert.equal(container.querySelector(".rail-drawer"), null, "Esc 应关闭抽屉");
+    assert.equal(
+      fetchCalls.some((url) => url.includes("/interrupt")),
+      false,
+      "抽屉打开时 Esc 不应触发中止",
+    );
+
+    // 抽屉关闭后再按 Esc（busy 中）→ 正常触发中止
+    await act(async () => {
+      pressEscape();
+    });
+    assert.equal(
+      fetchCalls.some((url) => url.includes("/interrupt")),
+      true,
+      "抽屉关闭后 Esc 应触发中止",
+    );
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("完成态警告内联渲染在会话列（不再由右栏承担）", async () => {
+    const { container, root, act } = await setup(
+      makeSession({
+        status: "done",
+        kind: "run",
+        toolCallCount: 0,
+        todos: [{ id: "t1", content: "写核心逻辑", status: "pending" }],
+      }),
+    );
+    const chatColumn = container.querySelector(".chat-column");
+    assert.ok(chatColumn, "应渲染会话列");
+    assert.match(chatColumn.textContent ?? "", /未调用任何工具就宣布完成/);
+    assert.match(chatColumn.textContent ?? "", /仍有\s*1\s*项任务未完成/);
+    // 抽屉未打开时页面没有右栏
+    assert.equal(container.querySelector(".session-rail"), null);
+    await act(async () => root.unmount());
+    container.remove();
   });
 });

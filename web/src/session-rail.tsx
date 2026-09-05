@@ -11,7 +11,8 @@ export interface FileChangeEntry {
   removed?: number;
 }
 
-/** 任务清单卡（有 todo 时显示，设计稿「计划详情」形态）+ 文件改动卡 + 消耗/会话卡。 */
+/** 任务清单卡（有 todo 时显示，设计稿「计划详情」形态）+ 文件改动卡 + 消耗/会话卡。
+ *  纯展示组件：完成态警告（0 工具调用 / 完成但有未完成 todo）由 SessionApp 内联渲染。 */
 export function SessionRail(props: {
   latestTodos: TodoItem[];
   selected: SessionSummary;
@@ -19,39 +20,17 @@ export function SessionRail(props: {
   /** 会话内累计文件改动（从事件流的 Edit/Write 工具结果提取） */
   fileChanges?: FileChangeEntry[];
 }) {
-  const zeroToolWarning =
-    props.selected.status === "done" &&
-    props.selected.kind === "run" &&
-    props.selected.toolCallCount === 0;
   const hasTodos = props.latestTodos.length > 0;
   const fileChanges = props.fileChanges ?? [];
   const totalAdded = fileChanges.reduce((sum, item) => sum + (item.added ?? 0), 0);
   const totalRemoved = fileChanges.reduce((sum, item) => sum + (item.removed ?? 0), 0);
-  if (!zeroToolWarning && !hasTodos && !props.showDetail && fileChanges.length === 0) {
+  if (!hasTodos && !props.showDetail && fileChanges.length === 0) {
     return null;
   }
   return (
     <aside className="session-rail">
-      {zeroToolWarning && (
-        <div className="rail-todo-warning">
-          Agent 未调用任何工具就宣布完成——若这是编码/搭建任务，
-          结果可能不完整，请检查或让 Agent 重新执行
-        </div>
-      )}
       {hasTodos && (
         <RailCard title="计划详情">
-          {props.selected.status === "done" &&
-            props.latestTodos.some((todo) => todo.status !== "completed") && (
-              <div className="rail-todo-warning">
-                Agent 已宣布完成，但仍有{" "}
-                {
-                  props.latestTodos.filter(
-                    (todo) => todo.status !== "completed",
-                  ).length
-                }{" "}
-                项任务未完成或未更新
-              </div>
-            )}
           <ol className="rail-plan-steps">
             {props.latestTodos.map((todo, index) => (
               <li className={`rail-plan-step ${todo.status}`} key={todo.id}>
