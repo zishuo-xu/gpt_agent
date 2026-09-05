@@ -1347,5 +1347,25 @@ describe("SessionApp 左侧栏折叠与状态记忆", () => {
     second.container.remove();
     window.localStorage.removeItem("myagent.sidebarCollapsed");
   });
+
+  it("折叠态下新建任务/设置/扩展图标按钮带 title 提示", async () => {
+    window.localStorage.setItem("myagent.sidebarCollapsed", "1");
+    const { container, root, act } = await setup();
+    const aside = container.querySelector("aside.session-list-sidebar");
+    assert.ok(aside?.classList.contains("collapsed"), "应以折叠态渲染");
+
+    const newTaskButton = container.querySelector("button.sidebar-new");
+    assert.equal(newTaskButton?.getAttribute("title"), "新建任务", "新建任务按钮应带 title");
+
+    const navItems = Array.from(container.querySelectorAll("button.nav-item"));
+    const settingsNav = navItems.find((item) => item.textContent?.includes("设置"));
+    const pluginsNav = navItems.find((item) => item.textContent?.includes("扩展"));
+    assert.equal(settingsNav?.getAttribute("title"), "设置", "设置按钮应带 title");
+    assert.equal(pluginsNav?.getAttribute("title"), "扩展", "扩展按钮应带 title");
+
+    await act(async () => root.unmount());
+    container.remove();
+    window.localStorage.removeItem("myagent.sidebarCollapsed");
+  });
 });
 

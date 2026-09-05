@@ -95,7 +95,7 @@ export function SessionListSidebar(props: {
           ))}
         </select>
       )}
-      <button className="sidebar-new" onClick={props.onNew}>
+      <button className="sidebar-new" onClick={props.onNew} title="新建任务">
         <span className="sidebar-new-plus" aria-hidden="true">+</span> 新建任务
       </button>
       <div className="sidebar-search-wrap">
@@ -152,6 +152,7 @@ export function SessionListSidebar(props: {
           onClick={() => {
             window.location.hash = "settings";
           }}
+          title="设置"
         >
           <span aria-hidden="true">⚙</span>设置
         </button>
@@ -160,6 +161,7 @@ export function SessionListSidebar(props: {
           onClick={() => {
             window.location.hash = "plugins";
           }}
+          title="扩展"
         >
           <span aria-hidden="true">🧩</span>扩展
         </button>
