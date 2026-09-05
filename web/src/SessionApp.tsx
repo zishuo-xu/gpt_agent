@@ -699,7 +699,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      if (showDetail) {
+      if (showDetail && sessionView === "conversation") {
         setShowDetail(false);
         return;
       }
@@ -707,7 +707,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedId, busy, showDetail]);
+  }, [selectedId, busy, showDetail, sessionView]);
 
   function startNewSession() {
     setSelectedId("");

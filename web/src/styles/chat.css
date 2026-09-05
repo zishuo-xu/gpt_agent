@@ -484,12 +484,8 @@
   .session-list-sidebar.collapsed .sidebar-new-plus {
     font-size: 15px;
   }
-  /* 分组标签只留数量徽标并居中 */
+  /* 分组标签（含数量徽标）折叠态整体隐藏 */
   .session-list-sidebar.collapsed .task-group-label {
-    justify-content: center;
-    margin: 0 0 4px;
-  }
-  .session-list-sidebar.collapsed .task-group-name {
     display: none;
   }
   /* 会话行只留状态标记并居中 */
@@ -1391,6 +1387,7 @@
     width: auto; max-height: 70vh;
     border-left: none; border-top: 1px solid var(--line);
     border-radius: 12px 12px 0 0;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
     animation: rail-drawer-in-mobile .2s ease;
   }
   @keyframes rail-drawer-in-mobile {
