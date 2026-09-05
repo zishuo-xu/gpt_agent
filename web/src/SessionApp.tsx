@@ -19,6 +19,7 @@ import {
   Composer,
   RunBoundsConfirmation,
   type RunBoundsPreview,
+  type SlashCommand,
 } from "./session-composer";
 import {
   SessionHeader,
@@ -27,6 +28,7 @@ import {
 } from "./session-header";
 import { SessionRail } from "./session-rail";
 import { SessionStatusBar } from "./session-statusbar";
+import { formatTokens } from "./session-format";
 import { SessionListSidebar } from "./session-sidebar";
 import { SessionStream } from "./session-stream";
 import { NewTaskOverlay } from "./session-new-task";
@@ -112,6 +114,13 @@ export function SessionApp(props: { initialSessionId?: string }) {
   const [permissionFeedback, setPermissionFeedback] =
     useState<Record<string, string>>({});
   const [error, setError] = useState("");
+  /** SSE 断流标志与重连计数：点"重新连接"递增 tick 重建 EventSource */
+  const [streamLost, setStreamLost] = useState(false);
+  const [streamReconnectTick, setStreamReconnectTick] = useState(0);
+  /** 斜杠命令/本地动作的提示（不进入会话流，非错误） */
+  const [localNotice, setLocalNotice] = useState("");
+  /** 上下文压缩阈值（config.context.compactAtEstimatedTokens，缺省 90k） */
+  const [contextThreshold, setContextThreshold] = useState(90_000);
   /** 来源筛选（Trajectory 按来源分组）：全部/推理/工具/子代理/系统；消息始终显示 */
   const [sourceFilter, setSourceFilter] = useState("all");
   /** 缓存 miss 提示开关（behavior.showCacheMissNotices；默认关，参照 Pi） */
@@ -340,6 +349,12 @@ export function SessionApp(props: { initialSessionId?: string }) {
         (payload.config as { behavior?: { showCacheMissNotices?: boolean } })
           ?.behavior?.showCacheMissNotices === true,
       );
+      const compactAt = (
+        payload.config as { context?: { compactAtEstimatedTokens?: number } }
+      )?.context?.compactAtEstimatedTokens;
+      if (typeof compactAt === "number" && compactAt > 0) {
+        setContextThreshold(compactAt);
+      }
     })();
   }, []);
 
@@ -462,14 +477,15 @@ export function SessionApp(props: { initialSessionId?: string }) {
     };
     source.onerror = () => {
       if (source.readyState === EventSource.CLOSED) {
-        setError("实时事件连接已关闭，请刷新页面重试。");
+        // 断流给出原地恢复入口（参照 Codex/Claude Code 的可恢复错误提示），而不是让用户整页刷新
+        setStreamLost(true);
       }
     };
     return () => {
       cancelled = true;
       source.close();
     };
-  }, [selectedId]);
+  }, [selectedId, streamReconnectTick]);
 
   useEffect(() => {
     const stream = chatStreamRef.current;
@@ -490,6 +506,77 @@ export function SessionApp(props: { initialSessionId?: string }) {
   function updateMessage(value: string) {
     setMessage(value);
     setRunBoundsPreview(null);
+  }
+
+  /** 上下文水位：最近一轮 cost_update 的 input（OpenAI 风格含缓存前缀）≈ 当前上下文占用 */
+  const contextTokens = useMemo(() => {
+    const latest = [...events]
+      .reverse()
+      .find((record) => record.event.type === "cost_update");
+    if (!latest || latest.event.type !== "cost_update") return 0;
+    return Number(latest.event.input ?? 0);
+  }, [events]);
+
+  /** 斜杠命令（本地执行，不发送给模型）：参照 Codex/Claude Code 的命令面板 */
+  const slashCommands: SlashCommand[] = [
+    {
+      name: "/help",
+      desc: "显示可用命令",
+      run: () =>
+        setLocalNotice(
+          [
+            "可用命令：",
+            "/cost — 本会话 token 与费用汇总",
+            `/context — 上下文水位（对照压缩阈值 ${Math.round(contextThreshold / 1000)}k）`,
+            "/settings — 打开设置",
+          ].join("　"),
+        ),
+    },
+    {
+      name: "/cost",
+      desc: "本会话 token 与费用汇总",
+      run: () => {
+        const turns = events.filter(
+          (record) => record.event.type === "cost_update",
+        ).length;
+        const latest = [...events]
+          .reverse()
+          .find((record) => record.event.type === "cost_update");
+        if (!latest || latest.event.type !== "cost_update") {
+          setLocalNotice("本会话还没有产生 token 用量。");
+          return;
+        }
+        setLocalNotice(
+          `本会话 ${turns} 轮 · 累计 ${formatTokens(Number(latest.event.totalTokens ?? 0))} tokens · 累计费用 ≈¥${Number(latest.event.totalCostCny ?? 0).toFixed(4)}（按配置单价估算）`,
+        );
+      },
+    },
+    {
+      name: "/context",
+      desc: "查看上下文水位",
+      run: () => {
+        const percent = Math.min(100, Math.round((contextTokens / contextThreshold) * 100));
+        setLocalNotice(
+          contextTokens === 0
+            ? "还没有上下文用量数据（首轮对话后可用）。"
+            : `上下文约 ${formatTokens(contextTokens)} tokens，占压缩阈值 ${Math.round(contextThreshold / 1000)}k 的 ${percent}%${percent >= 80 ? " · 接近自动压缩，建议本轮结束后开新会话" : ""}。`,
+        );
+      },
+    },
+    {
+      name: "/settings",
+      desc: "打开设置",
+      run: () => {
+        window.location.hash = "settings";
+      },
+    },
+  ];
+
+  /** SSE 断流后原地重建事件流（不刷新页面，不丢本地状态） */
+  function reconnectStream() {
+    setStreamLost(false);
+    setError("");
+    setStreamReconnectTick((tick) => tick + 1);
   }
 
   async function submitMessage(boundsConfirmed = false, steer = false) {
@@ -780,6 +867,31 @@ export function SessionApp(props: { initialSessionId?: string }) {
             {error && (
               <div className="notice error">{error}</div>
             )}
+            {streamLost && (
+              <div className="notice error">
+                实时事件连接已断开，期间的消息可能未显示。
+                <button
+                  type="button"
+                  className="notice-action"
+                  onClick={reconnectStream}
+                >
+                  重新连接
+                </button>
+              </div>
+            )}
+            {localNotice && (
+              <div className="notice info">
+                {localNotice}
+                <button
+                  type="button"
+                  className="notice-action"
+                  aria-label="关闭提示"
+                  onClick={() => setLocalNotice("")}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             <FlightRecorder
               session={selected}
@@ -848,6 +960,8 @@ export function SessionApp(props: { initialSessionId?: string }) {
                   latestTodos={latestTodos}
                   fileChanges={fileChanges}
                   selected={selected}
+                  contextTokens={contextTokens}
+                  contextThreshold={contextThreshold}
                   onOpen={() => setShowDetail(true)}
                 />
                 <SessionStream
@@ -911,6 +1025,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
                       onPlanModeChange={setPlanMode}
                       showModes={false}
                       onSubmit={submitMessage}
+                      slashCommands={slashCommands}
                     />
                 </>
               </section>

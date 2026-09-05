@@ -292,8 +292,8 @@ export function StatsApp() {
                 <small>{totals?.tokens ?? 0} 累计</small>
               </div>
               <div className="stats-card">
-                <span>累计费用</span>
-                <strong>{formatCost(totals?.costCny ?? 0)}</strong>
+                <span>累计费用（估算）</span>
+                <strong title="按配置单价估算，定价校准后为准确值">≈{formatCost(totals?.costCny ?? 0)}</strong>
                 <small>输出 {totals?.sessions ?? 0} 会话</small>
               </div>
             </section>

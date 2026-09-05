@@ -3128,6 +3128,79 @@
   color: #e5534b;
   font-weight: 700;
 }
+
+/* 斜杠命令面板（参照 Codex/Claude Code）：插入在输入框与底栏之间的常规流面板，
+   不用悬浮定位——会话流容器的层叠/裁剪会让悬浮菜单点击失效 */
+.slash-menu {
+  display: grid;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 8px 10px 0;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: rgba(24, 27, 32, 0.98);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+
+.slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.slash-item:hover,
+.slash-item.selected {
+  background: var(--surface-3);
+}
+
+.slash-item code {
+  color: var(--brand);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.slash-item span {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* 上下文水位接近压缩阈值：琥珀色提醒 */
+.statusbar .context-high {
+  color: #d29922;
+}
+
+/* 中性本地提示（斜杠命令输出）：区别于 ok/error */
+.notice.info {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text-body);
+}
+
+.notice-action {
+  margin-left: 10px;
+  padding: 3px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-body);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.notice-action:hover {
+  background: var(--surface-3);
+}
 .composer-send {
   display: inline-flex;
   align-items: center;
