@@ -87,10 +87,6 @@ function formatTime(iso: string): string {
   }).format(new Date(iso));
 }
 
-function formatCost(costCny: number): string {
-  return `¥${costCny.toFixed(2)}`;
-}
-
 function formatTokens(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
@@ -99,7 +95,7 @@ function formatTokens(tokens: number): string {
 
 /**
  * 任务统计面板：/api/stats 聚合会话 summary（按天分桶 + 总量），
- * 纯 CSS 柱状图展示每日 tokens/费用，下方为会话明细表。
+ * 纯 CSS 柱状图展示每日 tokens，下方为会话明细表。
  */
 export function StatsApp() {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -226,8 +222,7 @@ export function StatsApp() {
     if (!stats || stats.byDay.length === 0) return null;
     const days = stats.byDay;
     const maxTokens = Math.max(...days.map((day) => day.tokens), 1);
-    const maxCost = Math.max(...days.map((day) => day.costCny), 0.01);
-    return { days, maxTokens, maxCost };
+    return { days, maxTokens };
   }, [stats]);
 
   const totals = stats?.totals;
@@ -292,9 +287,22 @@ export function StatsApp() {
                 <small>{totals?.tokens ?? 0} 累计</small>
               </div>
               <div className="stats-card">
-                <span>累计费用（估算）</span>
-                <strong title="按配置单价估算，定价校准后为准确值">≈{formatCost(totals?.costCny ?? 0)}</strong>
-                <small>输出 {totals?.sessions ?? 0} 会话</small>
+                <span>输出 tokens</span>
+                <strong>
+                  {formatTokens(
+                    stats.sessions.reduce(
+                      (sum, session) => sum + session.totalOutputTokens,
+                      0,
+                    ),
+                  )}
+                </strong>
+                <small>
+                  {stats.sessions.reduce(
+                    (sum, session) => sum + session.totalOutputTokens,
+                    0,
+                  )}{" "}
+                  累计
+                </small>
               </div>
             </section>
             {chart ? (
@@ -315,17 +323,6 @@ export function StatsApp() {
                           }}
                           title={`${day.day} tokens：${day.tokens}`}
                         />
-                        <div
-                          className="stats-bar cost"
-                          style={{
-                            height: `${
-                              Math.round(
-                                (day.costCny / chart.maxCost) * 100,
-                              ) || 1
-                            }%`,
-                          }}
-                          title={`${day.day} 费用：${formatCost(day.costCny)}`}
-                        />
                       </div>
                       <span className="stats-chart-label">
                         {day.day.slice(5)}
@@ -338,7 +335,6 @@ export function StatsApp() {
                 </div>
                 <div className="stats-chart-legend">
                   <span className="legend-tokens">输入 tokens</span>
-                  <span className="legend-cost">费用</span>
                   <span>每列上方数字为当日会话数</span>
                 </div>
               </section>
@@ -349,12 +345,12 @@ export function StatsApp() {
             )}
             {stats.byModel.length > 0 && (
               <section className="stats-model-section">
-                <h2>按模型成本</h2>
+                <h2>按模型用量</h2>
                 <div className="stats-model-table">
                   {stats.byModel.map((entry) => {
-                    const maxCost = Math.max(
-                      ...stats.byModel.map((item) => item.costCny),
-                      0.01,
+                    const maxTokens = Math.max(
+                      ...stats.byModel.map((item) => item.tokens),
+                      1,
                     );
                     return (
                       <div
@@ -370,14 +366,11 @@ export function StatsApp() {
                             style={{
                               width: `${
                                 Math.round(
-                                  (entry.costCny / maxCost) * 100,
+                                  (entry.tokens / maxTokens) * 100,
                                 ) || 1
                               }%`,
                             }}
                           />
-                        </span>
-                        <span className="stats-model-cost">
-                          {formatCost(entry.costCny)}
                         </span>
                         <span className="stats-model-tokens">
                           {formatTokens(entry.tokens)}
@@ -399,7 +392,7 @@ export function StatsApp() {
                       <th>类型</th>
                       <th>状态</th>
                       <th>输入 tokens</th>
-                      <th>费用</th>
+                      <th>累计 tokens</th>
                       <th>收尾总结</th>
                       <th>轨迹</th>
                     </tr>
@@ -418,7 +411,11 @@ export function StatsApp() {
                           </span>
                         </td>
                         <td>{formatTokens(session.totalInputTokens)}</td>
-                        <td>{formatCost(session.totalCostCny)}</td>
+                        <td>
+                          {formatTokens(
+                            session.totalInputTokens + session.totalOutputTokens,
+                          )}
+                        </td>
                         <td>
                           {session.kind === "run" ? (
                             <button
@@ -506,7 +503,12 @@ export function StatsApp() {
                       分钟
                     </span>
                     <span>
-                      费用 {formatCost(runDetail.totals.totalCostCny)} · 输入{" "}
+                      累计{" "}
+                      {formatTokens(
+                        runDetail.totals.totalInputTokens +
+                          runDetail.totals.totalOutputTokens,
+                      )}{" "}
+                      tokens · 输入{" "}
                       {formatTokens(runDetail.totals.totalInputTokens)}
                     </span>
                     {runDetail.run.reason && (

@@ -526,7 +526,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
         setLocalNotice(
           [
             "可用命令：",
-            "/cost — 本会话 token 与费用汇总",
+            "/cost — 本会话 token 汇总",
             `/context — 上下文水位（对照压缩阈值 ${Math.round(contextThreshold / 1000)}k）`,
             "/settings — 打开设置",
           ].join("　"),
@@ -534,7 +534,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
     },
     {
       name: "/cost",
-      desc: "本会话 token 与费用汇总",
+      desc: "本会话 token 汇总",
       run: () => {
         const turns = events.filter(
           (record) => record.event.type === "cost_update",
@@ -547,7 +547,7 @@ export function SessionApp(props: { initialSessionId?: string }) {
           return;
         }
         setLocalNotice(
-          `本会话 ${turns} 轮 · 累计 ${formatTokens(Number(latest.event.totalTokens ?? 0))} tokens · 累计费用 ≈¥${Number(latest.event.totalCostCny ?? 0).toFixed(4)}（按配置单价估算）`,
+          `本会话 ${turns} 轮 · 累计 ${formatTokens(Number(latest.event.totalTokens ?? 0))} tokens（输入 ${formatTokens(Number(latest.event.input ?? 0))} / 输出 ${formatTokens(Number(latest.event.output ?? 0))}）`,
         );
       },
     },

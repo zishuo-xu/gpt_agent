@@ -143,7 +143,8 @@ describe("StatsApp（任务统计面板）", () => {
     // 总量卡
     assert.match(text, /会话总数/);
     assert.match(text, /2/);
-    assert.match(text, /¥0\.84/);
+    assert.match(text, /输入 tokens/);
+    assert.match(text, /输出 tokens/);
     // 图表列数（每列一个标签 MM-DD）
     assert.equal(container.querySelectorAll(".stats-chart-col").length, 2);
     // 明细表：2 行数据 + 表头
@@ -154,15 +155,15 @@ describe("StatsApp（任务统计面板）", () => {
     fetch.restore();
   });
 
-  it("渲染按模型成本维度表（费用占比条 + tokens）", async () => {
+  it("渲染按模型用量维度表（token 占比条）", async () => {
     const fetch = stubFetch(baseRoutes());
     const { container } = await setup();
     const text = container.textContent ?? "";
-    assert.match(text, /按模型成本/);
+    assert.match(text, /按模型用量/);
     assert.equal(container.querySelectorAll(".stats-model-row").length, 2);
     assert.match(text, /claude-sonnet/);
     assert.match(text, /deepseek/);
-    assert.match(text, /¥0\.6/);
+    assert.match(text, /1\.5k/);
     fetch.restore();
   });
 

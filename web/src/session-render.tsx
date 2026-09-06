@@ -125,35 +125,26 @@ export function ItemCard(props: {
     const cacheRate = input > 0 ? Math.round((cached / input) * 100) : 0;
     // 缓存浪费度量（参照 Pi 的 cache-stats）：区分合法失效（压缩）与异常失效
     const missed = Number(event.missedTokens ?? 0);
-    const missedCostCny = Number(event.missedCostCny ?? 0);
-    // 显示门控：压缩重置属合法信息始终提示；其余 miss 提示需开启开关且超过显示阈值
+    // 显示门控：压缩重置属合法信息始终提示；其余 miss 提示需开启开关且超过 token 阈值
     const showMiss =
       missed > 0 &&
       (event.missedReason === "compaction" ||
-        (showCacheMissNotices &&
-          (missed >= 20_000 || missedCostCny >= 0.1)));
-    const missedCostLabel =
-      showMiss && missedCostCny > 0
-        ? `（多花 ¥${missedCostCny.toFixed(4)}）`
-        : "";
+        (showCacheMissNotices && missed >= 20_000));
     const missedLabel =
       !showMiss
         ? ""
         : event.missedReason === "compaction"
           ? " · 缓存已重置（压缩）"
           : event.missedReason === "model_switch"
-            ? ` · 缓存失效 ${formatTokens(missed)}（模型切换）${missedCostLabel}`
+            ? ` · 缓存失效 ${formatTokens(missed)}（模型切换）`
             : event.missedReason === "idle"
-              ? ` · 缓存过期 ${formatTokens(missed)}（空闲超时）${missedCostLabel}`
-              : ` · 缓存未命中浪费 ${formatTokens(missed)}${missedCostLabel}`;
+              ? ` · 缓存过期 ${formatTokens(missed)}（空闲超时）`
+              : ` · 缓存未命中浪费 ${formatTokens(missed)}`;
     return (
       <div className="web-cost-line">
         本轮 {formatTokens(event.input)} in / {formatTokens(event.output)}{" "}
         out · 缓存命中 {cacheRate}% · 累计 {formatTokens(event.totalTokens)}
         {missedLabel}
-        {event.totalCostCny
-          ? `（≈¥${Number(event.totalCostCny).toFixed(4)}）`
-          : ""}
       </div>
     );
   }

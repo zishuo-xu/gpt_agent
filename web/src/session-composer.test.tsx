@@ -182,7 +182,7 @@ describe("Composer 斜杠命令面板渲染", () => {
 
 describe("SessionStatusBar 上下文水位段", () => {
   async function renderBar(options: {
-    cost?: number;
+    tokens?: number;
     contextTokens?: number;
     contextThreshold?: number;
   }) {
@@ -207,10 +207,10 @@ describe("SessionStatusBar 上下文水位段", () => {
             permissionMode: "normal",
             createdAt: "2026-09-06T10:00:00.000Z",
             updatedAt: "2026-09-06T10:00:00.000Z",
-            totalInputTokens: 0,
+            totalInputTokens: options.tokens ?? 0,
             totalOutputTokens: 0,
             totalCachedTokens: 0,
-            totalCostCny: options.cost ?? 0,
+            totalCostCny: 0,
             todos: [],
             toolCallCount: 0,
             kind: "interactive",
@@ -224,15 +224,15 @@ describe("SessionStatusBar 上下文水位段", () => {
     return container;
   }
 
-  it("有上下文数据时显示水位百分比，费用带 ≈ 估算标注", async () => {
+  it("有上下文数据时显示水位百分比，并显示累计 tokens", async () => {
     const container = await renderBar({
-      cost: 0.1117,
+      tokens: 1_200,
       contextTokens: 45_000,
       contextThreshold: 90_000,
     });
     const text = container.textContent ?? "";
     assert.match(text, /上下文 50%/);
-    assert.match(text, /≈¥0\.11/, "费用应带 ≈ 估算前缀");
+    assert.match(text, /1\.2k tokens/, "应显示累计 token 而非金额");
   });
 
   it("水位 ≥80% 时标记 context-high 警示色", async () => {
@@ -248,8 +248,8 @@ describe("SessionStatusBar 上下文水位段", () => {
   });
 
   it("无上下文数据时不渲染水位段", async () => {
-    const container = await renderBar({ cost: 0.5 });
-    assert.match(container.textContent ?? "", /≈¥0\.50/);
+    const container = await renderBar({ tokens: 500 });
+    assert.match(container.textContent ?? "", /500 tokens/);
     assert.doesNotMatch(container.textContent ?? "", /上下文/);
   });
 });

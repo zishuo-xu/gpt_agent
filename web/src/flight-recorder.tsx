@@ -392,7 +392,6 @@ function DiffView({ diff, error }: { diff: Diff | null; error: string }) {
       {row("Tools", diff.tools?.parent, diff.tools?.child)}
       {row("Input tokens", diff.tokens?.parent?.input, diff.tokens?.child?.input, diff.tokens?.delta?.input)}
       {row("Output tokens", diff.tokens?.parent?.output, diff.tokens?.child?.output, diff.tokens?.delta?.output)}
-      {row("费用 CNY", diff.costCny?.parent, diff.costCny?.child, diff.costCny?.delta)}
       {row("状态", diff.status?.parent, diff.status?.child)}
     </div>
     {(diff.acceptance || diff.review) && <div className="diff-evidence"><strong>Acceptance / Review</strong><pre>{pretty({ acceptance: diff.acceptance, review: diff.review })}</pre></div>}

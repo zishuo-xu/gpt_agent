@@ -112,14 +112,6 @@ export function SessionRail(props: {
                 props.selected.totalCachedTokens,
               )} tokens`}
             />
-            <KeyValue
-              label="估算费用"
-              value={
-                props.selected.totalCostCny > 0
-                  ? `¥${props.selected.totalCostCny.toFixed(4)}`
-                  : "未配置单价"
-              }
-            />
           </RailCard>
           <RailCard title="会话">
             <KeyValue

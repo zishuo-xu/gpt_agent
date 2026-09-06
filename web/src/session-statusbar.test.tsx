@@ -37,7 +37,7 @@ describe("SessionStatusBar", () => {
     return container;
   }
 
-  it("计划/改动/花费三分段都渲染", async () => {
+  it("计划/改动/token 三分段都渲染", async () => {
     const container = await render({
       latestTodos: [
         { id: "1", content: "定位问题", status: "completed" },
@@ -51,13 +51,13 @@ describe("SessionStatusBar", () => {
     assert.ok(text.includes("1/2"), "应显示计划进度");
     assert.ok(text.includes("1 文件"), "应显示文件数");
     assert.ok(text.includes("+12"), "应显示增行");
-    assert.ok(text.includes("¥0.12"), "应显示费用");
+    assert.ok(text.includes("1.2k tokens"), "应显示累计 token");
   });
 
   it("无数据时整条不渲染", async () => {
     const container = await render({
       latestTodos: [], fileChanges: [],
-      selected: makeSummary({ totalCostCny: 0, status: "idle" }),
+      selected: makeSummary({ totalInputTokens: 0, totalOutputTokens: 0, status: "idle" }),
       onOpen: () => undefined,
     });
     assert.equal(container.querySelector(".statusbar"), null);

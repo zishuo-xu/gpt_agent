@@ -2,8 +2,9 @@ import type { ReactNode } from "react";
 import type { SessionSummary, TodoItem } from "@shared/types.js";
 import { statusMeta } from "./session-render";
 import type { FileChangeEntry } from "./session-rail";
+import { formatTokens } from "./session-format";
 
-/** 会话头部下方的紧凑状态条：计划进度 / 文件改动 / 上下文水位 / 费用，点击展开详情抽屉。
+/** 会话头部下方的紧凑状态条：计划进度 / 文件改动 / 上下文水位 / token 消耗，点击展开详情抽屉。
  *  各分段仅在对应数据存在时渲染；全空则不渲染。 */
 export function SessionStatusBar(props: {
   latestTodos: TodoItem[];
@@ -19,7 +20,8 @@ export function SessionStatusBar(props: {
   const changes = props.fileChanges;
   const totalAdded = changes.reduce((s, c) => s + (c.added ?? 0), 0);
   const totalRemoved = changes.reduce((s, c) => s + (c.removed ?? 0), 0);
-  const cost = props.selected.totalCostCny;
+  const sessionTokens =
+    props.selected.totalInputTokens + props.selected.totalOutputTokens;
 
   const segments: Array<{ key: string; node: ReactNode }> = [];
   if (todos.length > 0) {
@@ -48,9 +50,11 @@ export function SessionStatusBar(props: {
       >上下文 {percent}%</b>,
     });
   }
-  if (cost > 0) {
-    // 定价未校准前明确标注估算属性
-    segments.push({ key: "cost", node: <b title="按配置单价估算">≈¥{cost.toFixed(2)}</b> });
+  if (sessionTokens > 0) {
+    segments.push({
+      key: "tokens",
+      node: <b title="本会话累计 input + output tokens">{formatTokens(sessionTokens)} tokens</b>,
+    });
   }
   if (segments.length === 0) return null;
 
