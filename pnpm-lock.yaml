@@ -10,13 +10,13 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^2.1.1
-        version: 2.1.1(hono@4.13.2)
+        version: 2.1.1(hono@4.13.11)
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
       hono:
-        specifier: ^4.13.2
-        version: 4.13.2
+        specifier: ^4.13.11
+        version: 4.13.11
       jsonc-parser:
         specifier: ^3.3.0
         version: 3.3.1
@@ -532,8 +532,8 @@ packages:
     resolution: {integrity: sha512-XSt8tMzbW9ymE7687xztkO1ckR7qJNQ3LywY9vlYGhGi3zXrGBHuUo2Cl1ztZaICW+1eAGdkLbj6iwVqDT33kg==}
     engines: {node: '>=20.0.0'}
 
-  hono@4.13.2:
-    resolution: {integrity: sha512-JydRilDRkYBQMt9qR9U92mXxmbGqsqSn/IKOrh4e7/gEbn+0zSr8igTu0obwJoNGN4sez28DIql7FBHWydoJpA==}
+  hono@4.13.11:
+    resolution: {integrity: sha512-/SMX/RQNJn7oNmFwH6DtwDqcrzZU2otm1FD6OJe2cWF6cfy/F8hq0XVBv7xW3FTJshRQwuBnXHDq2kNsdZnshg==}
     engines: {node: '>=16.9.0'}
 
   json-schema-traverse@1.0.0:
@@ -831,9 +831,9 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@hono/node-server@2.1.1(hono@4.13.2)':
+  '@hono/node-server@2.1.1(hono@4.13.11)':
     dependencies:
-      hono: 4.13.2
+      hono: 4.13.11
 
   '@oxc-project/types@0.144.0': {}
 
@@ -1041,7 +1041,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  hono@4.13.2: {}
+  hono@4.13.11: {}
 
   json-schema-traverse@1.0.0: {}
 
