@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@hono/node-server':
-        specifier: ^2.1.1
-        version: 2.1.1(hono@4.13.2)
+        specifier: ^2.1.6
+        version: 2.1.6(hono@4.13.2)
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
@@ -223,11 +223,11 @@ packages:
     resolution: {integrity: sha512-1C0wwHiyMlEdsbrJqff5ORE2PwaXBOam5rMqkZVOReAezd5nt6Tl/WGg28UAo75Ziuwchs0KaF8lvnn2oAtvJA==}
     engines: {node: '>=20.0.0'}
 
-  '@hono/node-server@2.1.1':
-    resolution: {integrity: sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg==}
+  '@hono/node-server@2.1.6':
+    resolution: {integrity: sha512-p/KH9MnfNcsm3sR6x4lNgm5j+QN4Et8srKredl9DZfXiyZ1UQ3aQ2YVpFLbqktYN5JI+DB+VZFKM2PqE5hLKjQ==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: ^4
+      hono: ^4 || ^5.0.0-0
 
   '@oxc-project/types@0.144.0':
     resolution: {integrity: sha512-nuhZIOLuI6TFQ32I/WnUx+SCPY7SdSKwgnFHydAuoS1+Z4BRcaP+RRJmGzl9lw+0OFF7UmaESf7KQRXaNLHypg==}
@@ -831,7 +831,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@hono/node-server@2.1.1(hono@4.13.2)':
+  '@hono/node-server@2.1.6(hono@4.13.2)':
     dependencies:
       hono: 4.13.2
 
